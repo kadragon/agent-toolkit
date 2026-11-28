@@ -11,7 +11,7 @@
 #   ci-status <pr_number>                   → {status: "pending"|"success"|"failure"|"none", checks: n, head_sha?}
 #   ci-logs <pr_number>                     → {failed_checks:[{name,run_id,logs}], count, logs_available}
 #   merge <pr_number> <squash|merge|rebase> [authority_branch] [expected_head]
-#                                            → {merge_ok, queued, unconfirmed, merge_output}
+#                                            → {merge_ok, queued, unconfirmed, merge_output, head_sha?}
 #   expected_head requires GitHub.
 #
 # Auth:
@@ -338,6 +338,7 @@ case "$SUBCOMMAND" in
     PR_NUMBER="${1:?Usage: hub.sh merge <pr_number> <squash|merge|rebase>}"
     STRATEGY="${2:?Usage: hub.sh merge <pr_number> <squash|merge|rebase>}"
     EXPECTED_HEAD="${4:-}"
+    MERGED_HEAD=""
     if [ "$HUB_TYPE" = "github" ]; then
       MERGE_ARGS=(pr merge "$PR_NUMBER" "--${STRATEGY}")
       if [ -n "$EXPECTED_HEAD" ]; then
@@ -353,7 +354,7 @@ case "$SUBCOMMAND" in
       if [ "$MERGE_OK" = "true" ]; then
         HEAD_INFO='{}'
         for attempt in 1 2 3; do
-          HEAD_INFO=$(gh pr view "$PR_NUMBER" --json state,headRefName,isCrossRepository 2>/dev/null) && break
+          HEAD_INFO=$(gh pr view "$PR_NUMBER" --json state,headRefName,isCrossRepository,headRefOid 2>/dev/null) && break
           HEAD_INFO='{}'
           [ "$attempt" -lt 3 ] && sleep 1
         done
@@ -375,6 +376,7 @@ case "$SUBCOMMAND" in
       # segment is URL-encoded (a raw `#`/`%` targets another path). A failure is reported, except
       # a ref already gone — the repo's auto-delete setting may have removed it first.
       if [ "$MERGE_OK" = "true" ]; then
+        MERGED_HEAD=$(jq -r '.headRefOid // empty' <<<"$HEAD_INFO")
         HEAD_REF=$(jq -r 'if .isCrossRepository | not then (.headRefName // "" | split("/") | map(@uri) | join("/")) else "" end' <<<"$HEAD_INFO")
         if [ -n "$HEAD_REF" ] \
           && ! DELETE_ERR=$(gh api -X DELETE "repos/{owner}/{repo}/git/refs/heads/${HEAD_REF}" 2>&1 >/dev/null) \
@@ -383,7 +385,9 @@ case "$SUBCOMMAND" in
         fi
       fi
       jq -n --argjson ok "$MERGE_OK" --argjson queued "$QUEUED" --argjson unconfirmed "$UNCONFIRMED" \
-        --arg out "$MERGE_OUTPUT" '{merge_ok: $ok, queued: $queued, unconfirmed: $unconfirmed, merge_output: $out}'
+        --arg out "$MERGE_OUTPUT" --arg sha "$MERGED_HEAD" \
+        '{merge_ok: $ok, queued: $queued, unconfirmed: $unconfirmed, merge_output: $out}
+         + (if $sha == "" then {} else {head_sha: $sha} end)'
     elif [ -n "$EXPECTED_HEAD" ]; then
       jq -n '{merge_ok: false, queued: false, unconfirmed: false, merge_output: "Head matching requires GitHub"}'
     else
@@ -391,8 +395,14 @@ case "$SUBCOMMAND" in
       PAYLOAD=$(jq -n --arg do "$STRATEGY" '{Do: $do, delete_branch_after_merge: true}')
       MERGE_OK=true
       MERGE_OUTPUT=$(fj_api POST "/repos/${OWNER_REPO}/pulls/${PR_NUMBER}/merge" "$PAYLOAD" 2>&1) || MERGE_OK=false
-      [ "$MERGE_OK" = "false" ] && MERGE_OUTPUT="HTTP $(fj_code): ${MERGE_OUTPUT}"
-      jq -n --argjson ok "$MERGE_OK" --arg out "$MERGE_OUTPUT" '{merge_ok: $ok, queued: false, unconfirmed: false, merge_output: $out}'
+      if [ "$MERGE_OK" = "false" ]; then
+        MERGE_OUTPUT="HTTP $(fj_code): ${MERGE_OUTPUT}"
+      elif HEAD_INFO=$(fj_api GET "/repos/${OWNER_REPO}/pulls/${PR_NUMBER}" 2>/dev/null); then
+        MERGED_HEAD=$(jq -r 'select(.merged == true) | .head.sha // empty' <<<"$HEAD_INFO" 2>/dev/null) || MERGED_HEAD=""
+      fi
+      jq -n --argjson ok "$MERGE_OK" --arg out "$MERGE_OUTPUT" --arg sha "$MERGED_HEAD" \
+        '{merge_ok: $ok, queued: false, unconfirmed: false, merge_output: $out}
+         + (if $sha == "" then {} else {head_sha: $sha} end)'
     fi
     ;;
 

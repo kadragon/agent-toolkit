@@ -7,6 +7,7 @@
                      --work-kind queue|new|standalone --request REQUEST --unit UNIT
                      [--git-limits LIMITS] [--git-grant-recorded | --no-git-writes]
                      [--review-transfer-approval APPROVAL]
+                     [--relaunch-from PREVIOUS_RUN]
                      [--name N] [--title TEXT] [--parent T] [--task TASK] [--trust-hooks] [--keep-connectors]
                      [--dry-run] [MESSAGE]
       Start a background child with hc run --bg. Prints launch and receipt details as JSON.
@@ -21,6 +22,9 @@
       Print the filtered transcript tail. Every successful peek updates the receipt cursor.
   dispatch.py report-review RESULT
       Read a Codex pre-merge report from stdin and atomically write ready or blocked.
+  dispatch.py timing RUN [delivered | start PHASE SHA [--tree] | finish PHASE ATTEMPT OUTCOME
+                         | bind-review ATTEMPT HEAD | merged [HEAD]]
+      Read timing or record a review/CI attempt or an independently confirmed merge.
   dispatch.py collect RECEIPT [--stall-minutes N] [--close [--force]]
       Read the result, status and any stop reason. Close an owned child.
       A Codex child whose hooks fail, or whose launch-time kadragon plugin version directory
@@ -41,6 +45,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -52,6 +57,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import phase_timing  # noqa: E402
 import pinned_wave  # noqa: E402
 import shared_codex  # noqa: E402
 
@@ -120,6 +126,7 @@ LOST_SETTLE_SECONDS = 2
 RESULT_STATES = {"done", "ready", "blocked", "merged", "working"}
 RESULT_LIMIT = 8192
 REVIEW_SOURCES = ("claude", "agy", "codex")
+TIMING_DATA_ERRORS = (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError)
 PR_REFERENCE = re.compile(r"\b(?:PR|pull request)\s*[#-]?\d+\b|/pulls?/\d+\b", re.IGNORECASE | re.ASCII)
 NO_WORK_PREFIX = re.compile(
     r"^\s*(?:no (?:eligible )?(?:work|changes)\b|작업 없음|처리할 (?:작업|이슈)(?:이|가)? 없)",
@@ -171,7 +178,13 @@ def child_argv(cli, model, effort, message, keep_connectors, result=None, *, tru
     settings = dict(CLAUDE_SETTINGS)
     if keep_connectors:
         del settings["disableClaudeAiConnectors"]
-    report = ["--append-system-prompt", report_instruction(result)] if result else []
+    report = []
+    if result:
+        acknowledge = shlex.join([sys.executable, "-I", str(Path(__file__).resolve()), "timing",
+                                  str(result.with_name("run.json")), "delivered"])
+        report = ["--append-system-prompt", f"On receipt of the task, before starting work, run `{acknowledge}`. "
+                  "If the acknowledgment fails, report unavailable startup timing and continue the task. "
+                  + report_instruction(result)]
     return ["claude", "--model", model, "--effort", effort,
             "--settings", json.dumps(settings, separators=(",", ":")), *report, message]
 
@@ -359,6 +372,64 @@ def lock_run(path, *, wait=0, label="dispatch receipt"):
         yield
 
 
+def timing_path(receipt):
+    return receipt.with_name("timing.json")
+
+
+def record_timing(receipt, update, *args, at=None):
+    path = timing_path(receipt)
+    with lock_run(path, wait=10, label="dispatch timing"):
+        data = phase_timing.read(path)
+        before = serialize_result(data)
+        value = update(data, *args, phase_timing.now_ms() if at is None else at)
+        after = serialize_result(data)
+        if before != after:
+            write_atomic(path, after)
+        return value
+
+
+def mark_timing(receipt, field, *, at=None):
+    try:
+        record_timing(receipt, phase_timing.mark, field, at=at)
+    except (*TIMING_DATA_ERRORS, SystemExit) as error:
+        print(f"dispatch timing unavailable: {error}", file=sys.stderr)
+
+
+def timing_report(receipt, result):
+    try:
+        return phase_timing.report(phase_timing.read(timing_path(receipt)), result)
+    except TIMING_DATA_ERRORS as error:
+        return {"final_head": None, "launches": [], "merge": None, "error": str(error)}
+
+
+def timing(args):
+    receipt = Path(args.run).resolve()
+    try:
+        if args.event == "delivered":
+            if not timing_path(receipt).is_file():
+                raise ValueError("no timing record for this launch")
+            record_timing(receipt, phase_timing.mark, "delivered_ms")
+            return
+        run = load_run(receipt)
+        if args.event == "start":
+            print(record_timing(receipt, phase_timing.start, args.phase, args.sha, args.tree))
+        elif args.event == "finish":
+            record_timing(receipt, phase_timing.finish, args.phase, args.attempt, args.outcome)
+        elif args.event == "merged":
+            record_timing(receipt, phase_timing.merged, args.head)
+        elif args.event == "bind-review":
+            if not phase_timing.HEAD.fullmatch(args.head):
+                raise ValueError("expected a full head SHA")
+            tree = subprocess.check_output(["git", "rev-parse", "--verify", f"{args.head}^{{tree}}"],
+                                           encoding="utf-8", stderr=subprocess.DEVNULL).strip()
+            record_timing(receipt, phase_timing.bind_review, args.attempt, args.head, tree)
+        else:
+            result, _ = current_result(receipt, run)
+            print(json.dumps(timing_report(receipt, result), ensure_ascii=False))
+    except (*TIMING_DATA_ERRORS, subprocess.CalledProcessError) as error:
+        raise SystemExit(f"dispatch timing unavailable: {error}") from None
+
+
 def verify_terminal(run, terminal):
     if run.get("created_ms") is None:
         # hc get failed at launch: adopt the terminal at this address only if hc created it with
@@ -489,6 +560,13 @@ def read_result(path):
         return None, None
     except (OSError, ValueError) as error:
         raise SystemExit(f"cannot read dispatch result {result_path}: {error}") from None
+
+
+def current_result(path, run):
+    result, written = read_result(path)
+    if written == run.get("previous_result"):
+        return None, None
+    return result, written
 
 
 def hc_json(*args, timeout=None):
@@ -920,6 +998,17 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
     home = args.parent or os.environ.get("HC_TERMINAL_ID") or None
     result_path = None
     child = None
+    previous = getattr(args, "relaunch_from", None)
+    if previous:
+        previous = Path(previous).expanduser().resolve()
+        load_run(previous)
+        try:
+            history = phase_timing.read(timing_path(previous))
+        except TIMING_DATA_ERRORS as error:
+            print(f"warning: cannot carry dispatch timing from {previous}: {error}", file=sys.stderr)
+            history = phase_timing.empty_history()
+    else:
+        history = phase_timing.empty_history()
     if wave:
         codex_args = child_argv(args.cli, model, args.effort, message, args.keep_connectors)
         child = [wave["binary"], *codex_args[1:]]
@@ -976,7 +1065,22 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
         except OSError as error:
             raise SystemExit(f"pinned launch withheld; could not register child: {error}") from None
     versions = {}
-    launched_ms = time.time_ns() // 1_000_000 - 1000  # slack for clock rounding between processes
+    started_ms = phase_timing.now_ms()
+    try:
+        phase_timing.new_launch(history, started_ms)
+    except TIMING_DATA_ERRORS as error:
+        print(f"warning: cannot carry dispatch timing from {previous}: {error}", file=sys.stderr)
+        history = phase_timing.new_launch(phase_timing.empty_history(), started_ms)
+
+    def save_launch_timing():
+        try:
+            write_json(timing_path(receipt), history)
+        except OSError as error:
+            print(f"dispatch timing unavailable: {error}", file=sys.stderr)
+
+    if args.cli == "claude":
+        save_launch_timing()
+    launched_ms = started_ms - 1000  # slack for clock rounding between processes
     try:
         if wave:
             reply = hc_rpc("terminal.run", params, LAUNCH_LOOKUP_SECONDS)
@@ -1043,6 +1147,8 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
         run["title"] = title
     if args.cli == "codex" and handoff["work_kind"] != "standalone":
         run["require_review_sources"] = True
+    if args.cli != "claude":
+        save_launch_timing()
     try:
         write_json(receipt, {**run, "handoff": handoff} if args.cli == "codex" else run)
     except OSError as error:
@@ -1441,6 +1547,9 @@ def send_task(args, run_path):
             if not started and (not result or written == run.get("previous_result")):
                 raise SystemExit("previous delivery is unconfirmed; inspect the child's composer before resuming")
             run["sent"] = True
+            acknowledged = run.get("send_acknowledged_ms")
+            if run.get("sent_continuation") is False and type(acknowledged) is int:
+                mark_timing(run_path, "delivered_ms", at=acknowledged)
             write_json(run_path, run)
         if not resend and run["sent"] != continuation:
             raise SystemExit("use --continue only after the first task is confirmed")
@@ -1610,6 +1719,7 @@ def send_task(args, run_path):
             run["sent_turn"] = sent_turn
             run["sent_continuation"] = continuation
             run["send_acknowledged"] = False
+            run.pop("send_acknowledged_ms", None)
             write_json(run_path, run)
         else:
             print("warning: no dispatch receipt. Use --run to carry handoff metadata", file=sys.stderr)
@@ -1701,16 +1811,19 @@ def send_task(args, run_path):
                     verify_delivery_turn(run, terminal)
                 if run and run["send_acknowledged"]:
                     run["send_acknowledged"] = False
+                    run.pop("send_acknowledged_ms", None)
                     write_json(run_path, run)
                 print("warning: the submission left no trace; sending it once more", file=sys.stderr)
             send_error = None
             try:
-                hc_json("send", *guard, "--", address, message)
+                reply = hc_json("send", *guard, "--", address, message)
             except (OSError, subprocess.CalledProcessError, ValueError, KeyError) as error:
                 send_error = error
             else:
                 if run:
                     run["send_acknowledged"] = True
+                    if not continuation and isinstance(reply, dict) and reply.get("started") is True:
+                        run["send_acknowledged_ms"] = phase_timing.now_ms()
                     write_json(run_path, run)
             submitted, saw_trace = confirmed(send_error is not None)
             if not submitted and (attempt or saw_trace or not lost()):
@@ -1721,6 +1834,8 @@ def send_task(args, run_path):
                 if run:
                     run["sent"] = True
                     run["screen_reads"] += screen_reads
+                    if not continuation:
+                        mark_timing(run_path, "delivered_ms", at=run.get("send_acknowledged_ms"))
                     write_json(run_path, run)
                 print(json.dumps({"address": address, "submitted": True, "screen_reads": screen_reads}))
                 return
@@ -1758,6 +1873,21 @@ def brief_report(report):
     fields = (status, result.get("phase"), result.get("summary"), result.get("pr"), watch_stop_reason(report))
     if warning := result.get("review_warning"):
         fields += (warning,)
+    measurements = report.get("timing", {})
+    launches = measurements.get("launches", [])
+    if launches:
+        latest = launches[-1]
+        head = measurements["final_head"]
+
+        def last_duration(phase):
+            return next((entry["elapsed_ms"] for launch in reversed(launches)
+                         for entry in reversed(launch[phase]) if not head or entry["head"] == head), None)
+
+        durations = {"startup": latest["startup_ms"], "implementation": latest["implementation_ms"],
+                     "review": last_duration("review"), "ci": last_duration("ci"), "restart": latest["restart_ms"]}
+        summary = " ".join(f"{name}={value}ms" if value is not None else f"{name}=?"
+                           for name, value in durations.items())
+        fields += (summary,)
     return " · ".join((report["address"], *(field(value) or "-" for value in fields)))
 
 
@@ -1991,27 +2121,25 @@ def recent_missing_codex_hook(address):
 def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadline=None):
     run = load_run(path)
     try:
-        result, written = read_result(path)
+        result, written = current_result(path, run)
     except SystemExit as error:
         if not force:
             raise
         print(error, file=sys.stderr)
-        result, written = None, None
-    if written == run.get("previous_result"):
         result, written = None, None
     if result and run.get("require_review_sources"):
         result = gate_required_reviews(result)
     timeout = remaining_wait(deadline) if deadline is not None else None
     if deadline is not None and run.get("closed_reason"):
         return {"address": run["address"], "status": None, "state": "finished", "result": result,
-                "stop_reason": None}
+                "stop_reason": None, "timing": timing_report(path, result)}
     try:
         confirm_launch_identity(path, run, locked=close, timeout=timeout)
         terminal = hc_json("get", run["address"], **({"timeout": remaining_wait(deadline)} if timeout else {}))
     except subprocess.CalledProcessError as error:
         if deadline is not None and herdr_error_kind(error) == "not_found":
             return {"address": run["address"], "status": None, "state": "finished", "result": result,
-                    "stop_reason": "Herdr terminal no longer exists"}
+                    "stop_reason": "Herdr terminal no longer exists", "timing": timing_report(path, result)}
         raise
     verify_terminal(run, terminal)
     status = (terminal.get("status") or {}).get("state")
@@ -2066,12 +2194,13 @@ def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadli
             wait_for_terminal_exit(run)
         hc_json("rm", run["address"])
         closed = {"closed_reason": closed_reason}
+        mark_timing(path, "closed_ms")
         write_json(path, {**run, **closed})
     else:
         reason, reads = child_stop_reason(terminal, run, result, written, stall_minutes, (changed, removed),
                                           deadline=deadline)
     return {"address": run["address"], "status": status, "state": terminal["state"],
-                      "result": result, "stop_reason": reason,
+                      "result": result, "stop_reason": reason, "timing": timing_report(path, result),
                       "scope_decision_categories": repeated_review_categories(result), "closed": close,
                       "screen_reads": run["screen_reads"], "collect_screen_reads": reads,
                       **({"plugin_drift": changed} if changed else {}), **closed}
@@ -2320,6 +2449,7 @@ def main(argv):
                           help="confirm that free-form --git-limits records the verified user grant")
     git_mode.add_argument("--no-git-writes", action="store_true", help="hand off implementation-only work")
     launch_parser.add_argument("--review-transfer-approval", help="verbatim user grant for reviewer data transfer")
+    launch_parser.add_argument("--relaunch-from", help="previous dispatch receipt to carry timing across a relaunch")
     launch_parser.add_argument("--name")
     launch_parser.add_argument("--title", help="short task title; hc label title=TEXT, and the name source without --name")
     launch_parser.add_argument("--parent")
@@ -2359,6 +2489,23 @@ def main(argv):
     report_parser = sub.add_parser("report-review", help="write a gated pre-merge review result")
     report_parser.add_argument("result")
     report_parser.set_defaults(func=report_review)
+    timing_parser = sub.add_parser("timing", help="inspect or record dispatch phase timings")
+    timing_parser.add_argument("run")
+    timing_parser.set_defaults(func=timing)
+    events = timing_parser.add_subparsers(dest="event")
+    events.add_parser("delivered")
+    start_parser = events.add_parser("start")
+    start_parser.add_argument("phase", choices=phase_timing.PHASES)
+    start_parser.add_argument("sha")
+    start_parser.add_argument("--tree", action="store_true")
+    finish_parser = events.add_parser("finish")
+    finish_parser.add_argument("phase", choices=phase_timing.PHASES)
+    finish_parser.add_argument("attempt")
+    finish_parser.add_argument("outcome", choices=phase_timing.OUTCOMES)
+    bind_parser = events.add_parser("bind-review")
+    bind_parser.add_argument("attempt")
+    bind_parser.add_argument("head")
+    events.add_parser("merged").add_argument("head", nargs="?")
     collect_parser = sub.add_parser("collect")
     collect_parser.add_argument("run")
     collect_parser.add_argument("--stall-minutes", type=int, default=STALL_MINUTES)

@@ -376,6 +376,36 @@ def main() -> int:
         check("the stale-SHA failure leaves no strike file",
               not strike_file(stale).exists())
 
+        dispatch = tmp / "dispatch/scripts"
+        dispatch.mkdir(parents=True)
+        for name in ("dispatch.py", "phase_timing.py", "pinned_wave.py", "codex_app_server.py", "shared_codex.py"):
+            shutil.copy(SCRIPT.parent / "../../dispatch/scripts" / name, dispatch)
+        receipt = tmp / "run.json"
+        receipt.write_text('{"address": "t7"}', encoding="utf-8")
+        timed = sha_repo("timed_ci", "failure", "previous", "success")
+        head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=timed, text=True).strip()
+        for _ in range(2):
+            run(timed, expected_head=head, CI_WAIT_POLL_INTERVAL=1, DISPATCH_TIMING_RUN=receipt)
+        recorded = json.loads(receipt.with_name("timing.json").read_text(encoding="utf-8"))
+        attempts = recorded["launches"][0]["ci"]
+        check("three polls across two waits record only two CI attempts on the pinned head",
+              call_count(timed) == 3 and [(entry["head"], entry["outcome"]) for entry in attempts]
+              == [(head, "passed"), (head, "passed")], f"got {attempts}")
+        check("the CI waits record their start and end", all(
+            entry["finished_ms"] >= entry["started_ms"] for entry in attempts))
+        (timed / "scripts" / "hub.sh").write_text("echo '{\"status\": \"success\"}'\n", encoding="utf-8")
+        result = run(timed, CI_WAIT_POLL_INTERVAL=1, DISPATCH_TIMING_RUN=receipt)
+        recorded = json.loads(receipt.with_name("timing.json").read_text(encoding="utf-8"))
+        check("a CI outcome without a verified head is still reported as observed",
+              result.get("passed") is True and recorded["launches"][0]["ci"][-1]["outcome"] == "passed-unverified")
+        (timed / "scripts" / "hub.sh").write_text(
+            "echo '" + json.dumps({"status": "none", "head_sha": head}) + "'\n", encoding="utf-8")
+        result = run(timed, expected_head=head, CI_WAIT_NO_CHECKS_GRACE_SECS=0, DISPATCH_TIMING_RUN=receipt)
+        recorded = json.loads(receipt.with_name("timing.json").read_text(encoding="utf-8"))
+        check("a successful wait without CI records the explicit no-checks outcome",
+              result.get("reason") == "no CI checks found"
+              and recorded["launches"][0]["ci"][-1]["outcome"] == "no-checks")
+
         stale_green = sha_repo("stale_success", "success", "previous", "failure")
         result = run(stale_green, CI_WAIT_POLL_INTERVAL=1)
         check("a stale-SHA success is not a pass; the head's failure is struck once",

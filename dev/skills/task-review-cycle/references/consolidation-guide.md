@@ -61,6 +61,8 @@ fallback policy. Keep the original launch history and the accepted blockers acro
 
 ## Fix rounds and re-review
 
+For dispatched work, record each review launch and consolidation per *Dispatch timing*.
+
 - Run at most **one general independent re-review per cycle** after the initial review. Use it
   only when the first repair materially changes behavior. Check the route floor before spending
   the re-review on a lite repair. Reuse the primary reviewer, with the current diff and targeted
@@ -96,7 +98,7 @@ review checkpoint as `Reviewed head <sha>`. Use that SHA as `REVIEWED_HEAD` for 
 and the merge command. After a repair or resync, record a new SHA when review and targeted
 evidence cover the new candidate under the existing review budget.
 
-On hub, follow `ci-failure-handling.md` for CI on the current PR head, then reclaim late results
+On hub, follow `ci-failure-handling.md` for CI and merge timing on the current PR head, then reclaim late results
 per `late-source-reclaim.md`. On the local-only route, reclaim at its stop point. If reclaim leads
 to an in-scope repair, run targeted checks, commit it, and return through CI on hub. Apply the
 existing review budget and gate to every repair, including CI repairs and fixes after resync.
@@ -120,6 +122,44 @@ Codex task cycle before a ready report or any authorized base merge.
 Finalize dispositions and update the PR's `Verification:` section from final evidence when
 authorized. Keep its closing lines and report local and remote check outcomes. On lite, preserve
 the final evidence in the merge commit message before retiring the archive.
+
+## Dispatch timing
+
+Use the receipt beside the assigned `result.json`. Start one measurement before each
+independent review round, including a re-review or a focused confirmation. Use the
+committed candidate's full Git SHA. Keep the printed attempt ID in
+the review checkpoint and finish that attempt when consolidating its verdict. Use
+`incomplete` if the attempt produced no verdict. Reuse the ID when reclaiming the
+same attempt. A new reviewer launch gets a new ID.
+
+```bash
+DISPATCH="<absolute path to dev/skills/dispatch/scripts/dispatch.py>"
+RESULT="<assigned result.json path>"
+DISPATCH_TIMING_RUN="${RESULT%/*}/run.json"
+HEAD_SHA=$(git rev-parse --verify HEAD) || exit 1
+ATTEMPT=$(python3 -I "$DISPATCH" timing "$DISPATCH_TIMING_RUN" start review "$HEAD_SHA")
+```
+
+After consolidating the verdict, recover the recorded ID and close its measurement.
+
+```bash
+DISPATCH="<absolute path to dev/skills/dispatch/scripts/dispatch.py>"
+RESULT="<assigned result.json path>"
+DISPATCH_TIMING_RUN="${RESULT%/*}/run.json"
+ATTEMPT="<from the review checkpoint>"
+python3 -I "$DISPATCH" timing "$DISPATCH_TIMING_RUN" finish review "$ATTEMPT" complete
+```
+
+When reviewing changes before committing them, stage the exact reviewed changes and verify the
+working tree matches the index. Capture the reviewed SHA with `git write-tree`. Start with
+`timing <receipt> start review <tree SHA> --tree`. After committing, run
+`timing <receipt> bind-review <attempt> <commit SHA>`. The helper verifies that the commit
+contains that tree before assigning the head.
+
+Report unavailable timing and continue the review when recording fails. Pass the same receipt
+to the CI wait and merge helper per `ci-failure-handling.md`. For a separately verified merge
+(including a confirmed lite push), run
+`dispatch.py timing <receipt> merged <confirmed feature head>`. Omit the head when unavailable.
 
 ## Dispatch pre-merge report
 

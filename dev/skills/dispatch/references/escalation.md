@@ -60,7 +60,9 @@ with `launch --dry-run`. If quota refuses it, keep the current child and
 choose a permitted rung or ask the user. For a `--tree` run, confirm its worktree slug in the
 result's `worktree` or the terminal history (`hc read --lines 60 <address>` or more) before closing it.
 When authorized to end the old child, run
-`dispatch.py collect <old-receipt> --close --force` and confirm it closed. Clean up the old
-receipt per [Close the child terminal](../SKILL.md#close-the-child-terminal). Then launch per
-SKILL.md step 4 with the new pair and the same first message. For a `--tree` run, keep its
-worktree and use `/dev:task-next --resume <slug>` as the first message.
+`dispatch.py collect <old-receipt> --close --force` and confirm it closed. Launch per SKILL.md
+step 4 with the new pair, the same first message, and `--relaunch-from <old-receipt>` to carry
+phase measurements and unfinished attempts. For a `--tree` run, keep its worktree and use
+`/dev:task-next --resume <slug>` as the first message. After launch prints the replacement
+receipt, clean up the old one per [Close the child terminal](../SKILL.md#close-the-child-terminal).
+If the replacement reports it could not carry timing, preserve the old timing file for diagnosis.

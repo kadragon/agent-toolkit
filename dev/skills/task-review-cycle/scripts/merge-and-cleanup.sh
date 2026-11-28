@@ -2,7 +2,7 @@
 # Merge a PR using the best available strategy, then clean up local branch.
 #
 # Usage: merge-and-cleanup.sh <pr_number> <base_branch> <feature_branch> <merge_strategy_json>
-#                            [worktree_path] [--expected-head <sha>]
+#                            [worktree_path] [--expected-head <sha>] [--dispatch-run <run.json>]
 #   merge_strategy_json: e.g. '{"squash":true,"merge":true,"rebase":true}'
 #   worktree_path: optional, removes the worktree before the local branch is deleted
 #   --expected-head: atomically match the reviewed full SHA when merging on GitHub
@@ -15,7 +15,7 @@ set -euo pipefail
 # --- Argument validation ---
 usage() {
   echo "Usage: merge-and-cleanup.sh <pr_number> <base_branch> <feature_branch> <merge_strategy_json>"
-  echo "                            [worktree_path] [--expected-head <sha>]"
+  echo "                            [worktree_path] [--expected-head <sha>] [--dispatch-run <run.json>]"
   echo ""
   echo "  pr_number           PR number (integer)"
   echo "  base_branch         Target branch (e.g. main)"
@@ -52,11 +52,19 @@ if [[ $# -gt 0 && "$1" != --* ]]; then
   shift
 fi
 EXPECTED_HEAD=""
-if [[ $# -eq 2 && "$1" == --expected-head && "$2" =~ ^[0-9a-f]{40}$ ]]; then
-  EXPECTED_HEAD="$2"
-elif [[ $# -ne 0 ]]; then
-  usage
-fi
+DISPATCH_RUN=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --expected-head)
+      [[ -z "$EXPECTED_HEAD" && "${2:-}" =~ ^[0-9a-f]{40}$ ]] || usage
+      EXPECTED_HEAD="$2" ;;
+    --dispatch-run)
+      [[ -z "$DISPATCH_RUN" && -n "${2:-}" && "$2" != --* ]] || usage
+      DISPATCH_RUN="$2" ;;
+    *) usage ;;
+  esac
+  shift 2
+done
 
 # Validate PR number is numeric
 if ! [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
@@ -98,6 +106,19 @@ QUEUED=$(jq -r '.queued // false' <<<"$MERGE_RESULT" 2>/dev/null || echo false)
 UNCONFIRMED=$(jq -r '.unconfirmed // false' <<<"$MERGE_RESULT" 2>/dev/null || echo false)
 if [ "$MERGE_OK" = "true" ]; then
   MERGE_MSG="PR #${PR_NUMBER} merged with ${MERGE_METHOD}"
+  if [ -n "$DISPATCH_RUN" ]; then
+    TIMING_PY=$(command -v python3 || command -v python || true)
+    if [ -z "$TIMING_PY" ]; then
+      echo "WARN: dispatch merge timing unavailable without Python" >&2
+    else
+      MERGED_HEAD=$(jq -r '.head_sha // empty' <<<"$MERGE_RESULT")
+      TIMING=("$TIMING_PY" -I "$SCRIPT_DIR/../../dispatch/scripts/dispatch.py" timing "$DISPATCH_RUN" merged)
+      if [ -n "${EXPECTED_HEAD:-$MERGED_HEAD}" ]; then
+        TIMING+=("${EXPECTED_HEAD:-$MERGED_HEAD}")
+      fi
+      "${TIMING[@]}" || true
+    fi
+  fi
 elif [ "$QUEUED" = "true" ]; then
   MERGE_MSG="PR #${PR_NUMBER} queued for merge, not merged yet"
 elif [ "$UNCONFIRMED" = "true" ]; then

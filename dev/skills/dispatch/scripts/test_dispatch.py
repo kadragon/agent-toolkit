@@ -16,6 +16,7 @@ from threading import Event
 from types import SimpleNamespace
 from unittest.mock import ANY, call, patch
 
+import phase_timing
 import pinned_wave
 import shared_codex
 from dispatch import (
@@ -43,6 +44,7 @@ from dispatch import (
     send,
     send_wave,
     terminal_name,
+    timing,
     transcript_echoed,
     transcript_offset,
     verify_delivery_turn,
@@ -133,6 +135,7 @@ class ChildArgvTests(unittest.TestCase):
         argv = child_argv("claude", "opus", "high", "/dev:task-next", False, Path("result.json"))
         self.assertEqual(argv[-3], "--append-system-prompt")
         self.assertIn("result.json", argv[-2])
+        self.assertIn("timing run.json delivered", argv[-2])
         self.assertEqual(argv[-1], "/dev:task-next")
 
 
@@ -2074,6 +2077,73 @@ class PinnedWaveTests(unittest.TestCase):
 
 
 class DispatchWatchTests(unittest.TestCase):
+    def test_timing_bounds_history_and_reports_missing_measurements(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            write_json(receipt, {"address": "t7"})
+            output = StringIO()
+            with redirect_stdout(output):
+                timing(SimpleNamespace(run=receipt, event=None))
+            report = json.loads(output.getvalue())
+            self.assertIsNone(report["final_head"])
+            self.assertIsNone(report["merge"])
+            self.assertIsNone(report["launches"][0]["startup_ms"])
+            self.assertFalse(receipt.with_name("timing.json").exists())
+
+            head = "a" * 40
+            data = phase_timing.empty_history()
+            for at in range(phase_timing.MAX_LAUNCHES + 1):
+                phase_timing.new_launch(data, at)
+            attempts = [phase_timing.start(data, "review", head, False, at)
+                        for at in range(phase_timing.MAX_ATTEMPTS + 1)]
+            with self.assertRaisesRegex(ValueError, "unknown review attempt"):
+                phase_timing.finish(data, "review", attempts[0], "complete", 30)
+            phase_timing.finish(data, "review", attempts[1], "complete", 0)
+            phase_timing.merged(data, None, 40)
+            report = phase_timing.report(data, {"head": head})
+            self.assertEqual(report["dropped_launches"], 1)
+            self.assertEqual(report["merge"], {"head": None, "confirmed_ms": 40, "elapsed_ms": 40})
+            self.assertEqual(report["final_head"], head)
+            launch = report["launches"][-1]
+            self.assertEqual(launch["dropped_review"], 1)
+            self.assertEqual(len(launch["review"]), phase_timing.MAX_ATTEMPTS)
+            self.assertEqual(launch["review"][0]["attempt"], attempts[1])
+            self.assertIsNone(launch["review"][0]["elapsed_ms"])
+            with self.assertRaisesRegex(ValueError, "full Git object SHA"):
+                phase_timing.start(data, "ci", "a prompt or a credential", False, 1)
+
+    def test_timing_uses_claude_acknowledgment_and_ignores_stale_results(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            report_path = receipt.with_name("result.json")
+            timing_file = receipt.with_name("timing.json")
+            args = SimpleNamespace(run=receipt, event=None)
+
+            def measure():
+                with redirect_stdout(StringIO()) as output:
+                    timing(args)
+                return json.loads(output.getvalue())
+
+            write_json(timing_file, phase_timing.new_launch(phase_timing.empty_history(), 1000))
+            with patch("dispatch.phase_timing.now_ms", return_value=1500):
+                timing(SimpleNamespace(run=receipt, event="delivered"))
+            self.assertFalse(receipt.exists())
+            write_json(receipt, {"address": "t7", "cli": "claude", "sent": True})
+            head = "a" * 40
+            write_json(report_path, {"status": "working", "phase": "review", "summary": "review", "head": head})
+            self.assertEqual(measure()["launches"][0]["startup_ms"], 500)
+            with patch("dispatch.phase_timing.now_ms", return_value=2500):
+                timing(SimpleNamespace(run=receipt, event="delivered"))
+            self.assertEqual(measure()["launches"][0]["startup_ms"], 500)
+            late_ack = phase_timing.new_launch(phase_timing.empty_history(), 1000)
+            phase_timing.start(late_ack, "review", head, False, 2000)
+            write_json(timing_file, late_ack)
+            with patch("dispatch.phase_timing.now_ms", return_value=2500):
+                timing(SimpleNamespace(run=receipt, event="delivered"))
+            self.assertIsNone(measure()["launches"][0]["startup_ms"])
+            write_json(receipt, {"address": "t7", "cli": "codex", "previous_result": report_path.stat().st_mtime_ns})
+            self.assertIsNone(measure()["final_head"])
+
     def test_wait_ignores_legacy_done_while_working_and_emits_only_changes(self):
         report = {"address": "t7", "status": "working", "state": "live", "stop_reason": None,
                   "result": {"status": "done", "phase": "implement", "summary": "작업 중\nsecond line",
@@ -2471,6 +2541,116 @@ class CodexSendTests(DispatchTestCase):
         ):
             launch(saved.launch_args(directory, **options))
         return mocked_hc.call_args_list
+
+    def test_relaunch_keeps_working_when_only_timing_history_is_invalid(self):
+        with tempfile.TemporaryDirectory() as previous, tempfile.TemporaryDirectory() as replacement:
+            receipt = Path(previous) / "run.json"
+            write_json(receipt, {"address": "t7", "closed_reason": "finished"})
+            timing_file = receipt.with_name("timing.json")
+            head = "a" * 40
+            old = phase_timing.new_launch(phase_timing.empty_history(), 1000)
+            saved_attempt = phase_timing.start(old, "review", head, False, 2000)
+            write_json(timing_file, {"launches": None})
+            with redirect_stderr(StringIO()) as warnings:
+                self.launch_codex(replacement, lambda *_: DispatchReceiptTests.TERMINAL,
+                                  relaunch_from=receipt, task=None)
+            self.assertIn("cannot carry dispatch timing", warnings.getvalue())
+            self.assertEqual(json.loads(timing_file.read_text(encoding="utf-8")), {"launches": None})
+            self.assertEqual(json.loads((Path(replacement) / "run.json").read_text(encoding="utf-8"))["address"], "t7")
+            started = phase_timing.read(Path(replacement) / "timing.json")
+            self.assertEqual(len(started["launches"]), 1)
+            self.assertIsNotNone(started["first_launched_ms"])
+            current_attempt = phase_timing.start(started, "review", head, False, 3000)
+            with self.assertRaisesRegex(ValueError, "unknown review attempt"):
+                phase_timing.finish(started, "review", saved_attempt, "complete", 4000)
+            self.assertNotEqual(saved_attempt, current_attempt)
+            self.assertIsNone(started["launches"][0]["review"][0]["finished_ms"])
+
+    def test_phase_timing_survives_retry_relaunch_and_repeated_collection(self):
+        terminal = DispatchReceiptTests.TERMINAL
+        sent = False
+
+        def respond(command, *args):
+            nonlocal sent
+            if command == "get":
+                return {**terminal, **(self.WORKING if sent else self.IDLE)}
+            if command == "read":
+                return self.screen(self.READY)
+            self.assertEqual(command, "send")
+            sent = True
+            return {"started": True}
+
+        def event(receipt, at, verb, **options):
+            with patch("dispatch.phase_timing.now_ms", return_value=at), redirect_stdout(StringIO()) as output:
+                timing(SimpleNamespace(run=receipt, event=verb, **({"tree": False} | options)))
+            return output.getvalue().strip()
+
+        first_head, final_head = "a" * 40, "b" * 40
+        with tempfile.TemporaryDirectory() as directory:
+            first = Path(directory) / "run.json"
+            with patch("dispatch.phase_timing.now_ms", side_effect=[1000, 1100]):
+                self.launch_codex(directory, respond, task="$task-next #520 private prompt")
+            review = event(first, 5000, "start", phase="review", sha=first_head)
+            event(first, 5200, "finish", phase="review", attempt=review, outcome="complete")
+            event(first, 5300, "finish", phase="review", attempt=review, outcome="complete")
+            pending_review = event(first, 5350, "start", phase="review", sha=first_head)
+            attempt = event(first, 5400, "start", phase="ci", sha=first_head)
+            event(first, 5500, "finish", phase="ci", attempt=attempt, outcome="incomplete")
+            attempt = event(first, 5600, "start", phase="ci", sha=first_head)
+            event(first, 5800, "finish", phase="ci", attempt=attempt, outcome="failed")
+            finished = {**terminal, "state": "finished"}
+            with (
+                patch("dispatch.phase_timing.now_ms", return_value=6000),
+                patch("dispatch.hc_json", side_effect=[finished, {}]),
+                redirect_stdout(StringIO()),
+            ):
+                collect(SimpleNamespace(run=first, close=True))
+
+            replacement = Path(directory) / "replacement"
+            replacement.mkdir()
+            second = replacement / "run.json"
+            sent = False
+            with patch("dispatch.phase_timing.now_ms", side_effect=[6500, 6700]):
+                self.launch_codex(replacement, respond, relaunch_from=first)
+            tree = "c" * 40
+            review = event(second, 8000, "start", phase="review", sha=tree, tree=True)
+            event(second, 8050, "finish", phase="review", attempt=pending_review, outcome="complete")
+            attempt = event(second, 8100, "start", phase="ci", sha=final_head)
+            event(second, 8200, "finish", phase="review", attempt=review, outcome="complete")
+            with patch("dispatch.subprocess.check_output", side_effect=["d" * 40, tree]) as git:
+                with self.assertRaisesRegex(SystemExit, "does not match"):
+                    event(second, 8300, "bind-review", attempt=review, head=final_head)
+                event(second, 8300, "bind-review", attempt=review, head=final_head)
+            self.assertEqual(git.call_args.args[0], ["git", "rev-parse", "--verify", f"{final_head}^{{tree}}"])
+            event(second, 8350, "finish", phase="ci", attempt=attempt, outcome="passed")
+            event(second, 8500, "merged", head=None)
+            event(second, 8550, "merged", head=final_head)
+            event(second, 8600, "merged", head=first_head)
+            saved = second.with_name("timing.json")
+            original = saved.read_bytes()
+            self.assertNotIn(b"private prompt", original)
+            with (
+                patch("dispatch.phase_timing.now_ms", side_effect=AssertionError("poll is read-only")),
+                patch("dispatch.hc_json", return_value=finished),
+                redirect_stdout(StringIO()) as output,
+            ):
+                for _ in range(2):
+                    collect(SimpleNamespace(run=second, close=False))
+                collect(SimpleNamespace(run=second, close=False, brief=True))
+            earlier, later, brief = output.getvalue().splitlines()
+            self.assertEqual(earlier, later)
+            self.assertEqual(saved.read_bytes(), original)
+            self.assertIn("startup=200ms implementation=1300ms review=200ms ci=250ms restart=500ms", brief)
+            report = json.loads(earlier)["timing"]
+            self.assertEqual(report["final_head"], final_head)
+            self.assertEqual(report["merge"], {"head": final_head, "confirmed_ms": 8500, "elapsed_ms": 7500})
+            original_launch, restart = report["launches"]
+            self.assertEqual((original_launch["startup_ms"], original_launch["implementation_ms"]), (100, 3900))
+            self.assertEqual(original_launch["review"][0]["finished_ms"], 5200)
+            self.assertEqual(original_launch["review"][1]["finished_ms"], 8050)
+            self.assertEqual([a["head"] for a in original_launch["ci"]], [first_head, first_head])
+            self.assertEqual([a["outcome"] for a in original_launch["ci"]], ["incomplete", "failed"])
+            self.assertEqual(restart["review"][0]["head"], final_head)
 
     def test_launch_withholds_task_on_visible_hook_review_or_failure(self):
         for trust, dialog in ((False, self.HOOK_REVIEW), (True, self.HOOK_REVIEW),
@@ -3153,6 +3333,24 @@ class CodexSendTests(DispatchTestCase):
             self.assertEqual([c.args[0] for c in hc.call_args_list].count("send"), 1)
             self.assertEqual(hc.call_count, 6)
             self.assertIn("warning: legacy receipt has no handoff metadata", stderr.getvalue())
+
+    def test_recovered_delivery_uses_the_original_first_send_acknowledgment(self):
+        working = {**DispatchReceiptTests.TERMINAL, **self.WORKING}
+        for first_send in (False, True, None):
+            with self.subTest(continuation=first_send), tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "run.json"
+                run = {**DispatchReceiptTests.RECEIPT, "sent": "unconfirmed", "send_acknowledged_ms": 1100}
+                if first_send is not None:
+                    run["sent_continuation"] = first_send
+                write_json(receipt, run)
+                with (
+                    patch("dispatch.hc_json", side_effect=[working, self.screen(self.READY)]),
+                    patch("dispatch.phase_timing.now_ms", side_effect=AssertionError("read the recorded time")),
+                ):
+                    with self.assertRaisesRegex(SystemExit, "use --continue"):
+                        send(SimpleNamespace(address="t7", message="task", run=receipt))
+                timing_data = phase_timing.read(receipt.with_name("timing.json"))
+                self.assertEqual(timing_data["launches"][0]["delivered_ms"], 1100 if first_send is False else None)
 
     def test_resend_keeps_the_original_phase_and_requires_a_clear_idle_composer(self):
         owner = DispatchReceiptTests.TERMINAL
