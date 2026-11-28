@@ -586,11 +586,11 @@ def requires_review_sources(run):
     return run.get("require_review_sources", False)
 
 
-def standalone_pr_review(message, handoff):
+def standalone_hub_review(message, handoff):
     invocation = (message or "").lstrip().splitlines()
     command = invocation[0].split() if invocation else []
     return (handoff.get("work_kind") == "standalone"
-            and command[:1] == ["$task-review"] and "--pr" in command[1:])
+            and command[:1] == ["$task-review"] and "--no-hub" not in command[1:])
 
 
 def review_policy_fields(three_source):
@@ -1203,7 +1203,7 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
     previous = getattr(args, "relaunch_from", None)
     resume = None
     three_source = args.cli == "codex" and (
-        handoff["work_kind"] != "standalone" or standalone_pr_review(args.task, handoff)
+        handoff["work_kind"] != "standalone" or standalone_hub_review(args.task, handoff)
     )
     if previous:
         previous = Path(previous).expanduser().resolve()
@@ -1980,10 +1980,10 @@ def send_task(args, run_path):
         verify_delivery_turn(run, terminal)
         message = args.message
         if run:
+            if standalone_hub_review(message, run.get("handoff", {})):
+                run.update(review_policy_fields(True))
             if not continuation:
                 if "handoff" in run:
-                    if standalone_pr_review(message, run["handoff"]):
-                        run.update(review_policy_fields(True))
                     message = first_prompt("codex", message, run["handoff"])
                 else:
                     print("warning: legacy receipt has no handoff metadata; include the original request, "

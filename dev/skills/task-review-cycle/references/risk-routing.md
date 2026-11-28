@@ -32,6 +32,12 @@ Step 5 commits a Step 4 fix (SKILL.md Step 6): a review fix can add the script t
 | `SCRIPT_HIT` | **hub** with required CI; `--lite` cannot bypass |
 | `WORKTREE_HIT` | **hub**; `--lite` cannot bypass — the lite merge checks out the base, which the main worktree holds |
 
+A dispatch receipt that requires three sources also forces hub whenever Git authority permits
+it. Read the receipt beside the assigned `result.json`; an explicit `review_policy` requires three
+sources unless it is `head-bound`, and a legacy receipt uses `require_review_sources`. Apply
+the same floor after relaunch and before any lite merge. Local-only authority still stops
+before merge.
+
 A shipped script forces hub so the panel reviews it: quoting, shell-expansion and interpreter-shim
 defects are where the non-Claude engines earn their slot.
 

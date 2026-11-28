@@ -3452,6 +3452,48 @@ class CodexSendTests(DispatchTestCase):
                         send(args)
                 self.assertTrue(sent)
 
+    def test_standalone_pr_review_sets_policy_on_continuation(self):
+        terminal = DispatchReceiptTests.TERMINAL
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            sent = False
+
+            def respond(command, *args, timeout=None):
+                nonlocal sent
+                if command == "get":
+                    state = {**self.IDLE, "turn": 2, "status": {"state": "done"}}
+                    return {**terminal, **(self.WORKING if sent else state)}
+                if command == "read":
+                    return self.screen(self.READY)
+                self.assertEqual(command, "send")
+                sent = True
+                saved = json.loads(receipt.read_text(encoding="utf-8"))
+                self.assertEqual(saved["review_policy"], "three-source")
+                self.assertIn("include review_sources", " ".join(args))
+                return {"started": True}
+
+            self.launch_codex(directory, respond, work_kind="standalone", task=None)
+            saved = json.loads(receipt.read_text(encoding="utf-8"))
+            write_json(receipt, {**saved, "sent": True})
+            args = SimpleNamespace(address="t7", message="$task-review --pr 12", run=receipt, continuation=True)
+            with patch("dispatch.hc_json", side_effect=respond), redirect_stdout(StringIO()):
+                send(args)
+            self.assertTrue(sent)
+
+    def test_standalone_review_uses_three_sources_when_hub_is_available(self):
+        for message, policy in (
+            ("$task-review --auto", "three-source"),
+            ("$task-review --lite", "three-source"),
+            ("$task-review --no-hub", "head-bound"),
+            ("Review the pending changes", "head-bound"),
+        ):
+            with self.subTest(message=message), tempfile.TemporaryDirectory() as directory:
+                with patch("dispatch.send"):
+                    self.launch_codex(directory, lambda *_: DispatchReceiptTests.TERMINAL,
+                                      work_kind="standalone", task=message)
+                saved = json.loads((Path(directory) / "run.json").read_text(encoding="utf-8"))
+                self.assertEqual(saved["review_policy"], policy)
+
     def test_idle_codex_relaunch_carries_pre_merge_stop_until_first_send(self):
         terminal = DispatchReceiptTests.TERMINAL
         sent = False
