@@ -67,6 +67,15 @@ normal checked resend flow using that prompt and receipt. Retry a withheld deliv
 reservation. A child's completed claim remains visible through its ordinary worktree claim.
 Use `wait --first` after delivery and keep merges into the base sequential.
 
+## Resync a pushed child PR
+
+The home session fetches and merges the PR base into the pushed branch, preserving shared queue
+entries from both sides. Before merging, it runs `cycle_state.py authorize --action commit` and
+`--action feature-push` against a home-owned contract for that branch. That contract records the
+original user grant, or the applicable dispatch default when the user stated no Git limits, never
+the child's narrower handoff limits. If either check fails, the home session leaves the checkout
+untouched and hands the resync to the child through *Continue with another phase*.
+
 ## Home merges a child PR
 
 Verify the original user grant authorizes the home session to merge the exact repository
