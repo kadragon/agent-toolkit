@@ -1,9 +1,8 @@
-"""Inspect the shared kadragon marketplace before an idle Codex warm-up."""
-
 import difflib
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 
 from codex_app_server import request
@@ -22,8 +21,11 @@ def cache_label(home):
 def remote_versions(repo, installed):
     git = ["git", "-C", str(repo)]
     command([*git, "fetch", "origin"])
-    ref = command([*git, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"]).strip()
-    commit = command([*git, "rev-parse", "--verify", f"{ref}^{{commit}}"]).strip()
+    head = command([*git, "ls-remote", "--exit-code", "origin", "HEAD"]).strip()
+    match = re.fullmatch(r"([0-9a-f]{40}|[0-9a-f]{64})	HEAD", head)
+    if match is None:
+        raise ValueError("cannot resolve the marketplace default branch commit")
+    commit = match[1]
     names = catalog_plugins(json.loads(command([*git, "show", f"{commit}:{CATALOG}"])))
     selected = set(names) & installed.keys()
     if not selected:
@@ -36,7 +38,7 @@ def remote_versions(repo, installed):
     }
 
 
-def inventory(home, cwd, versions):
+def inventory(home, cwd, versions, *, require_guard=False):
     response = request("codex", home, "hooks/list", {"cwds": [str(cwd)]},
                        timeout=TIMEOUT, cwd=cwd, experimental=True)
     [group] = response["data"]
@@ -47,6 +49,8 @@ def inventory(home, cwd, versions):
     relevant = {}
     for hook in group["hooks"]:
         name, _, market = (hook.get("pluginId") or "").partition("@")
+        if require_guard and market == MARKET and name == "guard" and not hook["enabled"]:
+            raise ValueError("a guard@kadragon hook is disabled in the target directory")
         if market == MARKET and hook["enabled"]:
             root = (home / "plugins/cache" / MARKET / name / versions[name]).resolve()
             manifest = json.loads((root / MANIFEST).read_text(encoding="utf-8"))
@@ -59,7 +63,8 @@ def inventory(home, cwd, versions):
             hooks.append({field: hook.get(field) for field in (
                 "key", "pluginId", "sourcePath", "eventName", "matcher", "command", "trustStatus",
             )})
-    # A plugin is a trusted baseline only when all its enabled hooks are trusted.
+    if require_guard and "guard" not in sources:
+        raise ValueError("no active guard@kadragon hooks in the target directory")
     snapshot = {
         name: {"version": versions[name], "trusted": all(state == "trusted" for state in relevant[name]),
                "files": hook_files(root, source)}

@@ -147,16 +147,18 @@ files with a previously observed trusted copy in this Codex home. A first run wi
 trusted copy reports that gap. Third-party pending hooks appear in `pending_hooks` with their
 native source paths and review status.
 
-If hooks need approval, launch the first task child idle and use **Review hooks** or `/hooks`
-in that child. Start all other children idle after the review, then deliver tasks with
-`dispatch.py send --run <receipt> -- <address> '<first message>'`. Confirm the installed
-versions match the prepared versions before starting another child in the same wave.
+If hooks need approval, launch an idle child and use **Review hooks** or `/hooks`. Close the
+review child and restart so approved SessionStart hooks can run. Start the task children idle,
+then deliver tasks with `dispatch.py send --run <receipt> -- <address> '<first message>'`.
 
 Preparation and dispatch startup share a local lock scoped to the Codex home. Prepared
 launches carry a Herdr label for that cache. While a labeled child is live, preparation is
-held, and launches from a different home session are warned and held. The first home may
-launch siblings. Close the wave before preparing another shared-cache wave. Standalone Codex
-startup and dispatch versions predating the label can still refresh the cache.
+held, and launches from a different home session are warned and held. Before launching a sibling,
+dispatch fetches from the checkout saved by preparation and verifies the remote and installed
+versions still match. Use an explicit Herdr parent when launching from outside a home session.
+A failed check or a version mismatch holds startup. Close the wave before
+preparing another one. Standalone Codex startup and dispatch versions predating the label can
+still refresh the cache.
 
 Startup update deferral is unverified on Codex 0.172.0. Its source starts a configured-marketplace
 upgrade when plugins are enabled. The `auto_update` field describes checks during plugin

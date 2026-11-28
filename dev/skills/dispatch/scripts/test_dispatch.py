@@ -478,6 +478,7 @@ class DispatchReceiptTests(DispatchTestCase):
             calls = [{"terminals": [owner, sibling]}, live_owner, {"terminals": [sibling]}, self.TERMINAL]
             with (
                 patch("dispatch.Path.cwd", return_value=home),
+                patch("dispatch.verify_shared_cache_versions") as verify_versions,
                 patch("dispatch.hc_json", side_effect=calls),
                 patch("dispatch.subprocess.run", return_value=child) as run,
                 patch("dispatch.tempfile.mkdtemp", return_value=directory),
@@ -485,6 +486,7 @@ class DispatchReceiptTests(DispatchTestCase):
                 patch("builtins.print") as output,
             ):
                 launch(args)
+            verify_versions.assert_called_once()
             git_call, launch_call = run.call_args_list
             self.assertEqual(git_call.args[0][0], "git")
             argv = launch_call.args[0]
@@ -997,6 +999,27 @@ class DispatchReceiptTests(DispatchTestCase):
         self.assertEqual(hc.call_args.args[:2], ("ls", "--label"))
         self.assertTrue(hc.call_args.args[2].startswith(f"{shared_codex.LABEL}="))
         self.assertTrue(all(entry.args[0][0] != "hc" for entry in run.call_args_list))
+
+    def test_same_home_launch_checks_the_fresh_remote_versions(self):
+        owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd())}
+        sibling = {"address": "t7", "state": "live", "parent": "t6"}
+        versions = {"guard": "1.0.0"}
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            write_json(home / "dispatch-prepared-cache.json", {"repo": str(home), "versions": versions})
+            with (
+                patch.dict(os.environ, {"CODEX_HOME": directory}),
+                patch("dispatch.hc_json", side_effect=[
+                    {"terminals": [owner, sibling]}, owner, {"terminals": [sibling]},
+                ]),
+                patch("dispatch.installed_plugin_versions", return_value=versions),
+                patch("shared_codex.remote_versions", return_value={"guard": "1.1.0"}) as remote,
+                patch("dispatch.subprocess.run") as run,
+            ):
+                with self.assertRaisesRegex(SystemExit, "marketplace versions changed"):
+                    launch(self.launch_args(Path.cwd()))
+            remote.assert_called_once_with(home, versions)
+            self.assertTrue(all(entry.args[0][0] != "hc" for entry in run.call_args_list))
 
     def test_launch_records_the_installed_codex_plugin_versions(self):
         with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as home:
@@ -1593,6 +1616,9 @@ class SharedCodexPreparationTests(unittest.TestCase):
         self.terminal = {"address": "t7", "parent": "t6", "state": "live",
                          "name": "dispatch-warmup-00112233", "created_ms": 2000}
         self.events = []
+        self.screen = "  Hooks need review"
+        self.guard_enabled = True
+        self.fail_close_get = False
         self.enterContext(patch("dispatch.secrets.token_hex", return_value="00112233"))
         self.enterContext(patch("dispatch.time.time_ns", return_value=2_000_000_000))
 
@@ -1615,15 +1641,13 @@ class SharedCodexPreparationTests(unittest.TestCase):
         if git == ["fetch", "origin"]:
             self.events.append("git fetch")
             return ""
-        if git[0] == "symbolic-ref":
-            return "origin/main\n"
-        if git[0] == "rev-parse":
-            self.assertEqual(git[-1], "origin/main^{commit}")
-            return "abc\n"
-        if git == ["show", "abc:" + pinned_wave.CATALOG]:
+        commit = "a" * 40
+        if git == ["ls-remote", "--exit-code", "origin", "HEAD"]:
+            return f"{commit}\tHEAD\n"
+        if git == ["show", f"{commit}:{pinned_wave.CATALOG}"]:
             plugins = [{"name": name, "source": {"source": "local", "path": f"./{name}"}} for name in pinned_wave.PLUGINS]
             return json.dumps({"name": "kadragon", "plugins": plugins})
-        self.assertEqual(git, ["show", "abc:guard/" + pinned_wave.MANIFEST])
+        self.assertEqual(git, ["show", f"{commit}:guard/{pinned_wave.MANIFEST}"])
         return json.dumps({"version": self.expected})
 
     def hooks(self, binary, home, method, params, **kwargs):
@@ -1631,12 +1655,12 @@ class SharedCodexPreparationTests(unittest.TestCase):
         self.assertTrue(kwargs["experimental"])
         version = next(self.cache.iterdir()).name
         self.events.append(f"hooks {version}")
-        hook = {"pluginId": "guard@kadragon", "source": "plugin", "key": "hook-key", "enabled": True,
+        hook = {"pluginId": "guard@kadragon", "source": "plugin", "key": "hook-key", "enabled": self.guard_enabled,
                 "eventName": "preToolUse", "matcher": "Bash", "command": "python guard.py",
                 "sourcePath": str(self.cache / version / "hooks.json"),
                 "trustStatus": "trusted" if version == "1.0.0" else "modified"}
         return {"data": [{"cwd": str(self.root), "errors": [], "warnings": [], "hooks": [
-            hook, {**hook, "key": "disabled", "enabled": False, "trustStatus": "untrusted"},
+            hook, {**hook, "pluginId": None, "key": "disabled", "enabled": False, "trustStatus": "untrusted"},
         ]}]}
 
     def hc(self, command, *args, **kwargs):
@@ -1650,9 +1674,12 @@ class SharedCodexPreparationTests(unittest.TestCase):
             return {"address": "t7"}
         self.assertEqual(args[-1], "t7")
         if command == "get":
+            if self.fail_close_get and kwargs.get("timeout") == 10:
+                self.fail_close_get = False
+                raise subprocess.TimeoutExpired(["hc", "get"], 10)
             return self.terminal
         if command == "read":
-            return {"text": "  Hooks need review", "how": "screen", "complete": True}
+            return {"text": self.screen, "how": "screen", "complete": True}
         self.events.append(f"hc {command}")
         if command == "kill":
             self.terminal["state"] = "finished"
@@ -1693,6 +1720,24 @@ class SharedCodexPreparationTests(unittest.TestCase):
         self.assertEqual(self.events, ["git fetch", "hooks 1.1.0", "hc run", "hc kill", "hc rm", "hooks 1.1.0"])
         self.assertEqual(report["hook_content_diffs"]["guard"],
                          {"reason": "no locally recorded trusted hook contents"})
+
+    def test_preparation_refuses_a_disabled_guard(self):
+        self.install("1.1.0", "new guard")
+        self.guard_enabled = False
+        with self.assertRaisesRegex(SystemExit, "guard@kadragon hook is disabled"):
+            self.prepare("1.1.0")
+        self.assertIn("hc rm", self.events)
+        self.assertFalse((self.home / "dispatch-prepared-cache.json").exists())
+
+    def test_preparation_refuses_a_failed_startup_hook_and_closes_the_child(self):
+        self.install("1.1.0", "new guard")
+        self.screen = "• Hook failed\n  └ SessionStart command exited 1"
+        self.fail_close_get = True
+        with self.assertRaisesRegex(SystemExit, "warm-up startup hook failed"):
+            self.prepare("1.1.0")
+        self.assertEqual(self.events[-2:], ["hc kill", "hc rm"])
+        self.assertFalse(self.fail_close_get)
+        self.assertFalse((self.home / "dispatch-prepared-cache.json").exists())
 
     def test_preparation_leaves_live_wave_untouched_even_from_its_home(self):
         terminals = {"terminals": [{"address": "t7", "state": "live", "parent": "t6"}]}
