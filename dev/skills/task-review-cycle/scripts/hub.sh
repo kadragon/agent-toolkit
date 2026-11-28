@@ -129,8 +129,7 @@ github_ci_snapshot() {
      [[ "$pr_url" =~ ^https://github\.com/([^/]+/[^/]+)/pull/[0-9]+$ ]]; then
     repo="${BASH_REMATCH[1]}"
   else
-    printf '%s\n' '{"repository": null, "oids": [], "checks": []}'
-    return
+    return 1
   fi
   view=$(gh api graphql --paginate -F number="$pr_number" \
     -f owner="${repo%%/*}" -f name="${repo#*/}" -f query='
@@ -144,10 +143,16 @@ github_ci_snapshot() {
               ... on StatusContext { context state createdAt link: targetUrl }
               ... on CheckRun { name status conclusion startedAt databaseId link: detailsUrl
                 checkSuite { app { id } workflowRun { event workflow { name } } } }
-            } } } } } } } } }' 2>/dev/null) || view=""
-  # Collect the streamed pages with jq for gh versions without --slurp.
-  jq -sc --arg repo "$repo" '[.[].data.repository] as $repositories
+            } } } } } } } } }' 2>/dev/null) || return 1
+  # Collect streamed pages for gh versions without --slurp. Each page must
+  # identify a commit and explicitly report either a rollup or a null rollup.
+  jq -esc --arg repo "$repo" '
+    select(length > 0 and all(.[]; (.errors // []) == []))
+    | [.[].data.repository] as $repositories
     | [$repositories[].pullRequest.commits.nodes[0].commit] as $c
+    | select(all($c[]; (.oid | type == "string" and test("^[0-9a-f]{40}$"))
+        and has("statusCheckRollup")
+        and (.statusCheckRollup == null or (.statusCheckRollup.contexts.nodes | type) == "array")))
     | {repository: ($repositories[0].nameWithOwner // $repo),
        oids: ([$c[].oid | strings] | unique),
        checks: [[$c[].statusCheckRollup.contexts.nodes[]?]
@@ -162,8 +167,7 @@ github_ci_snapshot() {
             bucket: (if $s == "SUCCESS" or $s == "SKIPPED" or $s == "NEUTRAL" then "pass"
               elif $s == "FAILURE" or $s == "ERROR" or $s == "TIMED_OUT" or $s == "ACTION_REQUIRED"
                 or $s == "STARTUP_FAILURE" or $s == "CANCELLED" or $s == "STALE" then "fail"
-              else "pending" end)}]}' <<<"$view" 2>/dev/null ||
-    jq -nc --arg repo "$repo" '{repository: $repo, oids: [], checks: []}'
+              else "pending" end)}]}' <<<"$view" 2>/dev/null
 }
 
 case "$SUBCOMMAND" in
@@ -280,15 +284,18 @@ case "$SUBCOMMAND" in
   ci-status)
     PR_NUMBER="${1:?Usage: hub.sh ci-status <pr_number>}"
     if [ "$HUB_TYPE" = "github" ]; then
-      SNAPSHOT=$(github_ci_snapshot "$PR_NUMBER")
+      if ! SNAPSHOT=$(github_ci_snapshot "$PR_NUMBER"); then
+        HEAD_SHA="" emit_status "pending" 0
+        exit 0
+      fi
       HEAD_SHA=$(jq -r 'if (.oids | length) == 1 then .oids[0] // empty else empty end' <<<"$SNAPSHOT")
       BUCKETS=$(jq -c '.checks | map(.bucket)' <<<"$SNAPSHOT")
       TOTAL=$(jq 'length' <<<"$BUCKETS")
-      if jq -e '.repository == null or (.oids | length) > 1' <<<"$SNAPSHOT" >/dev/null; then
-        # Poll again when the repository lookup failed or the head moved between pages.
+      if jq -e '(.oids | length) > 1' <<<"$SNAPSHOT" >/dev/null; then
+        # Poll again when the head moved between pages.
         emit_status "pending" "$TOTAL"
       elif [ "$TOTAL" -eq 0 ]; then
-        # No checks reported (or the query failed): "none" lets the caller apply its grace logic.
+        # A successful empty snapshot lets the caller apply its grace logic.
         emit_status "none" 0
       elif jq -e 'any(. == "pending")' <<<"$BUCKETS" >/dev/null; then emit_status "pending" "$TOTAL"
       elif jq -e 'any(. == "fail")' <<<"$BUCKETS" >/dev/null; then emit_status "failure" "$TOTAL"
@@ -327,10 +334,12 @@ case "$SUBCOMMAND" in
       EXPECTED_HEAD="$3"
     fi
     if [ "$HUB_TYPE" = "github" ]; then
-      SNAPSHOT=$(github_ci_snapshot "$PR_NUMBER")
+      if ! SNAPSHOT=$(github_ci_snapshot "$PR_NUMBER"); then
+        echo '{"failed_checks": [], "count": 0, "logs_available": false, "reason": "head-unavailable"}'
+        exit 0
+      fi
       HEAD_PROBLEM=$(jq -r --arg expected "$EXPECTED_HEAD" '
-        if (.oids | length) == 0 then "head-unavailable"
-        elif (.oids | length) > 1 or ($expected != "" and .oids[0] != $expected) then "head-changed"
+        if (.oids | length) > 1 or ($expected != "" and .oids[0] != $expected) then "head-changed"
         else empty end' <<<"$SNAPSHOT")
       if [ -n "$HEAD_PROBLEM" ]; then
         jq -nc --arg reason "$HEAD_PROBLEM" '{failed_checks: [], count: 0, logs_available: true, reason: $reason}'
