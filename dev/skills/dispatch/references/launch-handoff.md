@@ -69,12 +69,14 @@ Use `wait --first` after delivery and keep merges into the base sequential.
 
 ## Resync a pushed child PR
 
-The home session fetches and merges the PR base into the pushed branch, preserving shared queue
-entries from both sides. Before merging, it runs `cycle_state.py authorize --action commit` and
-`--action feature-push` against a home-owned contract for that branch. That contract records the
-original user grant, or the applicable dispatch default when the user stated no Git limits, never
-the child's narrower handoff limits. If either check fails, the home session leaves the checkout
-untouched and hands the resync to the child through *Continue with another phase*.
+The home session resyncs only when the child is idle or has a final result, so the two never write
+one worktree at once; otherwise it sends the resync to the child through *Continue with another
+phase*. It fetches and merges the PR base into the pushed branch, preserving shared queue entries
+from both sides. Before merging, it archives the original user grant, or the applicable dispatch
+default when the user stated no Git limits (never the child's narrower handoff limits), from a
+separate home-owned branch, and runs `cycle_state.py authorize --branch <home-contract-branch>
+--action commit` and `--action feature-push`. If either check fails, it leaves the checkout
+untouched and hands the resync to the child.
 
 ## Home merges a child PR
 

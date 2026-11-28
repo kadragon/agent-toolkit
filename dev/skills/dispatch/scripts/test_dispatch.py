@@ -2592,8 +2592,8 @@ class WorkflowDocsTests(unittest.TestCase):
         self.assertIn("After confirming task delivery to every new child", watch_step)
         self.assertIn("the home session resyncs it per *Resync a pushed child PR*", watch_step)
         handoff = (SCRIPTS.parent / "references" / "launch-handoff.md").read_text(encoding="utf-8")
-        self.assertIn("`cycle_state.py authorize --action commit` and\n`--action feature-push`", handoff)
-        self.assertIn("hands the resync to the child", handoff)
+        self.assertIn("--action commit` and `--action feature-push`", " ".join(handoff.split()))
+        self.assertIn("idle or has a final result", " ".join(handoff.split()))
 
     def test_docs_name_codex_models_by_family_only(self):
         docs = [SCRIPTS.parent / "SKILL.md", *sorted((SCRIPTS.parent / "references").glob("*.md"))]
