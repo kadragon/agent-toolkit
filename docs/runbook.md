@@ -143,5 +143,11 @@ Ephemeral — gone at session end, no cross-session resume.
 **Manual** (default): run `bash tools/sweep.sh` between features or before releases.
 No SessionStart hook — sweep is too heavy for every session on this repo.
 
+During a periodic sweep, revisit open Low (P3) review follow-ups. Close items that nobody
+has taken up using the GitHub queue's [`reject` operation](../dev/skills/task-next/references/queue-backend-contract.md#github-writes).
+Record the reason and the evidence needed to re-file under the
+[filing threshold](../dev/skills/task-review-cycle/references/consolidation-guide.md#recording-out-of-scope-and-non-blocking-findings).
+Keep work that has been claimed or has a reviewable fix in progress.
+
 Git effects follow the original contract's approval source/actions/limits, not `--from` or
 `--auto`; read `dev:task-next` → `references/git-authorization.md` before writes.

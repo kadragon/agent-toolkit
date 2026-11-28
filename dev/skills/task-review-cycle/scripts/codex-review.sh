@@ -22,7 +22,8 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/review-guidance.sh"
 GUIDANCE=$(review_repo_guidance)
 REVIEW_PROMPT="Review the current branch against ${BASE_BRANCH} using git diff ${BASE_BRANCH}...HEAD. Use git and file reads only; do not edit files or run checks. Identify actionable defects introduced or worsened by the diff, with file:line and a concrete failure scenario. Skip cleanup and style nits.
-Also report real bugs in code the diff touches or reads if verified at the base and not worsened by the diff. Put [pre_existing] in each such finding title, even if the output schema also requires a numeric priority. These findings are advisory and must not make the overall verdict blocking.
+Treat introduced P0/P1 as merge blockers and introduced P2 as in-PR fixes or advisory PR comments without issue filing. P3 and nits never become queue items.
+Also report real bugs in code the diff touches or reads if verified at the base and not worsened by the diff. Put [pre_existing] in each such finding title alongside its numeric priority. These findings are advisory at every priority and must not make the overall verdict blocking. Name the everyday path with its failing condition or cite reproduction evidence from real use if available. With neither, treat the bug as a PR comment only.
 ${GUIDANCE}"
 
 # Bytes of review text emitted before head/tail truncation kicks in. A real review runs a few
