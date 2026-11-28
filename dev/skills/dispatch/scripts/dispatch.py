@@ -17,6 +17,8 @@
       $CODEX_HOME/models_cache.json; a full slug passes through. fable and astra are refused.
   dispatch.py send [--run RECEIPT] [--continue | --resend] ADDRESS MESSAGE
       Send to a clear Codex composer. A receipt allows startup, phase reuse, or recovery.
+  dispatch.py peek RECEIPT [--since-last]
+      Print the filtered transcript tail. Every successful peek updates the receipt cursor.
   dispatch.py report-review RESULT
       Read a Codex pre-merge report from stdin and atomically write ready or blocked.
   dispatch.py collect RECEIPT [--stall-minutes N] [--close [--force]]
@@ -31,6 +33,7 @@
       Print one brief line per child and another only when its displayed state changes.
 """
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -986,6 +989,109 @@ def print_screen_tail(address, text, run):
             print(f"  {trimmed!r}", file=sys.stderr)
 
 
+def transcript_end(lines, cli):
+    """Locate the live composer using each CLI's footer, keeping dialog text visible."""
+    if cli == "codex":
+        for index in reversed(range(len(lines))):
+            row = lines[index]
+            if row.startswith(CODEX_OUTPUT_MARKERS):
+                break
+            if row.startswith("›"):
+                placeholder = row[1:].strip() == "Ask Codex to do anything"
+                if (footer_boundary(lines, index, placeholder=placeholder) is not None
+                        or (placeholder and index == len(lines) - 1)):
+                    return index
+                break
+    elif cli == "claude":
+        rules = [index for index, row in enumerate(lines) if re.fullmatch(r"─{10,}", row)]
+        if len(rules) >= 2:
+            top, bottom = rules[-2:]
+            if top + 1 < bottom and lines[top + 1].startswith("❯"):
+                start = top
+                if start and re.fullmatch(r"\s+\S+ \w+ · /effort", lines[start - 1]):
+                    start -= 1
+                if start >= 2 and lines[start - 1].startswith("Context ") and lines[start - 2].startswith("["):
+                    start -= 2
+                    if start and lines[start - 1].strip() in {"[-]", "[+]"}:
+                        start -= 1
+                return start
+    return len(lines)
+
+
+def filtered_transcript(text, cli):
+    lines = [line.rstrip() for line in text.rstrip().splitlines()]
+    lines = lines[:transcript_end(lines, cli)]
+    filtered = []
+    index = 0
+    while index < len(lines):
+        row = lines[index]
+        if cli == "codex" and not filtered and re.match(r"^\s*[╭│]?\s*>_ OpenAI Codex \(v", row):
+            index += 1
+            while index < len(lines) and lines[index].lstrip().startswith(("│", "╰")):
+                index += 1
+            if index < len(lines) and lines[index].startswith("     "):
+                index += 1
+            continue
+        if cli == "codex" and not filtered and row.startswith("  Tip:"):
+            index += 1
+            while index < len(lines) and lines[index].startswith("  "):
+                index += 1
+            continue
+        if cli == "claude" and not filtered and re.match(r"^\s*▐▛███▛█\s+Claude Code v", row):
+            index += 1
+            while index < len(lines) and lines[index].lstrip().startswith(("▝▜", "▝▝")):
+                index += 1
+            continue
+        if row.startswith("›" if cli == "codex" else "❯"):
+            end = index + 1
+            while end < len(lines) and (not lines[end] or lines[end].startswith("  ")):
+                end += 1
+            block = lines[index:end]
+            if (any(line.strip() == "<dispatch-handoff>" for line in block)
+                    and any(line.strip() == "Handoff metadata (JSON):" for line in block)):
+                index = end
+                continue
+        if row or (filtered and filtered[-1]):
+            filtered.append(row)
+        index += 1
+    if filtered and not filtered[-1]:
+        filtered.pop()
+    return filtered
+
+
+def transcript_offset(previous, current):
+    # History rolls out of Herdr's bounded tail. Find the largest retained overlap.
+    for size in range(min(len(previous), len(current)), 0, -1):
+        if previous[-size:] == current[:size]:
+            return size
+    # A streaming response can redraw the final line before appending more output.
+    for index, (before, after) in enumerate(zip(previous, current)):
+        if before != after:
+            return index
+    return min(len(previous), len(current))
+
+
+def peek(args):
+    path = Path(args.run).resolve()
+    with lock_run(path):
+        run = load_run(path)
+        address = run["address"]
+        try:
+            verify_terminal(run, hc_json("get", address, timeout=LAUNCH_LOOKUP_SECONDS))
+            snapshot = hc_json("read", "--lines", "40", address, timeout=LAUNCH_LOOKUP_SECONDS)
+            verify_terminal(run, hc_json("get", address, timeout=LAUNCH_LOOKUP_SECONDS))
+            lines = filtered_transcript(snapshot["text"], run["cli"])
+            # Store fingerprints, so the receipt does not duplicate transcript contents.
+            cursor = [hashlib.sha256(row.encode("utf-8")).hexdigest() for row in lines]
+            start = transcript_offset(run.get("peek_cursor", []), cursor) if args.since_last else 0
+            run["peek_cursor"] = cursor
+            write_json(path, run)
+        except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+            raise SystemExit(f"{address}: could not peek at the terminal ({error})") from None
+    if new_lines := lines[start:]:
+        print("\n".join(new_lines).lstrip("\n"))
+
+
 def startup_composer(text, *, draft=False):
     """Herdr may count initial Codex startup as turn 1 before any prompt."""
     prompts = [line.strip() for line in text.splitlines() if line.lstrip().startswith("›")]
@@ -1899,6 +2005,10 @@ def main(argv):
     delivery.add_argument("--continue", dest="continuation", action="store_true")
     delivery.add_argument("--resend", action="store_true", help="retry an unconfirmed delivery to a clear idle composer")
     send_parser.set_defaults(func=send)
+    peek_parser = sub.add_parser("peek", help="print the filtered child transcript")
+    peek_parser.add_argument("run")
+    peek_parser.add_argument("--since-last", action="store_true", help="print only rows new since the preceding peek")
+    peek_parser.set_defaults(func=peek)
     report_parser = sub.add_parser("report-review", help="write a gated pre-merge review result")
     report_parser.add_argument("result")
     report_parser.set_defaults(func=report_review)

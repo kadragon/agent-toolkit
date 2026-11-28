@@ -24,11 +24,13 @@ from dispatch import (
     codex_screen,
     collect,
     composer_draft,
+    filtered_transcript,
     first_prompt,
     free_name,
     launch,
     lock_run,
     main,
+    peek,
     pick,
     release,
     report_instruction,
@@ -36,6 +38,7 @@ from dispatch import (
     send,
     terminal_name,
     transcript_echoed,
+    transcript_offset,
     verify_delivery_turn,
     verify_pinned_delivery,
     verify_terminal,
@@ -1978,6 +1981,113 @@ class WorkflowDocsTests(unittest.TestCase):
         for doc in docs:
             with self.subTest(doc=doc.name):
                 self.assertIsNone(re.search(r"gpt-\d", doc.read_text(encoding="utf-8"), re.IGNORECASE))
+
+
+class PeekTests(unittest.TestCase):
+    def test_codex_capture_keeps_work_and_followup(self):
+        # Excerpt from hc read of the dispatch for #512, with handoff values shortened.
+        screen = """
+  >_ OpenAI Codex (v0.172.0)
+     ~/Dev/agent-toolkit
+
+  Tip: Use /hooks to view and manage lifecycle hooks.
+
+› <hc from="t2t">$task-next --tree #512
+  Dispatch mode: parallel-worktree
+
+  Handoff metadata (JSON):
+  <dispatch-handoff>
+  {"Assigned unit": "issue #512"}
+  </dispatch-handoff>
+
+  Write progress at phase boundaries.
+
+• Ran git status --short --branch
+  └ ## main...origin/main [behind 60]
+
+› Continue to review
+
+• Checking evidence.
+
+› Ask Codex to do anything
+
+  GPT-6.2-Sol medium · ~/Dev/agent-toolkit · main · Context 10% used · weekly 45% left
+  ← for agents · ? for shortcuts
+"""
+        self.assertEqual(filtered_transcript(screen, "codex"), [
+            "• Ran git status --short --branch", "  └ ## main...origin/main [behind 60]",
+            "", "› Continue to review", "", "• Checking evidence.",
+        ])
+
+    def test_claude_capture_keeps_response(self):
+        # Excerpt from hc read of a Claude launch in an empty fixture directory.
+        screen = """
+ ▐▛███▛█   Claude Code v2.1.332
+▝▜██████▀  Opus 5.5 · Claude Team
+ ▝▝   ▝▝   /tmp/claude-fixture
+
+⚠ Code Mode (experimental) is on · this session can be resumed only with Code Mode on
+
+❯ Reply with the exact sentence: Fixture response.
+
+  Handoff metadata (JSON):
+  <dispatch-handoff>
+  {"Assigned unit": "fixture"}
+  </dispatch-handoff>
+
+● Fixture response.
+
+✻ Sautéed for 1s · done 오전 9:26
+
+                                                    [-]
+[Opus 5.5 ◔ medium] │ claude-fixture
+Context 3% │ 5h: 21% (1h 43m) │ 7d: 59% (4d 4h) │ cache 59m
+                                    ◐ medium · /effort
+───────────────────────────────────────────────────────
+❯
+───────────────────────────────────────────────────────
+
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+"""
+        self.assertEqual(filtered_transcript(screen, "claude"), [
+            "⚠ Code Mode (experimental) is on · this session can be resumed only with Code Mode on",
+            "", "● Fixture response.", "", "✻ Sautéed for 1s · done 오전 9:26",
+        ])
+
+    def test_peek_cursor_survives_history_rollover_and_keeps_receipt_fields(self):
+        terminal = {"address": "t7", "parent": "t1", "created_ms": 42}
+        receipt = {**terminal, "cli": "codex", "sent": True}
+        screens = iter(("• Old\n• Retained", "• Retained\n• New", "• Retained\n• New"))
+
+        def hc(command, *_args, **_kwargs):
+            return terminal if command == "get" else {"text": next(screens), "how": "history", "complete": False}
+
+        with tempfile.TemporaryDirectory() as directory, patch("dispatch.hc_json", side_effect=hc):
+            path = Path(directory) / "run.json"
+            write_json(path, receipt)
+            for since_last, expected in ((False, "• Old\n• Retained\n"), (True, "• New\n"), (True, "")):
+                with redirect_stdout(StringIO()) as output:
+                    peek(SimpleNamespace(run=str(path), since_last=since_last))
+                self.assertEqual(output.getvalue(), expected)
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual({key: saved[key] for key in receipt}, receipt)
+            self.assertEqual(len(saved["peek_cursor"]), 2)
+            self.assertNotIn("• New", json.dumps(saved, ensure_ascii=False))
+
+    def test_peek_rejects_recycled_terminal_without_updating_cursor(self):
+        receipt = {"address": "t7", "parent": "t1", "created_ms": 42, "cli": "codex"}
+        responses = [receipt, {"text": "unrelated"}, {**receipt, "created_ms": 43}]
+        with tempfile.TemporaryDirectory() as directory, patch("dispatch.hc_json", side_effect=responses):
+            path = Path(directory) / "run.json"
+            write_json(path, receipt)
+            with self.assertRaisesRegex(SystemExit, "terminal identity changed"), redirect_stdout(StringIO()) as output:
+                peek(SimpleNamespace(run=str(path), since_last=True))
+            self.assertEqual(output.getvalue(), "")
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), receipt)
+
+    def test_streamed_line_redraw_and_no_overlap(self):
+        self.assertEqual(transcript_offset(["ready", "stream"], ["ready", "streamed", "next"]), 1)
+        self.assertEqual(transcript_offset(["irrelevant"], ["new"]), 0)
 
 
 class CodexSendTests(DispatchTestCase):
