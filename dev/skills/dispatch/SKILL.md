@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 3.4.0
+version: 3.5.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo listed in
   the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to
@@ -105,7 +105,10 @@ that edits no file may start one lower (`haiku/low`, `luna/medium`); `max`/`ultr
 | `high` | ordinary work that requires judgment about implementation or review within its scope, or harder or longer work |
 | `xhigh` | unknown-cause debugging, unresolved design or requirements, or a costly mistake |
 
-- For `task-next`, run `python3 -I "<dispatch>/scripts/dispatch.py" pick "<repo path>"`. Add
+- For a reserved queue wave, use Codex and size each unit from the exact candidates in
+  [Reserved queue waves](references/launch-handoff.md#reserved-queue-waves). Apply the usual
+  critical gate. An explicit Claude choice uses the individual launch path.
+- For other `task-next` work, run `python3 -I "<dispatch>/scripts/dispatch.py" pick "<repo path>"`. Add
   `--full-scan` for batches, known unattended runs, or an unclear selection. Add `--tree` for
   worktrees; it reads local `origin/HEAD` without fetching. Read stderr (warnings, claims) and the
   relevant criteria. Size for the hardest eligible candidate in scope, or estimate an unattended
@@ -175,11 +178,14 @@ python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model <codex fa
 
 More than one session:
 
-- At most one task session per repo uses the main checkout. For concurrent children, let the
-  launcher choose each name. Use the main checkout as `--cwd` and put `--tree` in the first task invocation.
-  Launching inside a linked worktree can keep Windows from deleting it at cleanup. Before
-  sending the next `task-next --tree` prompt on the same queue, use `pick --tree --full-scan`
-  to confirm the preceding queue child's worktree claim in stderr.
+- At most one task session per repo uses the main checkout. Launch children from the main checkout
+  and let the launcher choose distinct names. A child launched inside a linked worktree can keep
+  Windows from deleting it at cleanup.
+- For an independent `task-next` wave on a built-in queue, reserve the selected units before
+  launching their idle Codex children, then submit their prompts together. Follow
+  [Reserved queue waves](references/launch-handoff.md#reserved-queue-waves).
+- For individual queue launches (Claude or an adapter queue), use `pick --tree --full-scan`
+  to confirm the preceding child's worktree claim before delivering the next unit.
 - Keep a wave to at most four live children (two under `both-hot`).
 
 ## 5. Watch and decide

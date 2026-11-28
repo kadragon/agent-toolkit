@@ -22,8 +22,9 @@ home, settings and trust decisions intact.
 2. In the native hook dialog, review and approve each required hook individually. Check the
    hook paths and commands in the pinned cache. Close the review child with
    `collect <child receipt> --close --force`. The restart runs SessionStart with approval.
-3. Start the task children idle with the same `--wave`. Use `send --run <child receipt>`
-   for each task. Launch never accepts `--trust-hooks` with a wave. A warning, a changed or
+3. Start the task children idle with the same `--wave`. Use `send-wave` for
+   [reserved queue assignments](launch-handoff.md#reserved-queue-waves), or
+   `send --run <child receipt>` for an individual task. Launch never accepts `--trust-hooks` with a wave. A warning, a changed or
    incomplete hook inventory, a missing snapshot, or an unverifiable Herdr process holds delivery.
 4. Close each child with `collect --close` when it stops. Retain those receipts until
    `dispatch.py release <wave receipt>` removes the private home and snapshot. An uncertain
@@ -138,8 +139,9 @@ compare the plugin versions in `origin/main` with
 `~/.codex/plugins/cache/kadragon/<plugin>/<version>`. A changed version can remove files
 that a running session still uses. Launch only after the fetch succeeds and all versions
 match. Treat a live agent-toolkit child that may merge as a mismatch.
-If a wave needs multiple Codex children, launch all of them idle (omit `--task`), then
-send tasks with `dispatch.py send --run <receipt> -- <address> '<first message>'`.
+If a wave needs multiple Codex children, launch them idle (omit `--task`).
+Use [Reserved queue waves](launch-handoff.md#reserved-queue-waves) for independent queue units,
+or `dispatch.py send --run <receipt> -- <address> '<first message>'` for an individual task.
 
 When a plugin version may have changed, wait for active Codex cycles to finish, then prepare the wave:
 

@@ -71,6 +71,25 @@ Forge constraints the contract keeps: a claim needs no remote write, closing hap
 PR/commit closing keyword (`close_ref_template`), and no required op removes a label or edits an
 existing item.
 
+## Local wave reservations
+
+The built-in queues share a reservation store in the Git common directory. Reservations
+participate in normal queue claims across linked worktrees. These operations have no remote
+write side effects. The generic adapter contract is unchanged.
+
+| Op | Additional input | Output |
+|----|------------------|--------|
+| `prepare-wave` | None | Full queue snapshot with pinned `base` and `backend` |
+| `reserve-wave` | `base`, exact candidate objects in `units[]` | `base`, `reservations[]` with one ID per unit |
+| `bind-wave` | `assignments[]` containing `reservation`, `ref`, absolute `delivery` receipt path | Revalidated reservations bound to their receipts |
+| `claim-reservation` | `reservation`, `base`, `ref`, `delivery` | `worktree`, `branch`, `candidate`, `base`, `covers[]` after writing the worktree claim |
+| `release-reservation` | `reservation` | `released` (false if already released or claimed) |
+
+Prepare and reserve use the locally fetched `origin/HEAD`. Binding rechecks that base and
+the selection before delivery. Claim uses the reserved commit and revalidates eligibility,
+including live issue state, before creating the worktree. Release changes only the local
+reservation store.
+
 ## Filing findings
 
 Send `create` a stable key within the writer's scope and enough evidence in the body to act on

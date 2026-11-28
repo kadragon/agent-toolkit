@@ -38,7 +38,8 @@ import subprocess
 import sys
 import tempfile
 import time
-from contextlib import contextmanager, nullcontext, suppress
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack, contextmanager, nullcontext, suppress
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -503,6 +504,10 @@ def first_prompt(cli, message, handoff):
         fields["Additional Git limits (verbatim)"] = handoff["additional_git_limits"]
     if "review_transfer_approval" in handoff:
         fields["Review transfer approval (verbatim)"] = handoff["review_transfer_approval"]
+    if reservation := handoff.get("queue_reservation"):
+        if message.splitlines()[0].split() != [commands[0], "--tree", reservation["ref"]]:
+            raise SystemExit("first task must match the reserved worktree unit")
+        fields["Queue reservation"] = reservation
     prompt = (f"{message}\n\nHandoff metadata (JSON):\n"
               "Task-cycle mode and flags come exclusively from the invocation above.\n"
               "<dispatch-handoff>\n"
@@ -524,6 +529,9 @@ def first_prompt(cli, message, handoff):
             "(including Worktree cycle). After implementation, follow cycle.md → Version bump, Cleanup, "
             "and Validation evidence, then Step 4 and cycle.md → Hand off into task-review-cycle → Caller gate."
         )
+    if reservation:
+        prompt += ("\n\nUse task-next → Reserved dispatch intake. Claim the reservation with the installed "
+                   "queue_backend.py before creating or selecting a worktree. Stop on a claim mismatch.")
     extra_lines = handoff.get("extra_lines")
     if extra_lines:
         if cli == "codex":
@@ -829,13 +837,14 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
         terminal, lookup_error = {}, error
     run = {"name": name, "address": address, "parent": home,
            "created_ms": terminal.get("created_ms"), "cli": args.cli, **resolved,
-           "effort": args.effort, "sent": args.cli == "claude", "screen_reads": 0, **quota}
+           "effort": args.effort, "sent": args.cli == "claude", "screen_reads": 0,
+           "cwd": str(cwd.resolve()), **quota}
     if trust_hooks:
         run["trust_hooks"] = True
     if lookup_error is not None:
         run["launched_ms"] = launched_ms
     if wave:
-        run.update(wave=str(wave_path), wave_trusted_at_start=pinned_startup, cwd=str(cwd.resolve()))
+        run.update(wave=str(wave_path), wave_trusted_at_start=pinned_startup)
     elif versions:
         run["plugin_versions"] = versions
     if title:
@@ -1828,6 +1837,9 @@ def pick_entry(repo, candidate, rev):
 
 def pick(args):
     repo = Path(args.repo).expanduser().resolve()
+    if getattr(args, "reservable", False):
+        print(json.dumps(queue_op("prepare-wave", {"contract": 1, "repo": str(repo)}), ensure_ascii=False))
+        return
     sweep = QUEUE_BACKEND.with_name("worktree_sweep.py")
     subprocess.run([sys.executable, "-I", "-X", "utf8", str(sweep), str(repo)], check=False)
     request = {"contract": 1, "repo": str(repo)}
@@ -1850,6 +1862,97 @@ def pick(args):
     print(json.dumps(entries, ensure_ascii=False))
 
 
+def wave_request(repo, data=None):
+    return {**(data or {}), "contract": 1, "repo": str(Path(repo).expanduser().resolve())}
+
+
+def read_wave_request():
+    try:
+        data = json.loads(sys.stdin.buffer.read().decode("utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("expected a JSON object")
+        return data
+    except ValueError as error:
+        raise SystemExit(f"invalid wave request: {error}") from None
+
+
+def reserve_wave(args):
+    req = wave_request(args.repo, read_wave_request())
+    print(json.dumps(queue_op("reserve-wave", req), ensure_ascii=False))
+
+
+def release_reservation(args):
+    result = queue_op("release-reservation", wave_request(args.repo, {"reservation": args.reservation}))
+    print(json.dumps(result, ensure_ascii=False))
+
+
+def deliver_reserved(path, unit):
+    command = TASK_COMMANDS["codex"][0]
+    prompt = (f"{command} --tree {unit['ref']}\n"
+              "Dispatch mode: parallel-worktree\n"
+              f"Assigned unit: {unit['ref']} only. --tree was added for isolation only.")
+    run = load_run(path)
+    args = [sys.executable, "-I", "-X", "utf8", __file__, "send", "--run", str(path), "--", run["address"], prompt]
+    try:
+        result = subprocess.run(args, capture_output=True, encoding="utf-8", check=False)
+        if not result.returncode:
+            return {**json.loads(result.stdout), "delivery": "submitted", "diagnostics": result.stderr.strip()}
+        error = result.stderr.strip() or f"send exited {result.returncode}"
+    except (OSError, ValueError) as exc:
+        error = str(exc)
+    sent = load_run(path)["sent"]
+    delivery = "submitted" if sent is True else "unconfirmed" if sent == "unconfirmed" else "withheld"
+    return {"address": run["address"], "delivery": delivery, "diagnostics": error}
+
+
+def send_wave(args):
+    req = wave_request(args.repo, read_wave_request())
+    deliveries = req.get("deliveries")
+    if not isinstance(deliveries, list) or not 1 <= len(deliveries) <= 4:
+        raise SystemExit("deliveries must contain one to four reservation and run pairs")
+    paths = {}
+    for delivery in deliveries:
+        if not isinstance(delivery, dict) or not isinstance(delivery.get("run"), str):
+            raise SystemExit("each delivery needs a reservation ID and a run.json path")
+        path = Path(delivery["run"]).expanduser().resolve()
+        if path.name != "run.json" or not path.is_file() or path in paths:
+            raise SystemExit(f"missing or repeated launch receipt: {path}")
+        paths[path] = delivery.get("reservation")
+    with ExitStack() as locks:
+        runs = {}
+        addresses = set()
+        for path in sorted(paths):
+            locks.enter_context(lock_run(path))
+            run = load_run(path)
+            handoff = run.get("handoff", {})
+            if (
+                run.get("cli") != "codex" or run.get("sent") is not False or run.get("cwd") != req["repo"]
+                or handoff.get("work_kind") != "queue" or run["address"] in addresses
+            ):
+                raise SystemExit(f"expected a distinct idle Codex queue receipt for {req['repo']}: {path}")
+            addresses.add(run["address"])
+            runs[path] = run
+        assignments = [{"reservation": token, "delivery": str(path),
+                        "ref": runs[path]["handoff"]["unit"].strip().removeprefix("issue ")}
+                       for path, token in paths.items()]
+        bound = queue_op("bind-wave", wave_request(args.repo, {"assignments": assignments}))
+        units = {}
+        for unit in bound["reservations"]:
+            path = Path(unit["delivery"])
+            metadata = {"ref": unit["candidate"]["ref"], "base": unit["base"],
+                        "reservation": unit["reservation"], "delivery": unit["delivery"]}
+            runs[path]["handoff"]["queue_reservation"] = metadata
+            write_json(path, runs[path])
+            units[path] = metadata
+    with ThreadPoolExecutor(max_workers=len(units)) as pool:
+        futures = {path: pool.submit(deliver_reserved, path, unit) for path, unit in units.items()}
+        outcomes = [{"run": str(path), "reservation": paths[path], **future.result()}
+                    for path, future in futures.items()]
+    print(json.dumps({"deliveries": outcomes}, ensure_ascii=False))
+    if any(outcome["delivery"] != "submitted" for outcome in outcomes):
+        raise SystemExit("one or more deliveries were not confirmed; inspect the per-receipt outcomes")
+
+
 def main(argv):
     parser = argparse.ArgumentParser(prog="dispatch.py")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1857,7 +1960,18 @@ def main(argv):
     pick_parser.add_argument("repo")
     pick_parser.add_argument("--tree", action="store_true")
     pick_parser.add_argument("--full-scan", action="store_true")
+    pick_parser.add_argument("--reservable", action="store_true", help="return exact candidates at a pinned base")
     pick_parser.set_defaults(func=pick)
+    reserve_parser = sub.add_parser("reserve-wave", help="reserve the selected pinned queue units together")
+    reserve_parser.add_argument("repo")
+    reserve_parser.set_defaults(func=reserve_wave)
+    deliver_parser = sub.add_parser("send-wave", help="send reserved queue units to idle Codex children concurrently")
+    deliver_parser.add_argument("repo")
+    deliver_parser.set_defaults(func=send_wave)
+    cancel_parser = sub.add_parser("release-reservation", help="release an unconsumed queue reservation")
+    cancel_parser.add_argument("repo")
+    cancel_parser.add_argument("reservation")
+    cancel_parser.set_defaults(func=release_reservation)
     launch_parser = sub.add_parser("launch")
     launch_parser.add_argument("--cli", choices=["claude", "codex"], required=True)
     launch_parser.add_argument("--model", required=True)
