@@ -35,8 +35,8 @@ class PinError(Exception):
     """The launch cannot prove it will run the verified snapshot."""
 
 
-def command(argv, **kwargs):
-    return subprocess.run(argv, check=True, capture_output=True, encoding="utf-8", timeout=TIMEOUT, **kwargs).stdout
+def command(argv, *, timeout=TIMEOUT, **kwargs):
+    return subprocess.run(argv, check=True, capture_output=True, encoding="utf-8", timeout=timeout, **kwargs).stdout
 
 
 def read_json(path):

@@ -134,29 +134,40 @@ requires review. A dev-only or prod-only release preserves the guard approval.
 Dispatch holds task delivery when the installed dev has moved its hooks and guard is missing
 from the shared cache.
 
-Before starting a shared-cache child while another is mid-cycle, fetch agent-toolkit and
-compare the plugin versions in `origin/main` with
-`~/.codex/plugins/cache/kadragon/<plugin>/<version>`. A changed version can remove files
-that a running session still uses. Launch only after the fetch succeeds and all versions
-match. Treat a live agent-toolkit child that may merge as a mismatch.
-If a wave needs multiple Codex children, launch them idle (omit `--task`).
-Use [Reserved queue waves](launch-handoff.md#reserved-queue-waves) for independent queue units,
+Run the preparation command from the home session and specify the trusted target directory.
+
+```sh
+python3 -I "<dispatch>/scripts/dispatch.py" prepare-codex --repo "<agent-toolkit checkout>" --cwd "<target repo>"
+```
+
+The command fetches the checkout's default remote branch, compares installed kadragon plugin
+versions, upgrades that marketplace if needed, then starts and closes an idle Herdr child.
+Read `pending_hooks` in its JSON for the exact enabled hooks Codex marks untrusted or modified.
+`hook_content_diffs` compares the affected kadragon plugin's hook manifest and bundled hook
+files with a previously observed trusted copy in this Codex home. If native startup refresh
+replaces the old cache before its trust can be inspected, the command uses the last recorded
+trusted copy or reports that no trusted copy is available. Third-party pending hooks appear in `pending_hooks` with their
+native source paths and review status.
+
+If hooks need approval, launch an idle child and use **Review hooks** or `/hooks`. Close the
+review child and restart so approved SessionStart hooks can run. Start the task children idle,
+then use [Reserved queue waves](launch-handoff.md#reserved-queue-waves) for independent queue units
 or `dispatch.py send --run <receipt> -- <address> '<first message>'` for an individual task.
 
-When a plugin version may have changed, wait for active Codex cycles to finish, then prepare the wave:
+Preparation and dispatch startup share a local lock scoped to the Codex home. Prepared
+launches carry a Herdr label for that cache. While a labeled child is live, preparation is
+held, and launches from a different home session are warned and held. Before launching a sibling,
+dispatch fetches from the checkout saved by preparation and verifies the remote and installed
+versions still match. Use an explicit Herdr parent when launching from outside a home session.
+A failed check or a version mismatch holds startup. Close the wave before
+preparing another one. Standalone Codex startup and dispatch versions predating the label can
+still refresh the cache.
 
-1. Start an idle Codex child and wait for the plugin update at startup. Close the child.
-2. After installing or updating guard, start a second idle Codex child if a task child will
-   rely on persisted trust. Use **Review hooks** in the startup dialog or `/hooks` to check
-   that the guard hooks are trusted and active, then close the child.
-3. Launch the task children once the warm-up children are closed. Pass `--trust-hooks` at
-   launch for each child authorized to use it.
-
-Close an idle warm-up with `dispatch.py collect <receipt> --close --force` after verifying that
-it is the idle child started for this preparation.
-
-Before a long wave, run `codex plugin marketplace upgrade` and then the warm-up above, so no
-startup during the wave finds a newer plugin to install.
+Startup update deferral is unverified on Codex 0.172.0. Its source starts a configured-marketplace
+upgrade when plugins are enabled. The `auto_update` field describes checks during plugin
+listing. Use a [verified wave](#verified-wave) when concurrent work needs a fixed plugin version.
+[Codex startup implementation](https://github.com/openai/codex/blob/rust-v0.172.0/codex-rs/core-plugins/src/manager.rs#L3139-L3181),
+[marketplace config type](https://github.com/openai/codex/blob/rust-v0.172.0/codex-rs/config/src/types.rs#L1291-L1299).
 
 ## Plugin update during a shared-cache wave
 
