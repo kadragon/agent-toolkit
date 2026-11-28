@@ -66,7 +66,13 @@ CODEX_HOOK_FAILED = re.compile(r"^• Hook failed\b[^\n]*\n[ \t]*└", re.MULTIL
 WARNING_FOOTER = re.compile(r"⚠\ufe0f?\s*(\d+)\s+warnings?\s*·\s*f2 to view\b", re.IGNORECASE)
 HOOK_BYPASS_NOTICE = ("`--dangerously-bypass-hook-trust` is enabled. "
                       "Enabled hooks may run without review for this invocation.")
+UNSTABLE_FEATURES_NOTICE = re.compile(
+    r"Under-development features enabled: [a-z0-9_]+(?:, [a-z0-9_]+)*\. "
+    r"Under-development features are incomplete and may behave unpredictably\. "
+    r"To suppress this warning, set `suppress_unstable_features_warning = true` in "
+    r"(?:(?:[A-Za-z]:|~)?[/\\](?:[^`]*[/\\])?)?config\.toml\.")
 WARNING_VIEW_TITLE = re.compile(r"Warnings · \d+ of \d+ · .+")
+STARTUP_WARNING_TITLE = re.compile(r"Warnings · ([1-9][0-9]*) of ([1-9][0-9]*) · Startup")
 WARNING_VIEW_FOOTER = re.compile(
     r"k keep & next · esc dismiss & close(?: · \S+ copy)?(?: · \S+ warning)?", re.IGNORECASE)
 PASTED_CONTENT = re.compile(r"\[Pasted Content \d+ chars\](?: #\d+)?")
@@ -987,15 +993,22 @@ def startup_composer(text, *, draft=False):
             and not any(line.lstrip().startswith(("•", "■")) for line in text.splitlines()))
 
 
-def is_hook_bypass_notice(text):
+def startup_warning_page(text):
     rows = [line.strip() for line in text.splitlines() if line.strip()]
-    title = "Warnings · 1 of 1 · Startup"
-    if rows.count(title) != 1:
-        return False
-    body = rows[rows.index(title) + 1:]
+    titles = [index for index, row in enumerate(rows) if WARNING_VIEW_TITLE.fullmatch(row)]
+    if len(titles) != 1:
+        return None
+    index = titles[0]
+    title = STARTUP_WARNING_TITLE.fullmatch(rows[index])
+    if not title:
+        return None
+    body = rows[index + 1:]
     if body and WARNING_VIEW_FOOTER.fullmatch(body[-1]):
         body.pop()
-    return " ".join(body) == HOOK_BYPASS_NOTICE
+    notice = " ".join(body)
+    if notice == HOOK_BYPASS_NOTICE or UNSTABLE_FEATURES_NOTICE.fullmatch(notice):
+        return tuple(map(int, title.groups()))
+    return None
 
 
 def send(args):
@@ -1102,8 +1115,10 @@ def send_task(args, run_path):
     clears = 0
     last_clear = None
     warning_turn = None
+    warning_count = None
+    warning_page = 0
     warning_withheld = f"{address}: task withheld; inspect the Codex warning with F2"
-    dismissed_bypass_notice = False
+    dismissed_startup_warnings = False
     try:
         deadline = time.monotonic() + 30
         while True:
@@ -1117,27 +1132,38 @@ def send_task(args, run_path):
                 raise SystemExit(f"{address}: task withheld; inspect the Codex hook status with /hooks")
             if screen in {"warning", "warning-view"}:
                 if (not run or run.get("wave") or run.get("trust_hooks") is not True or run["sent"] is not False
-                        or dismissed_bypass_notice):
+                        or dismissed_startup_warnings):
                     raise SystemExit(warning_withheld)
                 if screen == "warning-view":
-                    if not is_hook_bypass_notice(text):
+                    position = startup_warning_page(text)
+                    if position is None:
                         raise SystemExit(warning_withheld)
-                    terminal = hc_json("get", address)
-                    verify_terminal(run, terminal)
-                    # Herdr can report working while the local warning viewer owns the input.
-                    turn = terminal["turn"]
-                    if (terminal["state"] != "live" or turn not in (0, 1)
-                            or (warning_turn is not None and turn != warning_turn)):
+                    page, count = position
+                    if (page > count or page not in (warning_page, warning_page + 1)
+                            or (warning_count is not None and count != warning_count)):
                         raise SystemExit(warning_withheld)
-                    hc_json("keys", address, "esc")
-                    warning_turn = None
-                    dismissed_bypass_notice = True
-                    time.sleep(SCREEN_POLL_SECONDS)
-                    continue
-                footer = "\n".join(text.rstrip().splitlines()[-2:])
-                if WARNING_FOOTER.findall(footer) != ["1"]:
-                    raise SystemExit(warning_withheld)
-                if warning_turn is None:
+                    if page > warning_page:
+                        terminal = hc_json("get", address)
+                        verify_terminal(run, terminal)
+                        # Herdr can report working while the local warning viewer owns the input.
+                        turn = terminal["turn"]
+                        if (terminal["state"] != "live" or turn not in (0, 1)
+                                or (warning_turn is not None and turn != warning_turn)):
+                            raise SystemExit(warning_withheld)
+                        if page == count:
+                            hc_json("keys", address, "esc")
+                            warning_turn = None
+                            dismissed_startup_warnings = True
+                            time.sleep(SCREEN_POLL_SECONDS)
+                            continue
+                        # Codex dismisses visited pages on Esc. Check all pages before closing.
+                        hc_json("keys", address, "right")
+                        warning_turn, warning_count, warning_page = turn, count, page
+                elif warning_turn is None:
+                    footer = "\n".join(text.rstrip().splitlines()[-2:])
+                    counts = WARNING_FOOTER.findall(footer)
+                    if len(counts) != 1 or not (count := int(counts[0])):
+                        raise SystemExit(warning_withheld)
                     terminal = hc_json("get", address)
                     verify_terminal(run, terminal)
                     turn = terminal["turn"]
@@ -1145,7 +1171,7 @@ def send_task(args, run_path):
                             or not (turn == 0 or (turn == 1 and startup_composer(text)))):
                         raise SystemExit(warning_withheld)
                     hc_json("keys", address, "f2")
-                    warning_turn = turn
+                    warning_turn, warning_count = turn, count
             if warning_turn is not None:
                 if time.monotonic() >= deadline:
                     raise SystemExit(warning_withheld)
@@ -1175,7 +1201,7 @@ def send_task(args, run_path):
                 terminal = hc_json("get", address)
                 if run:
                     verify_terminal(run, terminal)
-                if dismissed_bypass_notice and terminal["state"] != "live":
+                if dismissed_startup_warnings and terminal["state"] != "live":
                     raise SystemExit(f"{address}: task withheld; Codex exited after closing the warning")
                 status = (terminal.get("status") or {}).get("state")
                 if resend:
