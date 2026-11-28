@@ -34,7 +34,7 @@ Read the last `event_msg/token_count` with a non-null
 `info.total_token_usage` immediately before the first `task_complete` that
 reports the PR ready. Use `input_tokens` directly since it already includes
 `cached_input_tokens`. This excludes later turns that resync or clean up the
-worktree. The transcripts have 124, 107, and 71 token-count events up to that
+worktree. The transcripts have 124, 107, and 95 token-count events up to that
 point, respectively.
 
 The section-guided run used 32.5% fewer input tokens than #504 and 19.8% fewer
