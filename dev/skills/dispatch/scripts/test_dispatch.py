@@ -99,6 +99,12 @@ class TerminalTests(unittest.TestCase):
         prefix = "r" * 29
         self.assertEqual(free_name(base, False, {base, f"{prefix}-2", f"{prefix}-4"}), f"{prefix}-3")
 
+    def test_free_name_fits_three_digit_suffix(self):
+        base = "r" * 32
+        taken = {f"{base[:29]}-{n}" for n in range(2, 100)}
+        taken.add(base)
+        self.assertEqual(free_name(base, False, taken), f"{base[:28]}-100")
+
 
 class ChildArgvTests(unittest.TestCase):
     def test_codex_argv_and_message_guard(self):
