@@ -20,8 +20,10 @@ import phase_timing
 import pinned_wave
 import shared_codex
 from dispatch import (
+    DEFAULT_GIT_LIMITS,
     POST_SEND_SETTLE_SECONDS,
     QUEUE_BACKEND,
+    STANDING_REVIEW_TRANSFER,
     child_argv,
     child_name,
     codex_models_cache,
@@ -145,10 +147,12 @@ class DispatchReceiptTests(DispatchTestCase):
     TERMINAL = {"address": "t7", "parent": "t6", "created_ms": 50, "state": "live"}
     RECEIPT = {**TERMINAL, "cli": "codex", "sent": False, "screen_reads": 0}
     FIELDS = {"Original user request (verbatim)": "큐 모두 돌려 (--all)\n• Do the work\n- Git limits: example",
-              "Assigned unit": "First queued item", "Git limits": " pr-only\nDon't merge. "}
+              "Assigned unit": "First queued item", "Git limits": " pr-only\nDon't merge. ",
+              "Review transfer approval (standing)": STANDING_REVIEW_TRANSFER}
     REVIEW_APPROVAL = '이 PR diff를 Claude와 agy에 보내도 됩니다.\n"Codex"도 승인합니다.'
     HANDOFF = {"work_kind": "queue", "request": FIELDS["Original user request (verbatim)"],
-               "unit": FIELDS["Assigned unit"], "git_limits": FIELDS["Git limits"]}
+               "unit": FIELDS["Assigned unit"], "git_limits": FIELDS["Git limits"],
+               "review_transfer_standing": True}
     BLOCK = ("\n\nHandoff metadata (JSON):\n"
              "Task-cycle mode and flags come exclusively from the invocation above.\n"
              f"<dispatch-handoff>\n{json.dumps(FIELDS, ensure_ascii=False, indent=2)}\n</dispatch-handoff>")
@@ -220,9 +224,15 @@ class DispatchReceiptTests(DispatchTestCase):
                     launch(args)
                 payload = json.loads(stdout.getvalue())
                 prompt = payload["argv"][-1] if cli == "claude" else payload["task"]
-                self.assertEqual(prompt, message + self.BLOCK)
+                expected = dict(self.FIELDS)
+                block = self.BLOCK
+                if kind == "standalone":
+                    del expected["Review transfer approval (standing)"]
+                    block = block.replace(json.dumps(self.FIELDS, ensure_ascii=False, indent=2),
+                                          json.dumps(expected, ensure_ascii=False, indent=2))
+                self.assertEqual(prompt, message + block)
                 fields = prompt.split("<dispatch-handoff>\n", 1)[1].removesuffix("\n</dispatch-handoff>")
-                self.assertEqual(json.loads(fields), self.FIELDS)
+                self.assertEqual(json.loads(fields), expected)
                 self.assertEqual(bool(stderr.getvalue()), warns)
                 if warns:
                     self.assertIn("warning:", stderr.getvalue())
@@ -232,7 +242,7 @@ class DispatchReceiptTests(DispatchTestCase):
     def test_launch_requires_git_authority(self):
         for kind in ("queue", "new"):
             for limits in (
-                None, "", " \n ", "  Not   Specified.  ", "N/A", "TBD", "unknown", "unknown limits",
+                "", " \n ", "  Not   Specified.  ", "N/A", "TBD", "unknown", "unknown limits",
                 "unspecified", "none specified", "(none)", "?", "미지정", "없음", "implementation-only",
             ):
                 with self.subTest(kind=kind, limits=limits), patch("dispatch.hc_json") as hc:
@@ -254,6 +264,8 @@ class DispatchReceiptTests(DispatchTestCase):
             ("new", "no-push", False, "no-push"),
             ("new", "pr-only", False, "pr-only"),
             ("queue", "none", False, "none"),
+            ("queue", None, False, DEFAULT_GIT_LIMITS),
+            ("new", None, False, DEFAULT_GIT_LIMITS),
             ("queue", "", True, "implementation-only"),
             ("queue", "not specified", True, "implementation-only"),
             ("new", None, True, "implementation-only"),
@@ -276,14 +288,68 @@ class DispatchReceiptTests(DispatchTestCase):
             launch(args)
         prompt = json.loads(stdout.getvalue())["task"]
         handoff = prompt.split("<dispatch-handoff>\n", 1)[1].split("\n</dispatch-handoff>", 1)[0]
+        expected = {key: value for key, value in self.FIELDS.items()
+                    if key != "Review transfer approval (standing)"}
         self.assertEqual(json.loads(handoff), {
-            **self.FIELDS,
+            **expected,
             "Git limits": "implementation-only",
             "Additional Git limits (verbatim)": restrictions,
             "Review transfer approval (verbatim)": self.REVIEW_APPROVAL,
         })
         self.assertIn("including worktree preparation", prompt)
         self.assertIn("Quote them in a separate section of the Sprint Contract for handoff and resume.", prompt)
+
+    def test_cli_launch_without_git_limits_uses_the_dispatch_default(self):
+        for kind, invocation in (("queue", "/dev:task-next"), ("new", "/dev:task-new Update docs")):
+            with self.subTest(kind=kind):
+                result = subprocess.run(
+                    [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "launch",
+                     "--cli", "claude", "--model", "sonnet", "--effort", "medium", "--cwd", str(SCRIPTS),
+                     "--work-kind", kind, "--request", "Run it", "--unit", "Unit", "--dry-run", invocation],
+                    capture_output=True, text=True, encoding="utf-8",
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                prompt = json.loads(result.stdout)["argv"][-1]
+                fields = prompt.split("<dispatch-handoff>\n", 1)[1].split("\n</dispatch-handoff>", 1)[0]
+                self.assertEqual(json.loads(fields), {
+                    "Original user request (verbatim)": "Run it",
+                    "Assigned unit": "Unit",
+                    "Git limits": DEFAULT_GIT_LIMITS,
+                    "Review transfer approval (standing)": STANDING_REVIEW_TRANSFER,
+                })
+        result = subprocess.run(
+            [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "launch",
+             "--cli", "claude", "--model", "sonnet", "--effort", "medium", "--cwd", str(SCRIPTS),
+             "--work-kind", "standalone", "--request", "Explain", "--unit", "Unit", "--dry-run", "Explain"],
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--git-limits must not be blank", result.stderr)
+
+    def test_standing_review_transfer_follows_the_task_cycle_and_yields_to_the_user(self):
+        for kind, message, overrides, standing in (
+            ("queue", "/dev:task-next", {}, True),
+            ("new", "/dev:task-new Fix it", {}, True),
+            ("queue", "/dev:task-next", {"no_git_writes": True, "git_limits": None}, True),
+            ("standalone", "/dev:task-review", {}, True),
+            ("standalone", "$task-review --pr 12", {}, True),
+            ("standalone", "Review the pending changes", {}, False),
+            ("queue", "/dev:task-next", {"no_standing_review_approval": True}, False),
+            ("standalone", "/dev:task-review", {"no_standing_review_approval": True}, False),
+            ("new", "/dev:task-new Fix it", {"review_transfer_approval": self.REVIEW_APPROVAL}, False),
+        ):
+            with self.subTest(kind=kind, message=message, overrides=overrides):
+                args = self.launch_args(Path.cwd(), cli="claude", task=None, message=message, work_kind=kind,
+                                        dry_run=True, **overrides)
+                with (patch("dispatch.warn_linked_worktree"), redirect_stderr(StringIO()),
+                      redirect_stdout(StringIO()) as stdout):
+                    launch(args)
+                prompt = json.loads(stdout.getvalue())["argv"][-1]
+                fields = json.loads(prompt.split("<dispatch-handoff>\n", 1)[1].split("\n</dispatch-handoff>", 1)[0])
+                self.assertEqual(fields.get("Review transfer approval (standing)"),
+                                 STANDING_REVIEW_TRANSFER if standing else None)
+                if "review_transfer_approval" in overrides:
+                    self.assertEqual(fields["Review transfer approval (verbatim)"], self.REVIEW_APPROVAL)
 
     def test_review_transfer_approval_survives_launch_and_first_send(self):
         grant = self.REVIEW_APPROVAL
@@ -2271,8 +2337,8 @@ class WorkflowDocsTests(unittest.TestCase):
                       "to the assigned unit.", layout_step)
         self.assertIn("If the file is unreadable or lacks that handling, report the worktree layout as unsupported.",
                       layout_step)
-        self.assertIn("If a required action is still unauthorized, ask once before launch "
-                      "which Git actions the user authorizes", launch_step)
+        self.assertIn("When the user states no Git limits, omit `--git-limits` for queue or new work", launch_step)
+        self.assertNotIn("ask once before launch", launch_step)
         self.assertIn("If an explicit full-workflow invocation grants the required Git writes and sets no narrower "
                       "limits, pass `--git-limits='none'`.", launch_step)
         self.assertIn("For standalone work that needs no Git writes and has no user-provided limits, "
