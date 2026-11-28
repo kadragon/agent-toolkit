@@ -2051,7 +2051,7 @@ def brief_report(report, *, outcome=None):
         return lines[0].strip() if lines else ""
 
     status = result.get("status")
-    if outcome == "idle":
+    if outcome == "idle" and status == "working":
         status = outcome
     elif not status or (status == "done" and report["status"] == "working"):
         status = "finished" if report["state"] == "finished" else report["status"]
@@ -2122,8 +2122,6 @@ def wait(args):
             for path in pending:
                 report = collect_result(path, False, False, args.stall_minutes, warn_drift=False, deadline=deadline)
                 outcome = reached_outcome(report, args.until)
-                if outcome:
-                    remaining_wait(deadline)
                 line = brief_report(report, outcome=outcome)
                 if args.first and outcome:
                     print(f"{path} · {line}", flush=True)
@@ -2257,14 +2255,18 @@ def child_stop_reason(terminal, run, result, written, stall_minutes, drift=((), 
                    or (terminal.get("foreground") or {}).get("cwd") or terminal.get("cwd"))
             timeout = min(2, remaining_wait(deadline)) if deadline is not None else 2
             stale = last_commit_ms(cwd, timeout=timeout) <= cutoff_ms
+            if deadline is not None:
+                remaining_wait(deadline)
     if not stale and not changed and state not in {"blocked", "error", "idle", "done"}:
         return None, 0
-    timeout = min(2, remaining_wait(deadline)) if deadline is not None else 2
     try:
+        timeout = min(2, remaining_wait(deadline)) if deadline is not None else 2
         snapshot = hc_json("read", "--lines", "0", run["address"], timeout=timeout)
         notice = screen_stop_reason(snapshot, run["cli"])
     except (OSError, ValueError, subprocess.SubprocessError):
         snapshot, notice = {}, None
+    if stale and deadline is not None:
+        remaining_wait(deadline)
     if notice:
         return notice, 1
     if (run["cli"] == "codex" and snapshot.get("how") == "screen"

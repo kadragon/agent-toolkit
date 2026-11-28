@@ -2772,6 +2772,15 @@ class DispatchWatchTests(unittest.TestCase):
                 self.assertEqual(output.getvalue().splitlines()[-1],
                                  f"{prefix}t7 · idle · implement · working · - · -")
 
+    def test_wait_preserves_saved_done_when_the_default_wait_selects_idle(self):
+        idle = {"address": "t7", "status": "idle", "state": "live", "stop_reason": None,
+                "result": {"status": "done", "phase": "implement", "summary": "complete"}}
+        with TextIOWrapper(BytesIO(), encoding="utf-8") as output, redirect_stdout(output), \
+             patch("dispatch.collect_result", return_value=idle):
+            main(["wait", "run.json"])
+            output.seek(0)
+            self.assertEqual(output.read(), "t7 · done · implement · complete · - · -\n")
+
     def test_wait_requires_all_receipts_and_a_stopped_terminal_for_done(self):
         working = {"address": "t7", "status": "working", "state": "live", "stop_reason": None,
                    "result": {"status": "done", "phase": "implement", "summary": "phase complete"}}
@@ -2859,6 +2868,30 @@ class DispatchWatchTests(unittest.TestCase):
                         self.assertEqual(hc.call_count, 1)
                     else:
                         self.assertEqual(hc.call_args.kwargs["timeout"], 0.5)
+
+    def test_wait_keeps_blocked_report_when_advisory_screen_read_times_out(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            terminal = {**DispatchReceiptTests.TERMINAL, "status": {"state": "idle"}, "status_ms": 1}
+            write_json(receipt, {**DispatchReceiptTests.RECEIPT, "cli": "claude", "sent": True})
+            write_json(receipt.with_name("result.json"), {"status": "blocked", "phase": "review", "summary": "blocked"})
+            args = SimpleNamespace(first=False, runs=[receipt], until={"blocked"}, timeout=1, stall_minutes=30)
+            now = 0
+
+            def herdr_probe(command, *args, **kwargs):
+                nonlocal now
+                if command == "get":
+                    return terminal
+                now = 2
+                raise subprocess.TimeoutExpired("hc read", kwargs["timeout"])
+
+            with patch("dispatch.time.monotonic", side_effect=lambda: now), \
+                 patch("dispatch.hc_json", side_effect=herdr_probe), redirect_stdout(StringIO()) as output:
+                try:
+                    wait(args)
+                except SystemExit as error:
+                    self.fail(f"The saved blocked outcome should be reported: {error}")
+            self.assertEqual(output.getvalue().split(" · ")[:6], ["t7", "blocked", "review", "blocked", "-", "-"])
 
     def test_wait_times_out_when_no_selected_outcome_occurs(self):
         report = {"address": "t7", "status": "idle", "state": "live", "stop_reason": None, "result": None}
