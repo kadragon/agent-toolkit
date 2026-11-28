@@ -5498,12 +5498,25 @@ class ReservedQueueWaveTest(unittest.TestCase):
         self.result("bind-wave", assignments=[delivery])
         request = {"contract": 1, "repo": str(self.repo), **delivery, "base": wave["base"]}
         worktree = Path(unit["worktree"])
+        git_run = subprocess.run
         replace = os.replace
+
+        def fail_checkout(args, **kwargs):
+            if args[:4] == ["git", "-C", str(worktree), "read-tree"]:
+                return subprocess.CompletedProcess(args, 1, "", "injected checkout failure")
+            return git_run(args, **kwargs)
 
         def fail_tasks(source, destination):
             if Path(destination) == worktree / "tasks.md":
                 raise OSError("injected publication failure")
             return replace(source, destination)
+
+        with patch.object(queue_backend.subprocess, "run", side_effect=fail_checkout), self.assertRaisesRegex(
+            queue_backend.QueueError, "injected checkout failure",
+        ):
+            queue_backend.handle("claim-reservation", request, {"AGENT_QUEUE_BACKEND": "backlog"})
+        self.assertFalse((worktree / "tasks.md").exists())
+        self.assertFalse(self.result("release-reservation", reservation=unit["reservation"])["released"])
 
         with patch.object(queue_backend.os, "replace", side_effect=fail_tasks), self.assertRaisesRegex(
             OSError, "injected publication failure",
@@ -5549,7 +5562,7 @@ class ReservedQueueWaveTest(unittest.TestCase):
         sys.path.insert(0, str(QUEUE_BACKEND.parent))
         import queue_backend
 
-        wave = self.reserve("First group", "Second group")
+        wave = self.reserve("First group", "Existing sprint")
         assignments = []
         for unit in wave["reservations"]:
             ref = unit["candidate"]["ref"]
@@ -5558,6 +5571,7 @@ class ReservedQueueWaveTest(unittest.TestCase):
         self.result("bind-wave", assignments=assignments)
         first_entered, second_entered = Event(), Event()
         partial_metadata, second_lookup = Event(), Event()
+        first_checkout, second_checkout = Event(), Event()
         materialize = queue_backend._materialize_claim
         git_run = subprocess.run
         queue_lock = queue_backend._queue_write_lock
@@ -5574,7 +5588,9 @@ class ReservedQueueWaveTest(unittest.TestCase):
             return materialize(repo, unit, *args)
 
         def run(args, **kwargs):
-            if args[:5] == ["git", "-C", str(self.repo), "worktree", "add"] and first["branch"] in args:
+            git_args = args[3:] if args[:2] == ["git", "-C"] else []
+            first_add = git_args[:2] == ["worktree", "add"] and first["branch"] in git_args
+            if first_add:
                 # Git publishes gitdir and HEAD before it finishes writing commondir.
                 admin = self.repo / ".git" / "worktrees" / Path(first["worktree"]).name
                 admin.mkdir(parents=True)
@@ -5587,6 +5603,16 @@ class ReservedQueueWaveTest(unittest.TestCase):
                 finally:
                     partial_metadata.clear()
                     shutil.rmtree(admin)
+            if (first_add and "--no-checkout" not in git_args) or (
+                git_args[:1] == ["read-tree"] and args[2] == first["worktree"]
+            ):
+                first_checkout.set()
+                self.assertTrue(second_checkout.wait(3), "second checkout waited for the first")
+            elif git_args[:1] == ["read-tree"] and args[2] == wave["reservations"][1]["worktree"]:
+                self.assertTrue(first_checkout.wait(3), "first checkout did not start")
+                stages = queue_backend.bc.collect_block_claims(str(self.backlog), None, ref=wave["base"])
+                self.assertEqual(stages, {}, "an unpopulated worktree appeared to remove an open sprint")
+                second_checkout.set()
             result = git_run(args, **kwargs)
             if partial_metadata.is_set() and args[:5] == ["git", "-C", str(self.repo), "worktree", "list"]:
                 second_lookup.set()

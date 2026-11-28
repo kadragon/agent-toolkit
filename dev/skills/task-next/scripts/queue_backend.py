@@ -721,7 +721,7 @@ def github_claims(repo: str, slug: str, issues: list[dict], include_self: bool,
     """
     claims: dict[int, str] = {}
     top = _git(repo, "rev-parse", "--show-toplevel")
-    listing = _git(repo, "worktree", "list", "--porcelain")
+    listing = _git(repo, "worktree", "list", "--porcelain", "-z")
     if top is not None and listing is not None:
         common = _git(repo, "rev-parse", "--git-common-dir")
         for wt in bc._claimants(listing, os.path.realpath(top), include_self):
@@ -1396,7 +1396,7 @@ def _worktree_record(repo, path):
 
 def _claim_status(repo, unit, token, content):
     record = _worktree_record(repo, unit["worktree"])
-    owned = record.get("locked") == f"dispatch reservation {token}"
+    owned = record.get("locked") == bc.RESERVATION_LOCK_REASON + token
     if not (owned or unit.get("published")):
         return False, False
     if record.get("branch") != f"refs/heads/{unit['branch']}" or record.get("HEAD") != unit["base"]:
@@ -1406,9 +1406,30 @@ def _claim_status(repo, unit, token, content):
     if actual == content:
         return owned, True
     original = _read_queue(os.path.join(repo, "tasks.md"), unit["base"], optional=True)
-    if actual != original or unit.get("published"):
+    pending_checkout = owned and not tasks.exists() and not _worktree_has_index(unit["worktree"])
+    if unit.get("published") or (actual != original and not pending_checkout):
         raise QueueError(f"reserved task claim changed: {tasks}")
     return owned, False
+
+
+def _worktree_has_index(path):
+    index = _git(path, "rev-parse", "--git-path", "index")
+    if not index:
+        raise QueueError(f"cannot resolve the index of reserved worktree {path}")
+    return (Path(path) / index).is_file()
+
+
+def _checkout_reserved_worktree(path, base):
+    # `worktree add --no-checkout` skips post-checkout as well as materializing files.
+    for args in (
+        ["read-tree", "-m", "-u", "--no-recurse-submodules", base],
+        ["hook", "run", "--ignore-missing", "post-checkout", "--", "0" * len(base), base, "1"],
+    ):
+        result = subprocess.run(
+            ["git", "-C", path, *args], capture_output=True, encoding="utf-8", errors="replace", check=False,
+        )
+        if result.returncode:
+            raise QueueError(f"cannot check out reserved worktree {path}: {result.stderr.strip()}")
 
 
 def _materialize_claim(repo, unit, token, content, owned):
@@ -1424,12 +1445,14 @@ def _materialize_claim(repo, unit, token, content, owned):
         if not owned:
             with _reservation_worktree_lock(repo):
                 result = subprocess.run(
-                    ["git", "-C", repo, "worktree", "add", "--lock", "--reason", f"dispatch reservation {token}",
-                     "-b", branch, path, unit["base"]],
+                    ["git", "-C", repo, "worktree", "add", "--no-checkout", "--lock", "--reason",
+                     bc.RESERVATION_LOCK_REASON + token, "-b", branch, path, unit["base"]],
                     capture_output=True, encoding="utf-8", errors="replace", check=False,
                 )
             if result.returncode:
                 raise QueueError(f"cannot create reserved worktree {path}: {result.stderr.strip()}")
+        if not owned or not _worktree_has_index(path):
+            _checkout_reserved_worktree(path, unit["base"])
         os.replace(temp, destination)
     finally:
         Path(temp).unlink(missing_ok=True)
@@ -1448,7 +1471,7 @@ def _finish_reservation(op, req, env, runner):
         if unit is not None:
             if release:
                 record = _worktree_record(repo, unit["worktree"])
-                if record.get("locked") == f"dispatch reservation {token}":
+                if record.get("locked") == bc.RESERVATION_LOCK_REASON + token:
                     return {"released": False, "reason": "worktree creation already started; resume the claim"}
             else:
                 _claim_reservation(req, env, runner, token, unit)
