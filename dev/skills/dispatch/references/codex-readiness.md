@@ -161,7 +161,8 @@ The command fetches the checkout's default remote branch, resolves its head to a
 and compares installed kadragon plugin versions. When the home's `[marketplaces.kadragon] ref` in
 `config.toml` is not that SHA, or the versions differ, it rewrites `ref` to the SHA, upgrades the
 marketplace, then starts and closes an idle Herdr child. The JSON reports `pinned` (the SHA) and
-`previously_pinned` (the old SHA, or null for a home that floated).
+`previously_pinned` (the old SHA, or null for a home that floated). The edit keeps the file's
+permissions and follows a symlinked `config.toml`; a failed `upgrade` puts the old `ref` back.
 Read `pending_hooks` in its JSON for the exact enabled hooks Codex marks untrusted or modified.
 `hook_content_diffs` compares the affected kadragon plugin's hook manifest and bundled hook
 files with a previously observed trusted copy in this Codex home. If native startup refresh

@@ -3,6 +3,8 @@ import hashlib
 import json
 import os
 import re
+import stat
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -43,33 +45,64 @@ def marketplace_pin(home):
     return ref if is_commit(ref) else None
 
 
+MARKET_HEADER = re.compile(r"""\s*\[\s*marketplaces\s*\.\s*(?:kadragon|"kadragon"|'kadragon')\s*\]\s*(?:#.*)?""")
+
+
 def pin_marketplace(home, commit):
-    """Set `ref` of the configured marketplace to a full commit, keeping the rest of the file."""
-    path = home / "config.toml"
+    """Set `ref` of the configured marketplace to a full commit, keeping the rest of the file.
+
+    Returns the previous file text so a failed upgrade can put the old ref back.
+    """
+    path = (home / "config.toml").resolve()
     try:
-        lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+        original = path.read_bytes().decode("utf-8")
     except FileNotFoundError:
-        lines = []
-    header = f"[marketplaces.{MARKET}]"
-    start = next((index for index, line in enumerate(lines) if line.strip() == header), None)
+        original = ""
+    lines = original.splitlines(keepends=True)
+    start = next((index for index, line in enumerate(lines) if MARKET_HEADER.fullmatch(line.rstrip("\r\n"))), None)
     if start is None:
-        raise ValueError(f"{path} has no {header} section; add the marketplace to this Codex home first")
+        raise ValueError(f"{path} has no [marketplaces.{MARKET}] section; add the marketplace to this Codex home first")
     end = next((index for index in range(start + 1, len(lines)) if lines[index].lstrip().startswith("[")), len(lines))
-    pin = f'ref = "{commit}"\n'
+    eol = "\r\n" if lines[start].endswith("\r\n") else "\n"
+    pin = f'ref = "{commit}"{eol}'
     for index in range(start + 1, end):
         if re.match(r"\s*ref\s*=", lines[index]):
             lines[index] = pin
             break
     else:
         if not lines[start].endswith("\n"):
-            lines[start] += "\n"
+            lines[start] += eol
         lines.insert(start + 1, pin)
     text = "".join(lines)
     if tomllib.loads(text)["marketplaces"][MARKET].get("ref") != commit:
-        raise ValueError(f"cannot pin {path}: the {header} section did not take the ref")
+        raise ValueError(f"cannot pin {path}: the [marketplaces.{MARKET}] section did not take the ref")
+    write_config(path, text)
+    return original
+
+
+def write_config(path, text):
+    """Replace `path` (a symlink's target) keeping its permissions; never exposes the text more widely."""
+    path = path.resolve()
+    mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o600
     temporary = path.with_name(path.name + ".dispatch-tmp")
-    temporary.write_text(text, encoding="utf-8")
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
+        handle.write(text)
+    os.chmod(temporary, mode)
     temporary.replace(path)
+
+
+def ensure_commit(repo, commit):
+    """Fetch only when the checkout lacks the pinned commit."""
+    git = ["git", "-C", str(repo)]
+    try:
+        command([*git, "cat-file", "-e", f"{commit}^{{commit}}"])
+    except subprocess.CalledProcessError:
+        command([*git, "fetch", "origin"])
+        try:
+            command([*git, "cat-file", "-e", f"{commit}^{{commit}}"])
+        except subprocess.CalledProcessError:
+            raise ValueError(f"the pinned marketplace commit {commit} is not in {repo}") from None
 
 
 def remote_versions(repo, installed, commit=None):

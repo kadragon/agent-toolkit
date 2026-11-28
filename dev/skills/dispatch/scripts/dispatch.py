@@ -291,6 +291,8 @@ def verify_shared_cache_versions(home, installed):
             print("warning: the shared Codex marketplace is not pinned to a commit, so any Codex startup can "
                   "refresh it and delete the plugin caches live children use; run prepare-codex between waves to pin it",
                   file=sys.stderr)
+        if pin is not None:
+            shared_codex.ensure_commit(repo, pin)
         expected = shared_codex.remote_versions(repo, prepared["versions"], pin)
     except (OSError, ValueError, KeyError, TypeError, pinned_wave.PinError, subprocess.SubprocessError) as error:
         raise SystemExit("shared-cache Codex startup withheld: cannot verify marketplace versions for the live wave; "
@@ -1005,10 +1007,15 @@ def prepare_codex(args):
             current = installed_plugin_versions()
             if pinned != commit or any(current.get(name) != version for name, version in expected.items()):
                 # A full-SHA ref makes later Codex startup refreshes no-ops until the next preparation moves it.
-                if pinned != commit:
-                    shared_codex.pin_marketplace(home, commit)
-                shared_codex.command([binary, "plugin", "marketplace", "upgrade", shared_codex.MARKET],
-                                     cwd=cwd, timeout=MARKETPLACE_UPGRADE_SECONDS)
+                previous = shared_codex.pin_marketplace(home, commit) if pinned != commit else None
+                try:
+                    shared_codex.command([binary, "plugin", "marketplace", "upgrade", shared_codex.MARKET],
+                                         cwd=cwd, timeout=MARKETPLACE_UPGRADE_SECONDS)
+                except (OSError, subprocess.SubprocessError):
+                    # The snapshot did not move, so a new ref would make the next Codex startup do the upgrade.
+                    if previous is not None:
+                        shared_codex.write_config(home / "config.toml", previous)
+                    raise
             warmup_codex(binary, cwd, parent, label)
             installed = installed_plugin_versions()
             if any(installed.get(name) != version for name, version in expected.items()):
