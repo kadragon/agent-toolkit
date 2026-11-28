@@ -1626,6 +1626,38 @@ class DispatchReceiptTests(DispatchTestCase):
                         result={"status": "merged", "phase": "merge", "summary": "Merged"})
                 self.assertIsNone(report["stop_reason"])
 
+    def test_collect_scopes_codex_hook_failures_to_the_current_turn(self):
+        failure = "• Hook failed\n  └ plugin contents changed; hook approval required"
+        old_turn = f"› First task\n\n{failure}\n\n› Next task"
+        working = "Working (5s • esc to interrupt)"
+        composer = "› Ask Codex to do anything\n\n  GPT-6.2-Sol default · ~/repo"
+        draft = ("› Unsent follow-up\n\n  GPT-6.2-Sol default · ~/repo\n"
+                 "  ← for agents · ? for shortcuts")
+        branch_draft = draft.replace("GPT-6.2-Sol default · ~/repo",
+                                     "main · weekly 54% left · Context 0% used · my-app")
+        warning = "       ⚠ 1 warning · f2 to view"
+        ide_context = "       IDE context"
+        cases = (
+            (f"{old_turn}\n\n{working}", None),
+            (f"{old_turn}\n\n{working}\n\n{composer}", None),
+            (f"{old_turn}\n\n• Working on the next task\n\n{composer}", None),
+            (f"{old_turn}\n\n{draft}{warning}", None),
+            (f"› Next task\n\n{failure}\n\n{working}", "hooks_broken"),
+            (f"› Next task\n\n{failure}\n\n{composer}", "hooks_broken"),
+            (f"› Next task\n\n{failure}\n\n{draft}{warning}", "hooks_broken"),
+            (f"› Next task\n\n{failure}\n\n{draft}{ide_context}", "hooks_broken"),
+            (f"› Next task\n\n{failure}\n\n{draft}{ide_context}{warning}", "hooks_broken"),
+            (f"› Next task\n\n{failure}\n\n{branch_draft}{ide_context}", "hooks_broken"),
+            (f"› Next task\n\n{failure}\n\n{branch_draft}{ide_context}{warning}", "hooks_broken"),
+            (f"{failure}\n\n{composer}", "hooks_broken"),
+        )
+        with tempfile.TemporaryDirectory() as directory, \
+             patch("dispatch.plugin_drift", return_value=(["dev old -> new"], [])), redirect_stderr(StringIO()):
+            for screen, reason in cases:
+                with self.subTest(screen=screen):
+                    report, _ = self.collect_report(directory, {"state": "working"}, screen=screen)
+                    self.assertEqual(report["stop_reason"], reason)
+
     def test_another_home_cannot_launch_into_a_live_shared_codex_wave(self):
         args = self.launch_args(Path.cwd(), parent="t8")
         owner = {"address": "t8", "state": "live", "cwd": str(Path.cwd())}
@@ -3013,6 +3045,27 @@ class DispatchWatchTests(unittest.TestCase):
             output.seek(0)
             self.assertEqual(output.read(), "t7 · done · implement · complete · - · -\n")
 
+    def test_wait_prints_finished_over_an_interim_working_report(self):
+        working = {"address": "t7", "status": "working", "state": "live", "stop_reason": None,
+                   "result": {"status": "working", "phase": "implement", "summary": "last progress"}}
+        finished = {**working, "state": "finished", "status": "done"}
+        args = SimpleNamespace(first=False, runs=["run.json"], until={"stop"}, timeout=30, stall_minutes=30)
+        with patch("dispatch.collect_result", side_effect=[working, finished]), \
+             patch("dispatch.hc_rpc", return_value={"result": {}}), patch("dispatch.time.sleep"), \
+             redirect_stdout(StringIO()) as output:
+            wait(args)
+        self.assertEqual(output.getvalue().splitlines(), [
+            "t7 · working · implement · last progress · - · -",
+            "t7 · finished · implement · last progress · - · -",
+        ])
+
+        for status in ("ready", "blocked", "done", "merged"):
+            report = {**finished, "result": {**finished["result"], "status": status}}
+            with self.subTest(status=status), patch("dispatch.collect_result", return_value=report), \
+                 redirect_stdout(StringIO()) as output:
+                wait(args)
+                self.assertEqual(output.getvalue().split(" · ")[1], status)
+
     def test_wait_requires_all_receipts_and_a_stopped_terminal_for_done(self):
         working = {"address": "t7", "status": "working", "state": "live", "stop_reason": None,
                    "result": {"status": "done", "phase": "implement", "summary": "phase complete"}}
@@ -3402,9 +3455,14 @@ class CodexSendTests(DispatchTestCase):
         with self.subTest("extract draft"):
             self.assertEqual(composer_draft(screen), message)
             self.assertEqual(composer_draft(draft), message)
+        status_like_prose = "› Summarize this\n\n  main · Context 0% used · explain what this means"
+        self.assertEqual(codex_screen(status_like_prose), "waiting")
+        self.assertEqual(composer_draft(status_like_prose),
+                         "Summarize this\n\nmain · Context 0% used · explain what this means")
         for status, hint in (
             ("main · weekly 54% left", "← for agents · ? for shortcuts"),
             ("GPT-6.2-Sol is the model", "← for agents · ? for shortcuts in this example."),
+            ("GPT-6.2-Sol is the model", "← for agents · ? for shortcuts  in this example."),
         ):
             with self.subTest(status=status, hint=hint):
                 status_like_draft = f"› Summarize this\n\n  {status}\n  {hint}"
