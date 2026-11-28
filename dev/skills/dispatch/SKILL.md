@@ -229,14 +229,11 @@ from `origin/<base>`, and nothing is stashed. Anything that fails a check stays;
 
 ### Close the child terminal
 
-Run `dispatch.py collect <receipt> --close` before cleaning up the child's worktree. For a live child with a final
-result, it ends the program, waits up to 10 seconds for Herdr to report `state: finished`, then removes the terminal
-and records `closed_reason` in the receipt. An idle or done child with a current, review-verified `ready` result
-can close when its receipt records a parallel worktree pre-merge stop or its reported PR head has a confirmed merge.
-The close uses an existing [merge timing record](references/phase-timing.md) for that head or checks the PR on GitHub
-and records the merge confirmation. A finished terminal closes without a final result. If the result file is
-unreadable, reconfirm `state: finished` and use `collect --close --force`. For a live child, use `--force` only when
-authorized to close it irrespective of its reported status.
+Run `dispatch.py collect <receipt> --close` before worktree cleanup. It ends a live child with a final result,
+waits up to 10 seconds for `state: finished`, removes the terminal and records `closed_reason`. A review-verified `ready`
+result is final for an idle or done child with a recorded pre-merge stop or [confirmed merge](references/phase-timing.md).
+A finished terminal closes without a final result. For an unreadable result, confirm `state: finished` and use `--force`.
+For a live child, use `--force` only with authorization to close it irrespective of its status.
 
 After close returns `"closed": true`, save any result or receipt details you still need. Once every child of the
 wave is closed (and a pinned wave released), run the [wave retrospect](references/retrospect.md) before removing any receipt.

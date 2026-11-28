@@ -25,3 +25,7 @@ Set `DISPATCH_TIMING_RUN` to the child's receipt when invoking `ci-wait.sh`. Pas
 `--dispatch-run <receipt>` to `merge-and-cleanup.sh`.
 For a merge confirmed separately, run `dispatch.py timing <receipt> merged <confirmed feature head>`
 after verifying the merge. Omit the SHA if the verified source does not provide it.
+
+When closing a child with a current `ready` result, `collect --close` uses any recorded merge for
+the reported head. Otherwise it checks the reported GitHub PR and records when it confirms that
+the same head was merged.
