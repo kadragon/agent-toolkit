@@ -180,7 +180,7 @@ head, `pending` while awaiting a result, or `missing` when a required result is 
 Carry the reviewed SHA forward from the evidence. Collection preserves PR completion reports
 and warns when their review record or required source results are missing, stale or incomplete.
 
-After a repair or a home-side resync changes the head, the child resumes at final verification.
+After a repair or a requested resync changes the head, the child resumes at final verification.
 Confirm that the local checkout matches the current PR head and recover the prior source results.
 Obtain one read-only confirmation for the current SHA from each required source whose result
 covers a different head. Give each source the previous SHA, its findings and the delta to check.
