@@ -157,8 +157,11 @@ Run the preparation command from the home session and specify the trusted target
 python3 -I "<dispatch>/scripts/dispatch.py" prepare-codex --repo "<agent-toolkit checkout>" --cwd "<target repo>"
 ```
 
-The command fetches the checkout's default remote branch, compares installed kadragon plugin
-versions, upgrades that marketplace if needed, then starts and closes an idle Herdr child.
+The command fetches the checkout's default remote branch, resolves its head to a full commit SHA,
+and compares installed kadragon plugin versions. When the home's `[marketplaces.kadragon] ref` in
+`config.toml` is not that SHA, or the versions differ, it rewrites `ref` to the SHA, upgrades the
+marketplace, then starts and closes an idle Herdr child. The JSON reports `pinned` (the SHA) and
+`previously_pinned` (the old SHA, or null for a home that floated).
 Read `pending_hooks` in its JSON for the exact enabled hooks Codex marks untrusted or modified.
 `hook_content_diffs` compares the affected kadragon plugin's hook manifest and bundled hook
 files with a previously observed trusted copy in this Codex home. If native startup refresh
@@ -174,19 +177,29 @@ or `dispatch.py send --run <receipt> -- <address> '<first message>'` for an indi
 Preparation and dispatch startup share a local lock scoped to the Codex home. Prepared
 launches carry a Herdr label for that cache. While a labeled child is live, preparation is
 held, and launches from a different home session are warned and held. Before launching a sibling,
-dispatch fetches from the checkout saved by preparation and verifies the remote and installed
-versions still match. Use an explicit Herdr parent when launching from outside a home session.
+dispatch compares the installed versions with the plugin versions at the pinned SHA. A home that
+is not pinned gets a stderr warning to run `prepare-codex`, and is compared with a fresh fetch of the
+remote head instead. Use an explicit Herdr parent when launching from outside a home session.
 A failed check or a version mismatch holds startup. Close the wave before
 preparing another one. Standalone Codex startup and dispatch versions predating the label can
 still refresh the cache.
 
-Startup update deferral is unverified on Codex 0.172.0. Its source starts a configured-marketplace
-upgrade when plugins are enabled. The `auto_update` field describes checks during plugin
-listing. Use a [verified wave](#verified-wave) when concurrent work needs a fixed plugin version.
+Codex 0.172.0 starts a configured-marketplace upgrade on every startup, and a new marketplace
+commit force-reinstalls the plugins and deletes the previous version directories. A `ref` set to a
+full commit SHA stops that: Codex resolves it without contacting the remote, and an installed
+snapshot that already matches is left alone. Every wave therefore runs on a pinned home, and the
+pin only moves in `prepare-codex`, between waves. `codex plugin marketplace add --ref` cannot
+move an existing pin, and a `-c` override leaves `config.toml` on the old SHA so the next startup
+reverts the snapshot; preparation edits `config.toml` instead. Use a [verified wave](#verified-wave)
+when concurrent work needs a fixed plugin version on an unpinned home.
 [Codex startup implementation](https://github.com/openai/codex/blob/rust-v0.172.0/codex-rs/core-plugins/src/manager.rs#L3139-L3181),
 [marketplace config type](https://github.com/openai/codex/blob/rust-v0.172.0/codex-rs/config/src/types.rs#L1291-L1299).
 
 ## Plugin update during a shared-cache wave
+
+On a home pinned by `prepare-codex`, a Codex startup outside the wave cannot update or delete
+anything: the pin holds until the next preparation advances it. The detection below is the
+fallback for a home that is not pinned (an older preparation, or a hand-edited `ref`).
 
 A Codex startup outside the wave can update guard and delete its old version directory.
 Live children can still point at that directory and report `• Hook failed … os error 2`.

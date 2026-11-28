@@ -33,7 +33,8 @@
       A Codex child whose hooks fail, or whose launch-time kadragon plugin version directory
       was removed, reports stop_reason hooks_broken; any plugin version change warns on stderr.
   dispatch.py prepare-codex --repo PATH --cwd PATH [--parent ADDRESS]
-      Prepare the shared marketplace and report the native hooks awaiting review.
+      Pin the shared marketplace to the remote head commit, upgrade it, and report the native
+      hooks awaiting review.
   dispatch.py pin --repo PATH --commit SHA --codex PATH
       Create an isolated Codex wave. Launch idle children with launch --wave WAVE.
   dispatch.py release WAVE
@@ -285,7 +286,12 @@ def verify_shared_cache_versions(home, installed):
     try:
         prepared = json.loads((home / "dispatch-prepared-cache.json").read_text(encoding="utf-8"))
         repo = Path(prepared["repo"])
-        expected = shared_codex.remote_versions(repo, prepared["versions"])
+        pin = shared_codex.marketplace_pin(home)
+        if pin is None:
+            print("warning: the shared Codex marketplace is not pinned to a commit, so any Codex startup can "
+                  "refresh it and delete the plugin caches live children use; run prepare-codex between waves to pin it",
+                  file=sys.stderr)
+        expected = shared_codex.remote_versions(repo, prepared["versions"], pin)
     except (OSError, ValueError, KeyError, TypeError, pinned_wave.PinError, subprocess.SubprocessError) as error:
         raise SystemExit("shared-cache Codex startup withheld: cannot verify marketplace versions for the live wave; "
                          f"prepare the cache between waves or use a pinned wave ({error})") from None
@@ -982,7 +988,9 @@ def prepare_codex(args):
         with lock_shared_cache(home):
             require_shared_cache_available(shared_cache_children(label), preparing=True)
             before = installed_plugin_versions()
-            expected = shared_codex.remote_versions(repo, before)
+            commit = shared_codex.remote_head(repo)
+            expected = shared_codex.remote_versions(repo, before, commit)
+            pinned = shared_codex.marketplace_pin(home)
             baseline_path = home / "dispatch-trusted-hooks.json"
             baseline = json.loads(baseline_path.read_text(encoding="utf-8")) if baseline_path.exists() else {}
             try:
@@ -995,7 +1003,10 @@ def prepare_codex(args):
             baseline.update({name: info for name, info in old_hooks.items() if info["trusted"]})
             write_json(baseline_path, baseline)
             current = installed_plugin_versions()
-            if any(current.get(name) != version for name, version in expected.items()):
+            if pinned != commit or any(current.get(name) != version for name, version in expected.items()):
+                # A full-SHA ref makes later Codex startup refreshes no-ops until the next preparation moves it.
+                if pinned != commit:
+                    shared_codex.pin_marketplace(home, commit)
                 shared_codex.command([binary, "plugin", "marketplace", "upgrade", shared_codex.MARKET],
                                      cwd=cwd, timeout=MARKETPLACE_UPGRADE_SECONDS)
             warmup_codex(binary, cwd, parent, label)
@@ -1012,6 +1023,7 @@ def prepare_codex(args):
     except (OSError, ValueError, KeyError, TypeError, pinned_wave.PinError, subprocess.SubprocessError) as error:
         raise SystemExit(f"cannot prepare shared-cache Codex: {error}") from None
     print(json.dumps({"before": before, "expected": expected, "installed": installed, "upgraded": before != installed,
+                      "pinned": commit, "previously_pinned": pinned,
                       "pending_hooks": pending, "hook_content_diffs": diffs}, ensure_ascii=False))
 
 

@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import re
+import tomllib
 from pathlib import Path
 
 from codex_app_server import request
@@ -18,14 +19,63 @@ def cache_label(home):
     return f"{LABEL}={hashlib.sha256(identity.encode()).hexdigest()[:16]}"
 
 
-def remote_versions(repo, installed):
+def is_commit(value):
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value) is not None
+
+
+def remote_head(repo):
     git = ["git", "-C", str(repo)]
     command([*git, "fetch", "origin"])
     head = command([*git, "ls-remote", "--exit-code", "origin", "HEAD"]).strip()
     match = re.fullmatch(r"([0-9a-f]{40}|[0-9a-f]{64})	HEAD", head)
     if match is None:
         raise ValueError("cannot resolve the marketplace default branch commit")
-    commit = match[1]
+    return match[1]
+
+
+def marketplace_pin(home):
+    """Return the commit the home's configured marketplace is pinned to, or None when it floats."""
+    try:
+        config = tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    ref = (config.get("marketplaces") or {}).get(MARKET, {}).get("ref")
+    return ref if is_commit(ref) else None
+
+
+def pin_marketplace(home, commit):
+    """Set `ref` of the configured marketplace to a full commit, keeping the rest of the file."""
+    path = home / "config.toml"
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    except FileNotFoundError:
+        lines = []
+    header = f"[marketplaces.{MARKET}]"
+    start = next((index for index, line in enumerate(lines) if line.strip() == header), None)
+    if start is None:
+        raise ValueError(f"{path} has no {header} section; add the marketplace to this Codex home first")
+    end = next((index for index in range(start + 1, len(lines)) if lines[index].lstrip().startswith("[")), len(lines))
+    pin = f'ref = "{commit}"\n'
+    for index in range(start + 1, end):
+        if re.match(r"\s*ref\s*=", lines[index]):
+            lines[index] = pin
+            break
+    else:
+        if not lines[start].endswith("\n"):
+            lines[start] += "\n"
+        lines.insert(start + 1, pin)
+    text = "".join(lines)
+    if tomllib.loads(text)["marketplaces"][MARKET].get("ref") != commit:
+        raise ValueError(f"cannot pin {path}: the {header} section did not take the ref")
+    temporary = path.with_name(path.name + ".dispatch-tmp")
+    temporary.write_text(text, encoding="utf-8")
+    temporary.replace(path)
+
+
+def remote_versions(repo, installed, commit=None):
+    git = ["git", "-C", str(repo)]
+    if commit is None:
+        commit = remote_head(repo)
     names = catalog_plugins(json.loads(command([*git, "show", f"{commit}:{CATALOG}"])))
     selected = set(names) & installed.keys()
     if not selected:
