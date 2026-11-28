@@ -43,6 +43,7 @@ from dispatch import (
     pre_merge_resume,
     pre_merge_stop,
     prepare_codex,
+    reached_outcome,
     release,
     report_instruction,
     report_review,
@@ -849,6 +850,8 @@ class DispatchReceiptTests(DispatchTestCase):
                 with self.assertRaisesRegex(SystemExit, "Claude may have received its launch prompt"):
                     launch(args)
                 self.assertEqual(run.call_args.args[0][-1], "/dev:task-next" + self.BLOCK)
+                receipt = json.loads((Path(directory) / "run.json").read_text(encoding="utf-8"))
+                self.assertEqual(receipt["handoff"]["git_limits"], args.git_limits)
 
     def test_claude_report_uses_review_policy_before_launch_returns(self):
         head = "a" * 40
@@ -870,8 +873,14 @@ class DispatchReceiptTests(DispatchTestCase):
                     write_json(previous, {**self.RECEIPT, "cli": "codex", **previous_fields})
 
                 def start_child(*_args, **_kwargs):
+                    if previous_fields is None:
+                        working = {**result, "status": "working"}
+                        with patch("sys.stdin", TextIOWrapper(BytesIO(json.dumps(working).encode("utf-8")))):
+                            report_review(SimpleNamespace(result=report, pause=False, resume_merge=False))
+                        early = json.loads(report.read_text(encoding="utf-8"))
+                        self.assertEqual((early["status"], early["phase"]), ("blocked", "review-state"))
                     with patch("sys.stdin", TextIOWrapper(BytesIO(json.dumps(result).encode("utf-8")))):
-                        report_review(SimpleNamespace(result=report))
+                        report_review(SimpleNamespace(result=report, pause=True, resume_merge=False))
                     return SimpleNamespace(stdout=json.dumps(self.TERMINAL))
 
                 with (
@@ -882,6 +891,7 @@ class DispatchReceiptTests(DispatchTestCase):
                     redirect_stdout(StringIO()),
                 ):
                     launch(self.launch_args(directory, cli="claude", task=None, message="/dev:task-next",
+                                            git_limits="pr-only",
                                             relaunch_from=previous if previous_fields is not None else None))
                 self.assertEqual(json.loads(receipt.read_text(encoding="utf-8"))["review_policy"], policy)
                 self.assertEqual(json.loads(report.read_text(encoding="utf-8"))["status"], status)
@@ -956,7 +966,7 @@ class DispatchReceiptTests(DispatchTestCase):
         head = "a" * 40
         pr = "https://github.com/acme/widget/pull/595"
         merged = {"state": "MERGED", "headRefOid": head, "mergeCommit": {"oid": "b" * 40}}
-        for outcome in ("merged", "recorded", "open", "different_head", "pre_merge_head_changed",
+        for outcome in ("merged", "working_merged", "working_open", "recorded", "open", "different_head", "pre_merge_head_changed",
                         "active", "resumed", "replaced_result", "reviews_missing", "lookup_failed"):
             with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as directory:
                 receipt = Path(directory) / "run.json"
@@ -965,24 +975,27 @@ class DispatchReceiptTests(DispatchTestCase):
                     "pre_merge_stop": outcome == "pre_merge_head_changed",
                 })
                 result = {
-                    "status": "ready", "phase": "review", "summary": "CI passed", "head": head, "pr": pr,
+                    "status": "working" if outcome.startswith("working_") else "ready",
+                    "phase": "merge" if outcome.startswith("working_") else "review",
+                    "summary": "CI passed", "head": head, "pr": pr,
                     "review": {"head": head, "status": "passed", "sources": ["claude"]},
                 }
                 write_json(receipt.with_name("result.json"), result)
                 data = phase_timing.new_launch(phase_timing.empty_history(), 1000)
-                if outcome == "recorded":
+                if outcome in {"recorded", "working_open"}:
                     phase_timing.merged(data, head, 1500)
                 timing_path = receipt.with_name("timing.json")
                 write_json(timing_path, data)
                 reply = {
                     "open": {**merged, "state": "OPEN", "mergeCommit": None},
+                    "working_open": {**merged, "state": "OPEN", "mergeCommit": None},
                     "different_head": {**merged, "headRefOid": "c" * 40},
                     "pre_merge_head_changed": {"state": "OPEN", "mergeCommit": None, "headRefOid": "c" * 40},
                 }.get(outcome, merged)
                 active = {**terminal, "turn": 2, "status": {"state": "working"}}
                 terminal_reply = active if outcome == "active" else terminal
                 responses = [terminal_reply]
-                if outcome in {"merged", "recorded", "replaced_result"}:
+                if outcome in {"merged", "working_merged", "recorded", "replaced_result"}:
                     responses.append(terminal)
                 elif outcome == "resumed":
                     responses.append(active)
@@ -1003,12 +1016,12 @@ class DispatchReceiptTests(DispatchTestCase):
                     redirect_stdout(StringIO()) as output,
                 ):
                     args = SimpleNamespace(run=receipt, close=True)
-                    if outcome in {"merged", "recorded"}:
+                    if outcome in {"merged", "working_merged", "recorded"}:
                         collect(args)
                     else:
                         with self.assertRaisesRegex(SystemExit, "left intact"):
                             collect(args)
-                if outcome in {"merged", "recorded"}:
+                if outcome in {"merged", "working_merged", "recorded"}:
                     report = json.loads(output.getvalue())
                     confirmed = 1500 if outcome == "recorded" else 2000
                     self.assertEqual(report["closed_reason"], "final_result")
@@ -1021,6 +1034,9 @@ class DispatchReceiptTests(DispatchTestCase):
                 elif outcome in {"resumed", "replaced_result"}:
                     self.assertEqual(phase_timing.read(timing_path)["merge"]["head"], head)
                     self.assertEqual(hc.call_args_list, [call("get", "t7")] * 2)
+                elif outcome == "working_open":
+                    self.assertEqual(phase_timing.read(timing_path)["merge"]["confirmed_ms"], 1500)
+                    hc.assert_called_once_with("get", "t7")
                 else:
                     self.assertIsNone(phase_timing.read(timing_path)["merge"])
                     hc.assert_called_once_with("get", "t7")
@@ -1421,6 +1437,52 @@ class DispatchReceiptTests(DispatchTestCase):
                         collect(SimpleNamespace(run=receipt, close=False))
                     self.assertEqual(json.loads(output.getvalue())["result"], saved)
 
+    def test_report_review_distinguishes_continuing_merge_from_pause(self):
+        head = "a" * 40
+        cases = (
+            ("working", False, None, DEFAULT_GIT_LIMITS, head, False, "working", "merge"),
+            ("ready", False, None, DEFAULT_GIT_LIMITS, head, False, "working", "merge"),
+            ("ready", False, "--pause", DEFAULT_GIT_LIMITS, head, False, "ready", "review"),
+            ("ready", True, None, DEFAULT_GIT_LIMITS, head, False, "ready", "review"),
+            ("ready", False, None, "pr-only", head, False, "ready", "review"),
+            ("working", True, None, DEFAULT_GIT_LIMITS, head, False, "blocked", "review-state"),
+            ("working", True, "--resume-merge", DEFAULT_GIT_LIMITS, head, False, "working", "merge"),
+            ("working", True, "--resume-merge", " PR-ONLY ", head, False, "blocked", "review-state"),
+            ("working", False, None, "no-push", head, False, "blocked", "review-state"),
+            ("working", False, None, "implementation-only", head, False, "blocked", "review-state"),
+            ("working", False, None, DEFAULT_GIT_LIMITS, "b" * 40, False, "blocked", "review-state"),
+            ("working", False, None, DEFAULT_GIT_LIMITS, head, True, "blocked", "review-sources"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            path = receipt.with_name("result.json")
+            for status, stop, mode, limits, review_head, require_sources, expected, phase in cases:
+                with self.subTest(status=status, stop=stop, limits=limits, review_head=review_head,
+                                  require_sources=require_sources, mode=mode):
+                    write_json(receipt, {
+                        **self.RECEIPT, "cli": "claude", "pre_merge_stop": stop,
+                        "handoff": {"git_limits": limits, **({"queue_reservation": {"ref": "#1"}} if stop else {})},
+                        "require_review_sources": require_sources,
+                    })
+                    result = {
+                        "status": status, "phase": "review", "summary": "CI passed",
+                        "pr": "example-pr", "head": head, "ci": "success",
+                        "review": {"head": review_head, "sources": ["codex"], "status": "passed"},
+                    }
+                    command = [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "report-review", str(path)]
+                    if mode:
+                        command.append(mode)
+                    completed = subprocess.run(
+                        command,
+                        input=json.dumps(result), text=True, check=False, capture_output=True,
+                    )
+                    self.assertEqual(completed.returncode, 0, completed.stderr)
+                    saved = json.loads(path.read_text(encoding="utf-8"))
+                    self.assertEqual((saved["status"], saved["phase"]), (expected, phase))
+                    self.assertEqual(saved["review"], result["review"])
+                    report = {"result": saved, "state": "running", "status": "active"}
+                    self.assertEqual(reached_outcome(report, {"ready", "merged"}), "ready" if expected == "ready" else None)
+
     def test_explicit_review_policy_overrides_the_legacy_source_flag(self):
         self.assertFalse(requires_review_sources({"review_policy": "head-bound", "require_review_sources": True}))
         self.assertTrue(requires_review_sources({"review_policy": "three-source"}))
@@ -1455,6 +1517,30 @@ class DispatchReceiptTests(DispatchTestCase):
             details = json.loads((path.parent / blocked["evidence"]).read_text(encoding="utf-8"))
             self.assertEqual(details["review_sources"], result["review_sources"])
             self.assertEqual(details["evidence"], result["evidence"])
+
+    def test_report_review_blocks_when_merge_normalization_exceeds_the_size_limit(self):
+        head = "a" * 40
+        result = {
+            "status": "ready", "phase": "merge", "summary": "CI passed", "head": head,
+            "review": {"head": head, "status": "passed", "sources": ["claude"]},
+            "evidence": "",
+        }
+        result["evidence"] = "x" * (8192 - len(json.dumps(result, separators=(",", ":"))))
+        raw = json.dumps(result, separators=(",", ":")).encode("utf-8")
+        self.assertEqual(len(raw), 8192)
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            write_json(receipt, {**self.RECEIPT, "handoff": {"git_limits": DEFAULT_GIT_LIMITS}})
+            path = receipt.with_name("result.json")
+            completed = subprocess.run(
+                [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "report-review", str(path)],
+                input=raw, check=False, capture_output=True,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr.decode("utf-8"))
+            self.assertLessEqual(path.stat().st_size, 8192)
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["status"], "blocked")
+            self.assertIn("Continuing merge report exceeds 8 KiB", saved["summary"])
 
     def test_collect_cannot_close_on_a_result_from_the_previous_phase(self):
         with tempfile.TemporaryDirectory() as directory:
