@@ -323,19 +323,28 @@ def report_instruction(result, *, require_review_sources=False):
             "(write a temporary sibling, then rename over it). Fields: status (working, done, ready, "
             "blocked, or merged), phase, summary (at most three lines), and optional worktree, "
             "contract, head, pr, ci, evidence, tokens (measured totals only), review_retries, "
-            "or review_sendbacks (per the task-review-cycle consolidation guide). "
+            "review, or review_sendbacks (per the task-review-cycle consolidation guide). "
             "Use working for interim reports. Write ready when pausing before the merge, and merged only after confirming the merge. "
             "Use file paths for details. Do not send reports by hc send.")
+    instruction += (
+        ' For a pre-merge report, set review to {"head": "<reviewed commit SHA or null>", '
+        '"sources": ["<reviewer name>"], "status": "passed|missing|pending"}. '
+        "Report ready only with passed review on head and passing CI. In every PR completion "
+        "report, keep the review record and use the PR's head commit in head."
+    )
     if require_review_sources:
         instruction += (
-            " For a pre-merge report, include review_sources with claude, agy and codex outcomes. "
+            " Also include review_sources with claude, agy and codex outcomes. "
+            "Use the same lowercase names in review.sources. "
             "Use complete only for a completed independent result you consolidated, "
             "or give the reason the source is missing. "
             "An incomplete required review blocks a merge and must report blocked with the reviewer and reason. "
-            f'Pass the candidate JSON to the bundled dispatch.py report-review "{result}" on stdin '
-            "when available. Report ready only after the required independent reviews and CI pass. "
             "Keep the review outcomes in any later PR completion report."
         )
+    instruction += (
+        f' Pass the pre-merge candidate JSON to the bundled dispatch.py report-review "{result}" on stdin '
+        "when available."
+    )
     return instruction
 
 
@@ -499,16 +508,24 @@ def missing_reviews(result):
     return missing
 
 
+def reviewable_completion(result):
+    status = result["status"]
+    if status == "merged":
+        return True
+    if status != "done":
+        return False
+    if result.get("pr"):
+        return True
+    if NO_WORK_PREFIX.match(result["summary"]):
+        return False
+    return bool(result.get("head") or PR_REFERENCE.search(result["summary"])
+                or PR_REFERENCE.search(json.dumps(result.get("evidence"), ensure_ascii=False)))
+
+
 def gate_required_reviews(result):
     status = result["status"]
-    if status not in {"ready", "merged", "done"}:
+    if status != "ready" and not reviewable_completion(result):
         return result
-    if status == "done" and not result.get("pr"):
-        if NO_WORK_PREFIX.match(result["summary"]):
-            return result
-        if not (result.get("head") or PR_REFERENCE.search(result["summary"])
-                or PR_REFERENCE.search(json.dumps(result.get("evidence"), ensure_ascii=False))):
-            return result
     missing = missing_reviews(result)
     if not missing:
         return result
@@ -520,6 +537,48 @@ def gate_required_reviews(result):
 
 def serialize_result(result):
     return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+
+
+def review_record(result):
+    review = result.get("review")
+    return review if isinstance(review, dict) else {}
+
+
+def review_problem(result, *, require_review_sources=False):
+    review = review_record(result)
+    status = review.get("status")
+    head = result.get("head")
+    sources = review.get("sources")
+    if status == "pending":
+        return "Independent review is pending"
+    if status != "passed":
+        return "Independent review is missing"
+    if not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", head):
+        return "Result head must be a full commit SHA"
+    if review.get("head") != head:
+        return "Independent review head differs from result head"
+    if not isinstance(sources, list) or not sources or any(
+        not isinstance(source, str) or not source.strip() for source in sources
+    ):
+        return "Independent review sources are missing"
+    if require_review_sources and not {"claude", "agy", "codex"}.issubset(sources):
+        return "Independent review record must list claude, agy and codex"
+    return None
+
+
+def gate_review_result(result, *, require_review_sources):
+    if require_review_sources:
+        result = gate_required_reviews(result)
+    status = result["status"]
+    if status != "ready" and not reviewable_completion(result):
+        return result
+    reason = review_problem(result, require_review_sources=require_review_sources)
+    if not reason:
+        return result
+    if status == "ready":
+        return {**result, "status": "blocked", "phase": "review-state", "summary": reason}
+    warning = result.get("review_warning")
+    return {**result, "review_warning": f"{warning} | {reason}" if warning else reason}
 
 
 def report_review(args):
@@ -534,11 +593,15 @@ def report_review(args):
         validate_result(result)
         if result["status"] not in {"ready", "blocked"}:
             raise ValueError("report-review expects a ready or blocked report")
-        gated = gate_required_reviews(result)
+        receipt = path.with_name("run.json")
+        # Preserve the three-source gate for callers that do not have a dispatch receipt.
+        required = load_run(receipt).get("require_review_sources", False) if receipt.exists() else True
+        gated = gate_review_result(result, require_review_sources=required)
         serialized = serialize_result(gated)
         if gated is not result and len(serialized.encode("utf-8")) > RESULT_LIMIT:
-            names = ", ".join(missing_reviews(result))
-            gated["summary"] = f"{names}: see review_sources"
+            phase = gated["phase"]
+            names = ", ".join(missing_reviews(result)) if phase == "review-sources" else "Independent review"
+            gated["summary"] = f"{names}: see review record"
             serialized = serialize_result(gated)
             if len(serialized.encode("utf-8")) > RESULT_LIMIT:
                 with tempfile.NamedTemporaryFile(
@@ -547,7 +610,7 @@ def report_review(args):
                     details.write(serialized)
                 details_path = Path(details.name)
                 serialized = serialize_result({
-                    "status": "blocked", "phase": "review-sources",
+                    "status": "blocked", "phase": phase,
                     "summary": f"{names}: see {details_path.name} for review details",
                     "evidence": str(details_path.resolve()),
                 })
@@ -1915,6 +1978,13 @@ def brief_report(report):
         summary = " ".join(f"{name}={value}ms" if value is not None else f"{name}=?"
                            for name, value in durations.items())
         fields += (summary,)
+    review_status = review_record(result).get("status")
+    if review_status == "passed" and review_problem(result):
+        review_status = "missing"
+    elif (result.get("phase") in {"review-state", "review-sources"} or warning) and review_status != "pending":
+        review_status = "missing"
+    if review_status in ("passed", "missing", "pending"):
+        fields += (f"review={review_status}",)
     return " · ".join((report["address"], *(field(value) or "-" for value in fields)))
 
 
@@ -2108,7 +2178,7 @@ def child_stop_reason(terminal, run, result, written, stall_minutes, drift=((), 
 
 
 def repeated_review_categories(result):
-    if not result or result["status"] != "blocked" or result["phase"] == "review-sources":
+    if not result or result["status"] != "blocked" or result["phase"] in {"review-sources", "review-state"}:
         return []
     history = result.get("review_sendbacks")
     if not isinstance(history, list) or len(history) < 2:
@@ -2154,8 +2224,8 @@ def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadli
             raise
         print(error, file=sys.stderr)
         result, written = None, None
-    if result and run.get("require_review_sources"):
-        result = gate_required_reviews(result)
+    if result:
+        result = gate_review_result(result, require_review_sources=run.get("require_review_sources", False))
     timeout = remaining_wait(deadline) if deadline is not None else None
     if deadline is not None and run.get("closed_reason"):
         return {"address": run["address"], "status": None, "state": "finished", "result": result,

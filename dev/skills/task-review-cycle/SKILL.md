@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.21.0
+version: 1.22.1
 ---
 # Dev Review Cycle
 Review workflow adapted from [How the Claude Code team does code review](https://claude.dev/blog/solving-code-review-at-anthropic/) (2026-10-15).

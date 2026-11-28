@@ -66,3 +66,19 @@ normal checked resend flow using that prompt and receipt. Retry a withheld deliv
 `dispatch.py release-reservation <repo> <id>`. The release only removes an unconsumed
 reservation. A child's completed claim remains visible through its ordinary worktree claim.
 Use `wait --first` after delivery and keep merges into the base sequential.
+
+## Home merges a child PR
+
+Verify the original user grant authorizes the home session to merge the exact repository
+and PR under the handoff limits. If the child's archived contract is `pr-only`, preserve it.
+Archive the home grant with `cycle_state.py save` from a separate home-owned feature branch in
+the target repo. Scope that contract to the repository, PR and feature branch to be merged and
+record the verified grant with `base-merge` as its allowed action.
+
+Before merging, match the live PR to that scope and apply the review and CI checks in
+`SKILL.md` → *Push and merge*. Merge one PR at a time. Syncing the pushed branch with its
+base keeps the push fast-forward, and squash-merging the PR keeps that sync commit off the base.
+In the target repo, run `cycle_state.py authorize --branch
+<home-contract-branch> --action base-merge` per
+`../../task-next/references/git-authorization.md` → *Check before execution*. On GitHub, pass the
+same checked SHA to `gh pr merge --match-head-commit` and use the merge strategy the user granted.

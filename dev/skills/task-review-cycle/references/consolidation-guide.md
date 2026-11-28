@@ -68,7 +68,8 @@ For dispatched work, record each review launch and consolidation per *Dispatch t
   the re-review on a lite repair. Reuse the primary reviewer, with the current diff and targeted
   evidence. Record its launch in `cycle_state.py note` before calling it. A timeout or
   unavailable result consumes the launch. A new HEAD, CI repair, or route
-  change does not reset the budget or restart the panel.
+  change does not reset the budget or restart the general panel. For dispatched pre-merge
+  verification on a new head, follow *Dispatch pre-merge report*.
 - Apply the normal gate until the one general re-review has been consolidated. If unused,
   keep the normal gate through late reclaim. Record closure in `cycle_state.py note` after
   consolidating the re-review, or when ready without it. Route valid new ordinary findings
@@ -163,33 +164,60 @@ to the CI wait and merge helper per `ci-failure-handling.md`. For a separately v
 
 ## Dispatch pre-merge report
 
-Dispatched Codex task cycles require the hub's Claude primary and the agy and Codex panel
-sources. Use their consolidated outcomes from Step 3 and late reclaim. The primary slot
-requires the independent Claude result. A missing source blocks both readiness and an
-authorized base merge. Keep a pending process running and preserve its result path for resume.
-Follow the existing review budget when reclaiming the result.
+All dispatched PRs report the reviewed head and sources. For receipts with
+`require_review_sources`, consolidate the independent Claude primary and the agy and Codex panel
+results from Step 3 and late reclaim. A missing required source blocks readiness and merge.
+Keep pending results available for resume and follow the existing review budget when reclaiming.
 
 After final verification, pass the pre-merge report as UTF-8 JSON on stdin to the installed
-dispatch script. Use the assigned path from the handoff. Include the usual head, PR, CI and
-evidence fields. Set `review_sources` to an object with the keys `claude`, `agy` and `codex`.
-Use `"complete"` only for a completed, consolidated independent result. Otherwise give the
-reason, such as `"approval denied"`, `"policy excluded"` or `"still running"`.
+dispatch script. Use the assigned path beside the current dispatch receipt. The helper applies
+the receipt's reviewer requirements, so Claude continuations report the independent reviews
+required by their review route. A report without a receipt uses the three-source gate.
+Include the full PR head SHA in `head` and the usual PR, CI and evidence fields. Record the commit
+the independent results cover in `review.head` (use `null` when unavailable) and list the reviewers in
+`review.sources`. Set `review.status` to `passed` when the required reviews pass for that
+head, `pending` while awaiting a result, or `missing` when a required result is unavailable.
+Carry the reviewed SHA forward from the evidence. Collection preserves PR completion reports
+and warns when their review record or required source results are missing, stale or incomplete.
+
+After a repair or a home-side resync changes the head, the child resumes at final verification.
+Confirm that the local checkout matches the current PR head and recover the prior source results.
+Obtain one read-only confirmation for the current SHA from each required source whose result
+covers a different head. Give each source the previous SHA, its findings and the delta to check.
+Use the regular source launch when no prior result exists. The disposition and re-review budgets still
+apply to code findings. Reclaim agy results from the matching invocation directory per
+`late-source-reclaim.md`. Record the outcomes on the current SHA before reporting ready. Resume
+a legacy report the same way, using archived evidence that identifies the reviewed head.
+
+For a receipt with `require_review_sources`, set `review_sources` to an object with the keys
+`claude`, `agy` and `codex`. Use `"complete"` only for a completed, consolidated independent
+result. Otherwise give the reason, such as `"approval denied"`, `"policy excluded"` or
+`"still running"`.
 
 ```bash
 DISPATCH="<absolute path to dev/skills/dispatch/scripts/dispatch.py>"
 RESULT="<assigned result.json path>"
 python3 -I "$DISPATCH" report-review "$RESULT" <<'REPORT_JSON'
-{"status":"ready","phase":"review","summary":"Final checks passed","review_sources":{"claude":"complete","agy":"still running","codex":"complete"}}
+{
+  "status": "blocked",
+  "phase": "review-sources",
+  "summary": "agy: still running",
+  "head": "<PR head SHA>",
+  "review": {
+    "head": "<reviewed commit SHA>",
+    "sources": ["claude", "codex"],
+    "status": "pending"
+  },
+  "review_sources": {"claude": "complete", "agy": "still running", "codex": "complete"}
+}
 REPORT_JSON
 ```
 
-For a pre-merge stop, pass `status: ready` when the other final gates pass. The helper writes
-`blocked` with the missing reviewers and reasons in this example. If another gate failed, pass
-`status: blocked` and state that blocker. A child authorized to merge proceeds to the merge
-helper only when all three sources and the other final gates pass. If a reviewer is missing,
-use the same candidate report to publish the block. Carry the outcomes into the confirmed
-merge report. Home collection checks PR completion reports from Codex task receipts before
-handing them to the merge owner.
+For a pre-merge stop, pass `status: ready` once all required reviews and final gates pass on
+the reported head. For a failed gate, pass `status: blocked` and state the blocker. A child
+authorized to merge proceeds to the merge helper only when the review and final gates pass on
+the current PR head. In the confirmed merge report, keep that PR head in `head` and carry forward
+the review record and source outcomes.
 
 ## Record finding dispositions
 

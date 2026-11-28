@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 3.9.0
+version: 3.10.2
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo listed in
   the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to
@@ -212,12 +212,12 @@ The user delegates the session's decisions to this session:
   recommendation unless it conflicts with the request or the repo; add a correction when it is
   missing something. Answer with `hc send <address> '<answer>'`, then tell the user in one line what
   was chosen and why. Honor Git limits and step 2's batch authorization rule.
-- **Push and merge** — follow the user's original authorization and limits (else the dispatch default), and wait until
-  the commit has passed the target repo's review cycle. Prepare independent PRs in parallel and
-  merge one at a time. Once a parallel PR branch has been pushed, fetch and merge its PR base
-  (for example, `origin/main`) into it. Preserve both sides of shared file-queue entries and rerun
-  required checks on the final head. This keeps pushes fast-forward and the merge commit
-  stays off main when the PR is squash-merged.
+- **Push and merge** — follow the original Git limits or applicable dispatch default. Prepare PRs in parallel. Once a
+  parallel PR branch has been pushed, fetch and merge its PR base, preserving shared queue entries from both sides.
+  If HEAD changed or review evidence is missing, use *Continue with another phase* to refresh the *Dispatch pre-merge report*.
+  Require full `collect` to show `result.status == "ready"` and `result.review.status == "passed"`, with `result.review.head`
+  and `result.head` matching the live PR head and required CI passing there. Follow *Home merges a child PR* in
+  `references/launch-handoff.md` for merge authority, the GitHub SHA check, and merge order.
 - **Leave to the user** — force-push, deleting branches or worktrees outside the cycle's own
   cleanup, anything else destructive, a repeated-review scope decision (`scope_decision_categories`
   in collect), and any decision the user kept. Tell the user what is waiting and stop watching.
@@ -244,7 +244,7 @@ or report its path if files remain. If close fails, keep the receipt files for d
 ### Continue with another phase
 
 Reuse the Codex session and worktree for the next authorized phase with
-`dispatch.py send --run <receipt> --continue -- <address> '<phase and any new authorization>'`. Use the same receipt
-for send and close. Point to the contract and evidence that still applies. Preserve the original authority and record
-new verified grants in the contract. For a Claude slash-only phase, launch again with the command first and include
-the contract and worktree.
+`dispatch.py send --run <receipt> --continue -- <address> '<phase and any new authorization>'`. Use the same receipt to
+send and close. Carry the contract and applicable evidence forward, preserve original authority, and archive new grants.
+Relaunch Claude with its command first, then the contract, worktree and review evidence. Include the PR and current SHA
+for review, and collect the updated result from the continuation receipt.
