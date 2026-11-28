@@ -1985,7 +1985,6 @@ class WorkflowDocsTests(unittest.TestCase):
 
 class PeekTests(unittest.TestCase):
     def test_codex_capture_keeps_work_and_followup(self):
-        # Excerpt from hc read of the dispatch for #512, with handoff values shortened.
         screen = """
   >_ OpenAI Codex (v0.172.0)
      ~/Dev/agent-toolkit
@@ -2020,7 +2019,6 @@ class PeekTests(unittest.TestCase):
         ])
 
     def test_claude_capture_keeps_response(self):
-        # Excerpt from hc read of a Claude launch in an empty fixture directory.
         screen = """
  ▐▛███▛█   Claude Code v2.1.332
 ▝▜██████▀  Opus 5.5 · Claude Team
@@ -2053,6 +2051,32 @@ Context 3% │ 5h: 21% (1h 43m) │ 7d: 59% (4d 4h) │ cache 59m
             "⚠ Code Mode (experimental) is on · this session can be resumed only with Code Mode on",
             "", "● Fixture response.", "", "✻ Sautéed for 1s · done 오전 9:26",
         ])
+
+    def test_hidden_codex_composer_preserves_indented_work(self):
+        screen = "› a task\n\n  • Completed\n\n  GPT-6.2-Sol medium · main\n  ← for agents · ? for shortcuts"
+        self.assertEqual(filtered_transcript(screen, "codex"), ["› a task", "", "  • Completed"])
+
+    def test_cropped_dispatch_echo_is_removed(self):
+        screen = '    "Assigned unit": "issue #512"\n  }\n  </dispatch-handoff>\n'
+        screen += "\n  Write progress at phase boundaries.\n\n• Checking evidence."
+        self.assertEqual(filtered_transcript(screen, "codex"), ["• Checking evidence."])
+
+    def test_handoff_filter_preserves_indented_claude_error(self):
+        screen = ("❯ /dev:task-next\n\n  Handoff metadata (JSON):\n  <dispatch-handoff>\n"
+                  "  {}\n  </dispatch-handoff>\n  ⎿  API Error: Usage Policy")
+        self.assertEqual(filtered_transcript(screen, "claude"), ["  ⎿  API Error: Usage Policy"])
+
+    def test_handoff_filter_preserves_indented_codex_hook_notice(self):
+        screen = ("› $task-next #512\n\n  Handoff metadata (JSON):\n  <dispatch-handoff>\n"
+                  "  {}\n  </dispatch-handoff>\n  Hooks need review")
+        self.assertEqual(filtered_transcript(screen, "codex"), ["  Hooks need review"])
+
+    def test_alternative_claude_status_and_codex_working_timer(self):
+        rule = "─" * 30
+        claude = f"● Fixture response.\n\n~/repo · main · 12%\n{rule}\n❯\n{rule}"
+        codex = "• Checking evidence.\n\nWorking (1m 59s • esc to interrupt)\n\n› Ask Codex to do anything"
+        self.assertEqual(filtered_transcript(claude, "claude"), ["● Fixture response."])
+        self.assertEqual(filtered_transcript(codex, "codex"), ["• Checking evidence."])
 
     def test_peek_cursor_survives_history_rollover_and_keeps_receipt_fields(self):
         terminal = {"address": "t7", "parent": "t1", "created_ms": 42}
@@ -2087,6 +2111,7 @@ Context 3% │ 5h: 21% (1h 43m) │ 7d: 59% (4d 4h) │ cache 59m
 
     def test_streamed_line_redraw_and_no_overlap(self):
         self.assertEqual(transcript_offset(["ready", "stream"], ["ready", "streamed", "next"]), 1)
+        self.assertEqual(transcript_offset(["old", "ready", "stream"], ["ready", "streamed", "next"]), 1)
         self.assertEqual(transcript_offset(["irrelevant"], ["new"]), 0)
 
 

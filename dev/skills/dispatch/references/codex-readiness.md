@@ -200,8 +200,8 @@ Read the live screen with `hc read --lines 0 <address>` before resolving a block
 Retry with `dispatch.py send --run <receipt> -- <address> '<first message>'` once the hooks are
 active, all blockers are resolved, and the composer is clear. If the source cannot be verified,
 approval is unavailable during manual review, or a warning remains, report the blocker and
-withhold the task. For an unconfirmed send, use `dispatch.py peek <receipt>` to check whether
-the task already started before retrying. Inspect the raw screen for drafts and dialogs.
+withhold the task. For an unconfirmed send, check for work with `dispatch.py peek <receipt>`.
+If no work is visible, inspect the raw screen for the submitted prompt, drafts, or dialogs before retrying.
 
 A send hold with a clear composer can indicate a stale installed plugin. Update it or use the current script.
 If a marketplace update replaced the installed directory, run `send --run <receipt>` using

@@ -990,11 +990,11 @@ def print_screen_tail(address, text, run):
 
 
 def transcript_end(lines, cli):
-    """Locate the live composer using each CLI's footer, keeping dialog text visible."""
     if cli == "codex":
+        footer = footer_boundary(lines, -1)
         for index in reversed(range(len(lines))):
             row = lines[index]
-            if row.startswith(CODEX_OUTPUT_MARKERS):
+            if row.lstrip().startswith(CODEX_OUTPUT_MARKERS) or row.startswith("  ›"):
                 break
             if row.startswith("›"):
                 placeholder = row[1:].strip() == "Ask Codex to do anything"
@@ -1002,6 +1002,7 @@ def transcript_end(lines, cli):
                         or (placeholder and index == len(lines) - 1)):
                     return index
                 break
+        return footer if footer is not None else len(lines)
     elif cli == "claude":
         rules = [index for index, row in enumerate(lines) if re.fullmatch(r"─{10,}", row)]
         if len(rules) >= 2:
@@ -1014,8 +1015,23 @@ def transcript_end(lines, cli):
                     start -= 2
                     if start and lines[start - 1].strip() in {"[-]", "[+]"}:
                         start -= 1
+                elif (start and (start == 1 or not lines[start - 2])
+                      and re.match(r"^\s*(?:~|…|[A-Za-z]:)?[/\\]\S.* [·│].* \d+%", lines[start - 1])):
+                    start -= 1
                 return start
     return len(lines)
+
+
+def prompt_block_end(lines, start, cli):
+    end = start + 1
+    while end < len(lines) and (not lines[end] or lines[end].startswith("  ")):
+        row = lines[end].lstrip()
+        if row.startswith("⎿" if cli == "claude" else "└") or HOOK_BLOCKER.match(row):
+            break
+        if cli == "codex" and not lines[end - 1] and row.startswith(CODEX_OUTPUT_MARKERS):
+            break
+        end += 1
+    return end
 
 
 def filtered_transcript(text, cli):
@@ -1023,8 +1039,18 @@ def filtered_transcript(text, cli):
     lines = lines[:transcript_end(lines, cli)]
     filtered = []
     index = 0
+    first = next((i for i, row in enumerate(lines) if row), len(lines))
+    if first < len(lines) and lines[first].startswith("  "):
+        end = prompt_block_end(lines, first, cli)
+        if any(line.strip() in {"<dispatch-handoff>", "</dispatch-handoff>"}
+               or line.strip().startswith("Write progress at phase boundaries and the final report as UTF-8 JSON to ")
+               for line in lines[first:end]):
+            index = end
     while index < len(lines):
         row = lines[index]
+        if cli == "codex" and re.fullmatch(r"\s*(?:• )?Working \([\d hms]+ • esc to interrupt\)", row):
+            index += 1
+            continue
         if cli == "codex" and not filtered and re.match(r"^\s*[╭│]?\s*>_ OpenAI Codex \(v", row):
             index += 1
             while index < len(lines) and lines[index].lstrip().startswith(("│", "╰")):
@@ -1043,9 +1069,7 @@ def filtered_transcript(text, cli):
                 index += 1
             continue
         if row.startswith("›" if cli == "codex" else "❯"):
-            end = index + 1
-            while end < len(lines) and (not lines[end] or lines[end].startswith("  ")):
-                end += 1
+            end = prompt_block_end(lines, index, cli)
             block = lines[index:end]
             if (any(line.strip() == "<dispatch-handoff>" for line in block)
                     and any(line.strip() == "Handoff metadata (JSON):" for line in block)):
@@ -1060,11 +1084,10 @@ def filtered_transcript(text, cli):
 
 
 def transcript_offset(previous, current):
-    # History rolls out of Herdr's bounded tail. Find the largest retained overlap.
     for size in range(min(len(previous), len(current)), 0, -1):
-        if previous[-size:] == current[:size]:
+        prefix = current[:size]
+        if previous[-size:] == prefix or previous[-size - 1:-1] == prefix:
             return size
-    # A streaming response can redraw the final line before appending more output.
     for index, (before, after) in enumerate(zip(previous, current)):
         if before != after:
             return index
@@ -1078,13 +1101,12 @@ def peek(args):
         address = run["address"]
         try:
             verify_terminal(run, hc_json("get", address, timeout=LAUNCH_LOOKUP_SECONDS))
-            snapshot = hc_json("read", "--lines", "40", address, timeout=LAUNCH_LOOKUP_SECONDS)
+            snapshot = hc_json("read", "--lines", "120", address, timeout=LAUNCH_LOOKUP_SECONDS)
             verify_terminal(run, hc_json("get", address, timeout=LAUNCH_LOOKUP_SECONDS))
             lines = filtered_transcript(snapshot["text"], run["cli"])
-            # Store fingerprints, so the receipt does not duplicate transcript contents.
-            cursor = [hashlib.sha256(row.encode("utf-8")).hexdigest() for row in lines]
-            start = transcript_offset(run.get("peek_cursor", []), cursor) if args.since_last else 0
-            run["peek_cursor"] = cursor
+            row_fingerprints = [hashlib.sha256(row.encode("utf-8")).hexdigest() for row in lines]
+            start = transcript_offset(run.get("peek_cursor", []), row_fingerprints) if args.since_last else 0
+            run["peek_cursor"] = row_fingerprints
             write_json(path, run)
         except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
             raise SystemExit(f"{address}: could not peek at the terminal ({error})") from None
