@@ -106,6 +106,42 @@ def fail(case, detail):
     sys.exit(1)
 
 
+def case_auto_detect_preserves_paths(tmp):
+    case = "auto-detected paths are staged literally"
+    repo = make_repo(tmp)
+    path = repo / "docs" / "Release Notes.md"
+    path.parent.mkdir()
+    path.write_text("original\n")
+    git(repo, "add", "--", str(path))
+    git(repo, "commit", "-qm", "[TEST] add release notes")
+    path.write_text("updated\n")
+    proc = subprocess.run(
+        ["bash", str(SCRIPT), "--message", "[TEST] update release notes", "--no-push"],
+        cwd=repo, capture_output=True, text=True, check=False,
+    )
+    if proc.returncode != 0 or name_status(repo) != ["M\tdocs/Release Notes.md"]:
+        fail(case, f"exit {proc.returncode}, stderr: {proc.stderr!r}, commit: {name_status(repo)!r}")
+    print(f"OK: {case}")
+
+
+def case_auto_detect_from_subdirectory(tmp):
+    case = "auto-detection covers the whole repo from a subdirectory"
+    repo = make_repo(tmp)
+    docs = repo / "docs"
+    docs.mkdir()
+    notes = docs / "Release Notes.md"
+    notes.write_text("notes\n")
+    (repo / "keep.md").write_text("updated\n")
+    proc = subprocess.run(
+        ["bash", str(SCRIPT), "--message", "[TEST] update docs", "--no-push"],
+        cwd=docs, capture_output=True, text=True, check=False,
+    )
+    expected = ["A\tdocs/Release Notes.md", "M\tkeep.md"]
+    if proc.returncode != 0 or name_status(repo) != expected:
+        fail(case, f"exit {proc.returncode}, stderr: {proc.stderr!r}, commit: {name_status(repo)!r}")
+    print(f"OK: {case}")
+
+
 def case_staged_deletion(tmp):
     """The reported bug: deletion already staged, path still in the --files list."""
     repo = make_repo(tmp)
@@ -686,6 +722,8 @@ def main():
     try:
         case_remote_boundaries(tmp)
         case_implementation_only_blocks_before_commit(tmp)
+        case_auto_detect_preserves_paths(tmp)
+        case_auto_detect_from_subdirectory(tmp)
         case_staged_deletion(tmp)
         case_explicit_paths_preserve_unrelated_staged_changes(tmp)
         case_explicit_paths_allow_merge_commit(tmp)
