@@ -13,7 +13,8 @@
 #                      and report. For a clean resumed branch, where there is no
 #                      new commit to guard but HEAD is still about to be pushed
 #                      or merged.
-#   --files <list>     Space-separated file paths to stage (default: auto-detect via changed-files.sh)
+#   --files <list>     Space-separated paths to stage and commit; refuse other staged paths
+#                      (default: auto-detect via changed-files.sh).
 #   --prefer-staged    A non-empty index is committed exactly as staged, staging
 #                      nothing more. An empty index on a branch ahead of --base
 #                      commits nothing (dirt in unstaged_left): --verify-head
@@ -64,6 +65,7 @@ source "$SCRIPT_DIR/git-authority.sh"
 
 MESSAGE=""
 FILES=""
+EXPLICIT_FILES=false
 NO_PUSH=false
 NO_COMMIT=false
 PREFER_STAGED=false
@@ -74,7 +76,7 @@ BASE_BRANCH="main"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --message) MESSAGE="$2"; shift 2 ;;
-    --files)   FILES="$2";   shift 2 ;;
+    --files)   FILES="$2"; EXPLICIT_FILES=true; shift 2 ;;
     --no-push) NO_PUSH=true; shift ;;
     --no-commit) NO_COMMIT=true; shift ;;
     --prefer-staged) PREFER_STAGED=true; shift ;;
@@ -89,11 +91,11 @@ if [ -z "$MESSAGE" ] && [ "$VERIFY_HEAD" != "true" ]; then
   echo "ERROR: --message is required" >&2
   exit 1
 fi
-if [ "$NO_COMMIT" = "true" ] && { [ "$NO_PUSH" = "true" ] || [ -n "$FILES" ]; }; then
+if [ "$NO_COMMIT" = "true" ] && { [ "$NO_PUSH" = "true" ] || [ "$EXPLICIT_FILES" = "true" ]; }; then
   echo "ERROR: --no-commit cannot be combined with --no-push or --files" >&2
   exit 1
 fi
-if [ "$PREFER_STAGED" = "true" ] && { [ "$NO_COMMIT" = "true" ] || [ -n "$FILES" ]; }; then
+if [ "$PREFER_STAGED" = "true" ] && { [ "$NO_COMMIT" = "true" ] || [ "$EXPLICIT_FILES" = "true" ]; }; then
   echo "ERROR: --prefer-staged cannot be combined with --no-commit or --files" >&2
   exit 1
 fi
@@ -191,10 +193,14 @@ fi
 # --- Resolve file list ---
 # --no-commit leaves FILES empty, so the clean-tree branch below publishes HEAD as-is;
 # a staged-only commit never stages, so it skips detection too.
-if [ -z "$FILES" ] && [ "$NO_COMMIT" != "true" ] && [ "$STAGED_ONLY" != "true" ]; then
+if [ "$EXPLICIT_FILES" != "true" ] && [ "$NO_COMMIT" != "true" ] && [ "$STAGED_ONLY" != "true" ]; then
   FILES=$(bash "$SCRIPT_DIR/changed-files.sh" | tr '\n' ' ')
 fi
 FILES=$(echo "$FILES" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')
+if [ "$EXPLICIT_FILES" = "true" ] && [ -z "$FILES" ]; then
+  echo '{"error": "--files requires at least one path"}' >&2
+  exit 1
+fi
 
 # Check requested PR authority before any push in a combined publish/PR call.
 if [[ "$CREATE_PR" == true && "$VERIFY_HEAD" != true && "$NO_PUSH" != true ]]; then
@@ -240,15 +246,30 @@ elif [ -n "$FILES" ]; then
   # still fires. Dropping those too would turn a loud abort into a quietly
   # incomplete commit that then goes to review and merge.
   STAGE=()
+  REQUESTED=()
   # Word-split is intentional here: FILES is a space-separated list of paths.
   # shellcheck disable=SC2086
   for f in $FILES; do
+    if [ "$EXPLICIT_FILES" = "true" ]; then
+      REQUESTED+=("$f")
+    fi
     if [ -e "$f" ] || [ -L "$f" ] || git ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then
       STAGE+=("$f")
     elif [ -z "$(git diff --cached --name-only --diff-filter=D -- "$f")" ]; then
       STAGE+=("$f")
     fi
   done
+  if [ "$EXPLICIT_FILES" = "true" ]; then
+    # Compare path sets without rename detection so a rename counts as both
+    # its deletion and addition. Git requires a whole-index merge commit.
+    DIFF_ARGS=(--cached --name-only --no-renames --no-relative --ignore-submodules=none)
+    ALL_STAGED=$(git diff "${DIFF_ARGS[@]}")
+    LISTED_STAGED=$(git diff "${DIFF_ARGS[@]}" -- "${REQUESTED[@]}")
+    if [ "$ALL_STAGED" != "$LISTED_STAGED" ]; then
+      echo '{"error": "--files excludes staged paths; list them explicitly or unstage them"}' >&2
+      exit 1
+    fi
+  fi
   # Guard the expansion: bash 3.2 (macOS system bash) errors on "${arr[@]}" for
   # an empty array under `set -u`.
   if [ "${#STAGE[@]}" -gt 0 ]; then

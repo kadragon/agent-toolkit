@@ -147,6 +147,8 @@ import os
 import re
 import subprocess
 import sys
+from bisect import bisect_right
+from itertools import accumulate
 
 # ---------------------------------------------------------------------------
 # Pure-function core (testable without real filesystem)
@@ -230,7 +232,7 @@ def _is_blocked(text: str) -> bool:
     )
 
 
-def _strip_html_comments(text: str) -> str:
+def _strip_html_comments(text: str, *, spans: dict[int, int] | None = None) -> str:
     """Blank out `<!-- ... -->` spans, preserving line count so token line numbers stay 1-based.
 
     The trailing-newline guard is the same class of fix as `_scan_fenced_blocks`'s `+ "\\n" if out`
@@ -264,7 +266,12 @@ def _strip_html_comments(text: str) -> str:
     # first break, or the text after a single-line comment — into one "\r\n" break. Tracked on
     # what was emitted, not the source, so back-to-back comments are covered too.
     out, pos, tail = [], 0, ""
+    offsets = list(accumulate(map(len, text.splitlines(keepends=True)), initial=0)) if spans is not None else []
     for m in _HTML_COMMENT_RE.finditer(text):
+        if spans is not None:
+            start = bisect_right(offsets, m.start())
+            stop = bisect_right(offsets, m.end() - 1)
+            spans[start] = max(spans.get(start, start), stop)
         before = text[pos:m.start()]
         tail = before[-1:] or tail
         breaks = len(m.group(0).splitlines()) - 1
@@ -281,7 +288,7 @@ def _strip_html_comments(text: str) -> str:
     return "".join(out)
 
 
-def _scan_fenced_blocks(text: str) -> tuple[str, int | None]:
+def _scan_fenced_blocks(text: str, *, spans: dict[int, int] | None = None) -> tuple[str, int | None]:
     """Blank out fenced code blocks, preserving line count so token line numbers stay 1-based.
 
     A `#`/`##`/`###` line inside a ```-fenced sample is markup, not a heading — and treating it as
@@ -325,6 +332,8 @@ def _scan_fenced_blocks(text: str) -> tuple[str, int | None]:
         # whitespace after it, closes. A shorter or differently-charactered run is just content.
         m = _FENCE_RE.match(line)
         if m and m.group(1)[0] == fence_char and len(m.group(1)) >= fence_len and not m.group(2).strip():
+            if spans is not None:
+                spans[opened_at] = max(spans.get(opened_at, opened_at), len(out) + 1)
             fence_char = None
             fence_len = 0
             opened_at = None
@@ -334,7 +343,16 @@ def _scan_fenced_blocks(text: str) -> tuple[str, int | None]:
     # `.splitlines()` — silently breaking the line-count contract in the one case with no content
     # after the fence to make the drift visible. Guard the empty input, whose join is already "".
     blanked = "\n".join(out) + "\n" if out else ""
+    if spans is not None and opened_at is not None:
+        spans[opened_at] = len(out)
     return blanked, opened_at
+
+
+def markup_line_ends(text: str) -> dict[int, int]:
+    """Map each comment or fence opener's line to its inclusive closing line."""
+    spans: dict[int, int] = {}
+    _scan_fenced_blocks(_strip_html_comments(text, spans=spans), spans=spans)
+    return spans
 
 
 def _strip_fenced_blocks(text: str) -> str:
