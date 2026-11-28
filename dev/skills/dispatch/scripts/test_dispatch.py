@@ -1245,6 +1245,7 @@ class DispatchReceiptTests(DispatchTestCase):
         self.assertFalse(requires_review_sources({"review_policy": "head-bound", "require_review_sources": True}))
         self.assertTrue(requires_review_sources({"review_policy": "three-source"}))
         self.assertTrue(requires_review_sources({"review_policy": "typo", "require_review_sources": False}))
+        self.assertTrue(requires_review_sources({"review_policy": None}))
         self.assertTrue(requires_review_sources({"review_policy": "unknown"}))
         self.assertTrue(requires_review_sources({"require_review_sources": True}))
         self.assertFalse(requires_review_sources({}))

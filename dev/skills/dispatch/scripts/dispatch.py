@@ -573,11 +573,9 @@ def review_record(result):
 
 def requires_review_sources(run):
     """Receipts launched with an explicit review_policy never use the legacy require_review_sources flag."""
-    policy = run.get("review_policy")
-    if policy is not None:
-        if policy == "head-bound":
-            return False
-        return True  # three-source, or an unrecognized policy: fail closed
+    if "review_policy" in run:
+        # Only head-bound relaxes the gate; three-source, null or unrecognized values fail closed.
+        return run["review_policy"] != "head-bound"
     return run.get("require_review_sources", False)
 
 

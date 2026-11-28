@@ -170,7 +170,8 @@ results from Step 3 and late reclaim. A missing required source blocks readiness
 Keep pending results available for resume and follow the existing review budget when reclaiming.
 
 After final verification, pass the pre-merge report as UTF-8 JSON on stdin to the installed
-dispatch script. Use the assigned path beside the current dispatch receipt. The helper applies
+dispatch script. Use the assigned path beside the current dispatch receipt. The helper exits 0 even
+when it rewrites the report as `blocked`; re-read `result.json` and proceed only on `status: ready`. The helper applies
 the receipt's reviewer requirements, so Claude continuations report the independent reviews
 required by their review route. A report without a receipt uses the three-source gate.
 Include the full PR head SHA in `head` and the usual PR, CI and evidence fields. Record the commit
