@@ -97,7 +97,9 @@ UNSTABLE_FEATURES_NOTICE = re.compile(
 WARNING_VIEW_TITLE = re.compile(r"Warnings · \d+ of \d+ · .+")
 STARTUP_WARNING_TITLE = re.compile(r"Warnings · ([1-9][0-9]*) of ([1-9][0-9]*) · Startup")
 WARNING_VIEW_FOOTER = re.compile(
-    r"k keep & next · esc dismiss & close(?: · \S+ copy)?(?: · \S+ warning)?", re.IGNORECASE)
+    r"^k\skeep\s&\snext\s·\sesc\sdismiss\s&\sclose(?:\s·\s\S+\scopy)?(?:\s·\s\S+\swarning)?\Z",
+    re.IGNORECASE | re.MULTILINE,
+)
 PASTED_CONTENT = re.compile(r"\[Pasted Content \d+ chars\](?: #\d+)?")
 HERDR_MESSAGE = re.compile(r'^<hc\s+from="[^"]+"(?:\s+[\w-]+="[^"]*")*>\s*(.*?)\s*</hc>$', re.DOTALL)
 CODEX_STATUS_LINE = re.compile(
@@ -1588,14 +1590,17 @@ def startup_warning_page(text):
     title = STARTUP_WARNING_TITLE.fullmatch(rows[index])
     if not title:
         return None
-    body = rows[index + 1:]
-    if body and WARNING_VIEW_FOOTER.fullmatch(body[-1]):
-        body.pop()
-    notice = " ".join(body)
-    if notice == HOOK_BYPASS_NOTICE or UNSTABLE_FEATURES_NOTICE.fullmatch(notice):
-        page, count = map(int, title.groups())
-        return page, count, notice
-    return None
+    body = "\n".join(rows[index + 1:])
+    if footer := WARNING_VIEW_FOOTER.search(body):
+        body = body[:footer.start()].rstrip("\n")
+    notice = body.replace("\n", " ")
+    if UNSTABLE_FEATURES_NOTICE.fullmatch(notice):
+        # Reflow at a directory separator does not add a space to the path.
+        notice = re.sub(r"(?<=[/\\])\n", "", body).replace("\n", " ")
+    elif notice != HOOK_BYPASS_NOTICE:
+        return None
+    page, count = map(int, title.groups())
+    return page, count, notice
 
 
 def send(args):
@@ -1853,9 +1858,12 @@ def send_task(args, run_path):
                 if not initial and not continuation:
                     if run and terminal["turn"] == 1:
                         screen_reads += 1
-                        snapshot = hc_json("read", "--lines", "0", address)
-                        initial = (snapshot["complete"] and snapshot["how"] == "screen"
-                                   and startup_composer(snapshot["text"]))
+                        snapshot, startup_text = read_codex_screen(address, with_text=True)
+                        if snapshot == "hooks":
+                            raise SystemExit(f"{address}: task withheld; inspect the Codex hook status with /hooks")
+                        if snapshot in {"warning", "warning-view"}:
+                            raise SystemExit(warning_withheld)
+                        initial = snapshot == "ready" and startup_composer(startup_text)
                     if not initial:
                         raise SystemExit(f"{address}: first task withheld; this child already started a turn")
                 if status == "idle" or (continuation and status == "done"):
