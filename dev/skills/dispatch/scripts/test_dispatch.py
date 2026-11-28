@@ -3060,6 +3060,76 @@ class CodexSendTests(DispatchTestCase):
                 self.assertEqual(operations, ["f2", "right", "esc", "send"])
                 self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], True)
 
+    def test_send_restarts_startup_warning_scan_from_a_later_page(self):
+        terminal = {**DispatchReceiptTests.TERMINAL, **self.IDLE}
+        first = self.BYPASS_NOTICE.replace("1 of 1", "1 of 3")
+        middle = self.UNSTABLE_FEATURES_NOTICE.replace("2 of 2", "2 of 3")
+        last = middle.replace("2 of 3", "3 of 3")
+        for recognized in (True, False):
+            with self.subTest(recognized=recognized), tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "run.json"
+                receipt.write_text(json.dumps({**DispatchReceiptTests.RECEIPT, "trust_hooks": True}),
+                                   encoding="utf-8")
+                first_page = first if recognized else first.replace("is enabled", "is disabled")
+                frames = iter([last, last, middle, first_page, middle, last])
+                operations = []
+
+                def respond(command, *args):
+                    if command == "get":
+                        return {**terminal, **self.WORKING} if operations[-1:] == ["send"] else terminal
+                    if command == "read":
+                        return self.screen(self.READY if "esc" in operations else next(frames))
+                    operations.append(args[-1] if command == "keys" else command)
+                    return {}
+
+                with patch("dispatch.hc_json", side_effect=respond), patch("dispatch.time.sleep"), \
+                        redirect_stdout(StringIO()):
+                    args = SimpleNamespace(address="t7", message="a task", run=receipt)
+                    if recognized:
+                        try:
+                            send(args)
+                        except SystemExit as error:
+                            self.fail(str(error))
+                    else:
+                        with self.assertRaisesRegex(SystemExit, "task withheld.*F2"):
+                            send(args)
+                expected = ["left", "left", "right", "right", "esc", "send"] if recognized else ["left", "left"]
+                self.assertEqual(operations, expected)
+                self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], recognized)
+
+    def test_send_waits_for_startup_warning_viewer_to_close(self):
+        terminal = {**DispatchReceiptTests.TERMINAL, **self.IDLE}
+        for closes in (True, False):
+            with self.subTest(closes=closes), tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "run.json"
+                receipt.write_text(json.dumps({**DispatchReceiptTests.RECEIPT, "trust_hooks": True}),
+                                   encoding="utf-8")
+                after_redraw = self.READY if closes else self.BYPASS_NOTICE
+                frames = iter([self.BYPASS_NOTICE, self.BYPASS_NOTICE, after_redraw])
+                operations = []
+
+                def respond(command, *args):
+                    if command == "get":
+                        return {**terminal, **self.WORKING} if operations[-1:] == ["send"] else terminal
+                    if command == "read":
+                        return self.screen(next(frames, after_redraw))
+                    operations.append(args[-1] if command == "keys" else command)
+                    return {}
+
+                with patch("dispatch.hc_json", side_effect=respond), patch("dispatch.time.sleep"), \
+                        redirect_stdout(StringIO()):
+                    args = SimpleNamespace(address="t7", message="a task", run=receipt)
+                    if closes:
+                        try:
+                            send(args)
+                        except SystemExit as error:
+                            self.fail(str(error))
+                    else:
+                        with self.assertRaisesRegex(SystemExit, "task withheld.*F2"):
+                            send(args)
+                self.assertEqual(operations, ["esc", "send"] if closes else ["esc"])
+                self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], closes)
+
     def test_startup_notice_requires_opt_in_and_recognized_pages(self):
         terminal = {**DispatchReceiptTests.TERMINAL, **self.IDLE}
         failure = "• Hook failed\n  └ SessionStart hook exited with code 1"
