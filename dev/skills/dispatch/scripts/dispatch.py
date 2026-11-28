@@ -70,7 +70,7 @@ UNSTABLE_FEATURES_NOTICE = re.compile(
     r"Under-development features enabled: [a-z0-9_]+(?:, [a-z0-9_]+)*\. "
     r"Under-development features are incomplete and may behave unpredictably\. "
     r"To suppress this warning, set `suppress_unstable_features_warning = true` in "
-    r"(?:(?:[A-Za-z]:|~)?[/\\](?:[^`]*[/\\])?)?config\.toml\.")
+    r"(?:(?:[A-Za-z]:|~)?[/\\](?:[^`]*[/\\])? *)?config\.toml\.")
 WARNING_VIEW_TITLE = re.compile(r"Warnings · \d+ of \d+ · .+")
 STARTUP_WARNING_TITLE = re.compile(r"Warnings · ([1-9][0-9]*) of ([1-9][0-9]*) · Startup")
 WARNING_VIEW_FOOTER = re.compile(
@@ -1006,8 +1006,10 @@ def startup_warning_page(text):
     if body and WARNING_VIEW_FOOTER.fullmatch(body[-1]):
         body.pop()
     notice = " ".join(body)
-    if notice == HOOK_BYPASS_NOTICE or UNSTABLE_FEATURES_NOTICE.fullmatch(notice):
-        return tuple(map(int, title.groups()))
+    is_bypass = notice == HOOK_BYPASS_NOTICE
+    if is_bypass or UNSTABLE_FEATURES_NOTICE.fullmatch(notice):
+        page, count = map(int, title.groups())
+        return page, count, is_bypass
     return None
 
 
@@ -1117,6 +1119,7 @@ def send_task(args, run_path):
     warning_turn = None
     warning_count = None
     warning_page = 0
+    saw_bypass_notice = False
     warning_withheld = f"{address}: task withheld; inspect the Codex warning with F2"
     dismissed_startup_warnings = False
     try:
@@ -1138,11 +1141,14 @@ def send_task(args, run_path):
                     position = startup_warning_page(text)
                     if position is None:
                         raise SystemExit(warning_withheld)
-                    page, count = position
+                    page, count, is_bypass = position
                     if (page > count or page not in (warning_page, warning_page + 1)
                             or (warning_count is not None and count != warning_count)):
                         raise SystemExit(warning_withheld)
                     if page > warning_page:
+                        saw_bypass_notice = saw_bypass_notice or is_bypass
+                        if page == count and not saw_bypass_notice:
+                            raise SystemExit(warning_withheld)
                         terminal = hc_json("get", address)
                         verify_terminal(run, terminal)
                         # Herdr can report working while the local warning viewer owns the input.

@@ -119,9 +119,10 @@ and reads each page in order. It recognizes these native Startup notices:
   `suppress_unstable_features_warning = true` setting in the Codex config path. Dispatch checks
   the full message template.
 
-Dispatch closes the viewer with Esc only after recognizing every page, then rechecks the
-composer and waits for an idle terminal before sending. An unrecognized page leaves the
-viewer open and withholds the task for manual review.
+Dispatch closes the viewer with Esc only after recognizing every page and finding the bypass
+notice. It then rechecks the composer and waits for an idle terminal before sending. An
+unrecognized page or a missing bypass notice leaves the viewer open and withholds the task
+for manual review.
 Omit `--trust-hooks` to use the manual review below.
 
 ## Before a shared-cache Codex wave

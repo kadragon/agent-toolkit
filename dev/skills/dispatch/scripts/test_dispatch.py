@@ -2036,9 +2036,9 @@ class CodexSendTests(DispatchTestCase):
 
     def test_send_dismisses_two_recognized_startup_pages(self):
         first = self.BYPASS_NOTICE.replace("1 of 1", "1 of 2")
+        wrapped = self.UNSTABLE_FEATURES_NOTICE.replace("Config/config.toml.", "Config/\n  config.toml.")
         for pages in ((first, self.UNSTABLE_FEATURES_NOTICE),
-                      (self.UNSTABLE_FEATURES_NOTICE.replace("2 of 2", "1 of 2"),
-                       first.replace("1 of 2", "2 of 2"))):
+                      (wrapped.replace("2 of 2", "1 of 2"), first.replace("1 of 2", "2 of 2"))):
             with self.subTest(first=pages[0]), tempfile.TemporaryDirectory() as directory:
                 receipt = Path(directory) / "run.json"
                 receipt.write_text(json.dumps({**DispatchReceiptTests.RECEIPT, "trust_hooks": True}),
@@ -2091,6 +2091,9 @@ class CodexSendTests(DispatchTestCase):
              ["f2"], "F2"),
             ("page count mismatch", True, self.SINGLE_WARNING,
              [terminal, {}, self.screen(self.BYPASS_NOTICE.replace("1 of 1", "1 of 2"))], ["f2"], "F2"),
+            ("missing bypass notice", True, self.SINGLE_WARNING,
+             [terminal, {}, self.screen(self.UNSTABLE_FEATURES_NOTICE.replace("2 of 2", "1 of 1")),
+              terminal, {}, self.screen(self.SINGLE_WARNING)], ["f2"], "F2"),
             ("unknown second page", True, self.TWO_WARNINGS,
              [terminal, {}, first, terminal, {}, unknown, terminal, {}, self.screen(self.SINGLE_WARNING)],
              ["f2", "right"], "F2"),
