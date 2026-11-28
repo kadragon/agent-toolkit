@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 2.23.0
+version: 2.23.1
 description: >-
   Pull the next queued item from the repo's queue (backlog.md/tasks.md, or GitHub issues)
   and run the full code cycle: branch,
@@ -38,7 +38,12 @@ With a `Queue reservation`, use `references/tree.md` → *Reserved dispatch inta
 
 ## Prerequisites
 
-**Pin the worktree base.** For `--tree`, pin the remote base before resolving the queue or
+**Reserved dispatch.** When the assigned `--tree` handoff contains a `Queue reservation`,
+go directly to [Reserved dispatch intake](references/tree.md#reserved-dispatch-intake).
+Claim the pinned base there and continue at Step 3. The fetch and selection below apply to
+runs that still need to select a base or queue candidate.
+
+**Pin the worktree base.** For other `--tree` runs, pin the remote base before resolving the queue or
 applying the working-tree gate:
 
 ```bash
