@@ -571,6 +571,14 @@ def review_record(result):
     return review if isinstance(review, dict) else {}
 
 
+def requires_review_sources(run):
+    """Receipts launched with an explicit review_policy never use the legacy require_review_sources flag."""
+    if "review_policy" in run:
+        # Only head-bound relaxes the gate; three-source, null or unrecognized values fail closed.
+        return run["review_policy"] != "head-bound"
+    return run.get("require_review_sources", False)
+
+
 def review_problem(result, *, require_review_sources=False):
     review = review_record(result)
     status = review.get("status")
@@ -622,7 +630,7 @@ def report_review(args):
             raise ValueError("report-review expects a ready or blocked report")
         receipt = path.with_name("run.json")
         # Preserve the three-source gate for callers that do not have a dispatch receipt.
-        required = load_run(receipt).get("require_review_sources", False) if receipt.exists() else True
+        required = requires_review_sources(load_run(receipt)) if receipt.exists() else True
         gated = gate_review_result(result, require_review_sources=required)
         serialized = serialize_result(gated)
         if gated is not result and len(serialized.encode("utf-8")) > RESULT_LIMIT:
@@ -1291,7 +1299,9 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
             run["shared_guard_enabled_at_launch"] = guard_enabled_at_launch
     if title:
         run["title"] = title
-    if args.cli == "codex" and handoff["work_kind"] != "standalone":
+    three_source = args.cli == "codex" and handoff["work_kind"] != "standalone"
+    run["review_policy"] = "three-source" if three_source else "head-bound"
+    if three_source:
         run["require_review_sources"] = True
     if args.cli != "claude":
         save_launch_timing()
@@ -1877,7 +1887,7 @@ def send_task(args, run_path):
                           "assigned unit, and Git limits in the first message", file=sys.stderr)
             message += "\n\n" + report_instruction(
                 run_path.with_name("result.json"),
-                require_review_sources=run.get("require_review_sources", False),
+                require_review_sources=requires_review_sources(run),
             )
         sent_message = message.strip()
         echoed_before = transcript_echoed(text, sent_message)
@@ -2043,7 +2053,7 @@ def watch_stop_reason(report):
     return report["stop_reason"] or ("plugin_drift" if report.get("plugin_drift") else None)
 
 
-def brief_report(report):
+def brief_report(report, *, outcome=None):
     result = report["result"] or {}
 
     def field(value):
@@ -2051,7 +2061,9 @@ def brief_report(report):
         return lines[0].strip() if lines else ""
 
     status = result.get("status")
-    if not status or (status == "done" and report["status"] == "working"):
+    if outcome == "idle" and status == "working":
+        status = outcome
+    elif not status or (status == "done" and report["status"] == "working"):
         status = "finished" if report["state"] == "finished" else report["status"]
     fields = (status, result.get("phase"), result.get("summary"), result.get("pr"), watch_stop_reason(report))
     if warning := result.get("review_warning"):
@@ -2085,9 +2097,13 @@ def reached_outcome(report, outcomes):
     result = report["result"] or {}
     reported = result.get("status")
     stopped = report["state"] == "finished" or report["status"] in {"idle", "done"}
-    return ((reported in outcomes and (reported != "done" or stopped))
-            or ("idle" in outcomes and report["status"] == "idle")
-            or ("stop" in outcomes and (watch_stop_reason(report) or report["state"] == "finished")))
+    if reported in outcomes and (reported != "done" or stopped):
+        return reported
+    if "idle" in outcomes and report["status"] == "idle":
+        return "idle"
+    if "stop" in outcomes and (watch_stop_reason(report) or report["state"] == "finished"):
+        return "stop"
+    return None
 
 
 def remaining_wait(deadline):
@@ -2116,7 +2132,9 @@ def wait(args):
             for path in pending:
                 report = collect_result(path, False, False, args.stall_minutes, warn_drift=False, deadline=deadline)
                 outcome = reached_outcome(report, args.until)
-                line = brief_report(report)
+                if outcome == "stop":
+                    remaining_wait(deadline)
+                line = brief_report(report, outcome=outcome)
                 if args.first and outcome:
                     print(f"{path} · {line}", flush=True)
                     return
@@ -2204,13 +2222,14 @@ def screen_stop_reason(snapshot, cli):
     return None
 
 
-def last_commit_ms(cwd):
+def last_commit_ms(cwd, *, deadline=None):
     if not cwd:
         return 0
     try:
+        timeout = min(2, remaining_wait(deadline)) if deadline is not None else 2
         commit = subprocess.run(
             ["git", "log", "-1", "--format=%ct", "HEAD", "--"], cwd=cwd, capture_output=True,
-            text=True, check=True, timeout=2, env={**os.environ, "GIT_NO_LAZY_FETCH": "1"},
+            text=True, check=True, timeout=timeout, env={**os.environ, "GIT_NO_LAZY_FETCH": "1"},
         )
         return int(commit.stdout) * 1000
     except (OSError, ValueError, subprocess.SubprocessError):
@@ -2247,7 +2266,7 @@ def child_stop_reason(terminal, run, result, written, stall_minutes, drift=((), 
             worktree = (result or {}).get("worktree")
             cwd = ((worktree if isinstance(worktree, str) else None)
                    or (terminal.get("foreground") or {}).get("cwd") or terminal.get("cwd"))
-            stale = last_commit_ms(cwd) <= cutoff_ms
+            stale = last_commit_ms(cwd, deadline=deadline) <= cutoff_ms
     if not stale and not changed and state not in {"blocked", "error", "idle", "done"}:
         return None, 0
     try:
@@ -2318,7 +2337,7 @@ def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadli
         print(error, file=sys.stderr)
         result, written = None, None
     if result:
-        result = gate_review_result(result, require_review_sources=run.get("require_review_sources", False))
+        result = gate_review_result(result, require_review_sources=requires_review_sources(run))
     timeout = remaining_wait(deadline) if deadline is not None else None
     if deadline is not None and run.get("closed_reason"):
         return {"address": run["address"], "status": None, "state": "finished", "result": result,

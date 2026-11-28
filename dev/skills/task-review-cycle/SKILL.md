@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.22.2
+version: 1.22.3
 ---
 # Dev Review Cycle
 Review workflow adapted from [How the Claude Code team does code review](https://claude.dev/blog/solving-code-review-at-anthropic/) (2026-10-15).
@@ -186,7 +186,7 @@ with `gh pr edit`, keeping every closing line.
 **Local-only or PR-only** — apply `references/consolidation-guide.md` → *Final verification*.
 `--no-hub` stops with remote checks pending. PR-only, unverified base-merge authority and dispatch
 pre-merge stops finish CI and preserve the archive. Use the guide's *Dispatch pre-merge report*
-for Codex task dispatches. Other PR-only runs report ready after final verification.
+for every dispatched PR, whichever CLI runs it. Other PR-only runs report ready after final verification.
 
 **Lite path** — fetch the current base and re-run the floor after any repair. A non-empty `FLOOR_HIT` or
 base tip outside the reviewed HEAD's history → Step 1's hub block, then launch unused hub
