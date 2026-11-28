@@ -1361,6 +1361,51 @@ class DispatchReceiptTests(DispatchTestCase):
                                      {**result, "status": status, "phase": phase, "summary": summary})
                     self.assertEqual(list(path.parent.iterdir()), [path])
 
+    def test_report_review_and_collect_allow_only_an_agy_quota_skip(self):
+        head = "a" * 40
+        terminal = {**self.TERMINAL, "status": {"state": "done"}}
+        outcomes = {"claude": "complete", "agy": "quota-exhausted", "codex": "complete"}
+        base = {
+            "status": "working", "phase": "review", "summary": "CI passed", "ci": "success", "head": head,
+            "review_sources": outcomes, "review": {"head": head, "sources": ["claude", "codex"], "status": "passed"},
+        }
+        cases = (
+            ({}, ("working", "merge")),
+            ({"status": "ready"}, ("ready", "review")),
+            ({"review_sources": {**outcomes, "agy": "failed"}}, ("blocked", "review-sources")),
+            ({"review_sources": {**outcomes, "agy": "policy-excluded"}}, ("blocked", "review-sources")),
+            ({"review_sources": {**outcomes, "agy": "unavailable"}}, ("blocked", "review-sources")),
+            ({"review_sources": {**outcomes, "claude": "quota-exhausted"}}, ("blocked", "review-sources")),
+            ({"review_sources": {**outcomes, "codex": "still running"}}, ("blocked", "review-sources")),
+            ({"review": {**base["review"], "sources": ["codex"]}}, ("blocked", "review-state")),
+            ({"review": {**base["review"], "head": "b" * 40}}, ("blocked", "review-state")),
+            ({"ci": "failure"}, ("blocked", "review-state")),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            path = receipt.with_name("result.json")
+            write_json(receipt, {**self.RECEIPT, "review_policy": "three-source"})
+            for fields, expected in cases:
+                with self.subTest(fields=fields):
+                    command = [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "report-review", str(path)]
+                    if fields.get("status") == "ready":
+                        command.append("--pause")
+                    completed = subprocess.run(
+                        command, input=json.dumps({**base, **fields}), text=True, check=False, capture_output=True,
+                    )
+                    self.assertEqual(completed.returncode, 0, completed.stderr)
+                    saved = json.loads(path.read_text(encoding="utf-8"))
+                    self.assertEqual((saved["status"], saved["phase"]), expected)
+                    if saved["status"] != "ready":
+                        continue
+                    with patch("dispatch.hc_json", return_value=terminal), redirect_stdout(StringIO()) as output:
+                        collect(SimpleNamespace(run=receipt, close=False))
+                    self.assertEqual(json.loads(output.getvalue())["result"], saved)
+                    with patch("dispatch.hc_json", return_value=terminal), redirect_stdout(StringIO()) as output:
+                        collect(SimpleNamespace(run=receipt, close=False, brief=True))
+                    self.assertIn("agy: quota-exhausted", output.getvalue())
+                    self.assertIn("review=passed", output.getvalue())
+
     def test_report_review_respects_the_resumed_dispatch_receipts_review_policy(self):
         head = "a" * 40
         terminal = {**self.TERMINAL, "status": {"state": "done"}}

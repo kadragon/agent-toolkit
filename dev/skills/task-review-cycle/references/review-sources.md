@@ -104,5 +104,12 @@ fi
 
 `codex_status` 75 is the workspace lock held by another cycle: skipped, not failed.
 `unavailable` (either source) means preflight found no such CLI: the block never ran a review.
+`agy-review.sh` emits `{"agy_review":"quota-exhausted","reset":...}` on stdout and stores
+`status=quota-exhausted` in the invocation metadata for a confirmed quota or rate limit.
+A null reset means the CLI supplied no recognized reset value. This is a skipped review.
+Only this agy outcome can satisfy its slot on a three-source route with complete Claude and Codex
+reviews and green CI on the final head. A crash, malformed result, policy denial, missing CLI,
+or other missing required source still blocks. Apply the reporting and PR disclosure in
+`consolidation-guide.md` → *Dispatch pre-merge report* and *Final verification*.
 `codex-review.sh` and `agy-review.sh` both persist a result; a run still going when the cycle
 moves on is reclaimed before merge per `late-source-reclaim.md`.
