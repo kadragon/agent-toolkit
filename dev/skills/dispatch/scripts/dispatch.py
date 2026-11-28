@@ -87,6 +87,8 @@ CODEX_STATUS_LINE = re.compile(
 )
 CODEX_SHORTCUT_LINE = re.compile(r"^ {2,}(?:← for agents · )?\? for shortcuts\b", re.IGNORECASE)
 CODEX_OUTPUT_MARKERS = ("•", "■", "─ Worked for")
+CODEX_PROGRESS = re.compile(r"^\s*(?:[•◦] )?.+ \(\d[\d hms]* • esc to interrupt\)(?:\s.*)?$")
+CLAUDE_PROGRESS = re.compile(r"^[✢✳✶✻✽] .+… \(\d[\d hms]*(?: · [^)]*)?\)$")
 USAGE_NOTICE = re.compile(
     r"(?:you(?:'ve|’ve| have)? (?:hit|reached) (?:your|the) (?:chatgpt )?(?:usage )?limit\b|"
     r"(?:(?:individual )?quota|usage limit|rate limit) (?:reached|exceeded)\b)", re.IGNORECASE)
@@ -1046,9 +1048,10 @@ def filtered_transcript(text, cli):
                or line.strip().startswith("Write progress at phase boundaries and the final report as UTF-8 JSON to ")
                for line in lines[first:end]):
             index = end
+    progress = CODEX_PROGRESS if cli == "codex" else CLAUDE_PROGRESS
     while index < len(lines):
         row = lines[index]
-        if cli == "codex" and re.fullmatch(r"\s*(?:• )?Working \([\d hms]+ • esc to interrupt\)", row):
+        if progress.fullmatch(row):
             index += 1
             continue
         if cli == "codex" and not filtered and re.match(r"^\s*[╭│]?\s*>_ OpenAI Codex \(v", row):
@@ -1096,20 +1099,26 @@ def transcript_offset(previous, current):
 
 def peek(args):
     path = Path(args.run).resolve()
-    with lock_run(path):
-        run = load_run(path)
-        address = run["address"]
-        try:
-            verify_terminal(run, hc_json("get", address, timeout=LAUNCH_LOOKUP_SECONDS))
-            snapshot = hc_json("read", "--lines", "120", address, timeout=LAUNCH_LOOKUP_SECONDS)
-            verify_terminal(run, hc_json("get", address, timeout=LAUNCH_LOOKUP_SECONDS))
-            lines = filtered_transcript(snapshot["text"], run["cli"])
-            row_fingerprints = [hashlib.sha256(row.encode("utf-8")).hexdigest() for row in lines]
-            start = transcript_offset(run.get("peek_cursor", []), row_fingerprints) if args.since_last else 0
-            run["peek_cursor"] = row_fingerprints
-            write_json(path, run)
-        except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
-            raise SystemExit(f"{address}: could not peek at the terminal ({error})") from None
+    run = load_run(path)
+    address = run["address"]
+    previous = run.get("peek_cursor", [])
+    try:
+        verify_terminal(run, hc_json("get", address, timeout=LAUNCH_LOOKUP_SECONDS))
+        snapshot = hc_json("read", "--lines", "120", address, timeout=LAUNCH_LOOKUP_SECONDS)
+        terminal = hc_json("get", address, timeout=LAUNCH_LOOKUP_SECONDS)
+        verify_terminal(run, terminal)
+        lines = filtered_transcript(snapshot["text"], run["cli"])
+        row_fingerprints = [hashlib.sha256(row.encode("utf-8")).hexdigest() for row in lines]
+        start = transcript_offset(previous, row_fingerprints) if args.since_last else 0
+        with lock_run(path):
+            saved = load_run(path)
+            verify_terminal(saved, terminal)
+            if saved.get("closed_reason") != run.get("closed_reason") or saved.get("peek_cursor", []) != previous:
+                raise SystemExit(f"{address}: receipt changed during peek; try again")
+            saved["peek_cursor"] = row_fingerprints
+            write_json(path, saved)
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        raise SystemExit(f"{address}: could not peek at the terminal ({error})") from None
     if new_lines := lines[start:]:
         print("\n".join(new_lines).lstrip("\n"))
 

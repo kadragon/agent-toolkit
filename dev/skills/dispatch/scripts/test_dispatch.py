@@ -2078,6 +2078,13 @@ Context 3% │ 5h: 21% (1h 43m) │ 7d: 59% (4d 4h) │ cache 59m
         self.assertEqual(filtered_transcript(claude, "claude"), ["● Fixture response."])
         self.assertEqual(filtered_transcript(codex, "codex"), ["• Checking evidence."])
 
+    def test_progress_timers_do_not_move_the_cursor(self):
+        for seconds in (41, 42):
+            claude = f"● Checking evidence.\n\n✻ Thinking… ({seconds}s · ↑ 50 tokens)\n  ⎿  ☐ Run tests"
+            codex = f"• Checking evidence.\n\n◦ Exploring repository ({seconds}s • esc to interrupt)"
+            self.assertEqual(filtered_transcript(claude, "claude"), ["● Checking evidence.", "", "  ⎿  ☐ Run tests"])
+            self.assertEqual(filtered_transcript(codex, "codex"), ["• Checking evidence."])
+
     def test_peek_cursor_survives_history_rollover_and_keeps_receipt_fields(self):
         terminal = {"address": "t7", "parent": "t1", "created_ms": 42}
         receipt = {**terminal, "cli": "codex", "sent": True}
@@ -2108,6 +2115,24 @@ Context 3% │ 5h: 21% (1h 43m) │ 7d: 59% (4d 4h) │ cache 59m
                 peek(SimpleNamespace(run=str(path), since_last=True))
             self.assertEqual(output.getvalue(), "")
             self.assertEqual(json.loads(path.read_text(encoding="utf-8")), receipt)
+
+    def test_peek_leaves_receipt_unlocked_during_read(self):
+        receipt = {"address": "t7", "parent": "t1", "created_ms": 42, "cli": "codex", "sent": False}
+
+        def hc(command, *_args, **_kwargs):
+            if command == "get":
+                return receipt
+            with lock_run(path):
+                write_json(path, {**receipt, "sent": True})
+            return {"text": "• Started"}
+
+        with tempfile.TemporaryDirectory() as directory, patch("dispatch.hc_json", side_effect=hc):
+            path = Path(directory) / "run.json"
+            write_json(path, receipt)
+            with redirect_stdout(StringIO()) as output:
+                peek(SimpleNamespace(run=str(path), since_last=True))
+            self.assertEqual(output.getvalue(), "• Started\n")
+            self.assertTrue(json.loads(path.read_text(encoding="utf-8"))["sent"])
 
     def test_streamed_line_redraw_and_no_overlap(self):
         self.assertEqual(transcript_offset(["ready", "stream"], ["ready", "streamed", "next"]), 1)
