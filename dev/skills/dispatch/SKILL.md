@@ -178,7 +178,7 @@ More than one session:
 - For an independent `task-next` wave on a built-in queue, reserve the selected units before
   launching their idle Codex children, then submit their prompts together. Follow
   [Reserved queue waves](references/launch-handoff.md#reserved-queue-waves).
-- For individual queue launches (Claude or an adapter queue), use `pick --tree --full-scan`
+- For individual, non-reserved queue launches, use `pick --tree --full-scan`
   to confirm the preceding child's worktree claim before delivering the next unit.
 - Keep a wave to at most four live children (two under `both-hot`).
 

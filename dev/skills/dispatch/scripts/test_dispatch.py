@@ -3929,6 +3929,9 @@ class ReservedQueueWaveTest(unittest.TestCase):
         remaining = self.prepare()["by_title"]
         self.assertNotIn("First group", remaining)
         self.assertEqual(len({"Second group", "Third group"}.intersection(remaining)), 1)
+        claims = self.result("list", full_scan=True)["claimed"]
+        for reservation in winner["reservations"]:
+            self.assertTrue(any(reservation["reservation"] in claim["by"] for claim in claims))
         self.assertFalse((self.repo / ".worktrees").exists())
 
     def test_changed_or_duplicate_selections_fail_before_reservation(self):
@@ -3975,6 +3978,7 @@ class ReservedQueueWaveTest(unittest.TestCase):
         self.assertEqual(listed["claimed"][0]["by"], str(path))
         self.assertIn("Second group", listed["by_title"])
         self.assertNotIn("First group", listed["by_title"])
+        self.assertFalse(list((self.repo / ".git/agent-queue").glob("reservation-[0-9a-f]*.lock")))
 
     def test_reserved_sprint_preserves_other_sections(self):
         wave = self.reserve("Existing sprint")
@@ -4042,6 +4046,33 @@ class ReservedQueueWaveTest(unittest.TestCase):
         self.assertEqual(Path(active["worktree"]), worktree)
         self.assertNotIn("locked dispatch reservation", self.git("worktree", "list", "--porcelain"))
         self.assertIn("- [ ] [FEAT] First item", (worktree / "tasks.md").read_text(encoding="utf-8"))
+
+    def test_release_retires_published_reservation_after_ledger_failure(self):
+        sys.path.insert(0, str(QUEUE_BACKEND.parent))
+        import queue_backend
+
+        wave = self.reserve("First group")
+        [unit] = wave["reservations"]
+        token = unit["reservation"]
+        ref = unit["candidate"]["ref"]
+        delivery = {"reservation": token, "ref": ref, "delivery": str(self.receipt("first", ref))}
+        self.result("bind-wave", assignments=[delivery])
+        request = {"contract": 1, "repo": str(self.repo), **delivery, "base": wave["base"]}
+        write_state = queue_backend._write_queue_json
+
+        def fail_retire(path, data):
+            if token not in data["units"]:
+                raise OSError("injected retirement failure")
+            write_state(path, data)
+
+        with patch.object(queue_backend, "_write_queue_json", side_effect=fail_retire), self.assertRaisesRegex(
+            OSError, "injected retirement failure",
+        ):
+            queue_backend.handle("claim-reservation", request, {"AGENT_QUEUE_BACKEND": "backlog"})
+        self.assertNotIn("locked dispatch reservation", self.git("worktree", "list", "--porcelain"))
+        self.assertEqual(self.result("release-reservation", reservation=token), {"released": True})
+        self.assertIn("- [ ] [FEAT] First item", (Path(unit["worktree"]) / "tasks.md").read_text(encoding="utf-8"))
+        self.assertNotIn("First group", self.prepare()["by_title"])
 
     def test_independent_claims_can_prepare_worktrees_concurrently(self):
         sys.path.insert(0, str(QUEUE_BACKEND.parent))

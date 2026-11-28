@@ -87,9 +87,10 @@ write side effects. The generic adapter contract is unchanged.
 
 Prepare and reserve use the locally fetched `origin/HEAD`. Binding rechecks that base and
 the selection before delivery. Claim checks current eligibility and creates the worktree at
-the reserved commit. If claim publication is interrupted, retry with the same reservation
-and receipt. Release changes only the local reservation store and leaves a started worktree
-intact.
+the reserved commit. Retry interrupted publication with the same reservation and receipt.
+If only the success output was lost, verify the branch, base and active claim in the handoff's
+worktree before resuming there. Release changes only the reservation store. A lock during
+publication preserves the worktree for retry. Normal claim diagnostics include reservation IDs.
 
 ## Filing findings
 

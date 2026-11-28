@@ -296,7 +296,7 @@ def backlog_list(req: dict, reservations=(), *, snapshot=False) -> dict:
         reserved_items = {}
         for reservation in reservations:
             candidate = reservation["candidate"]
-            by = f"dispatch reservation {candidate['ref']}"
+            by = _reservation_claimant(reservation)
             if candidate["ref"].startswith("tasks.md:"):
                 reserved_blocks.setdefault(by, set()).add(candidate["title"])
             else:
@@ -330,7 +330,6 @@ def backlog_list(req: dict, reservations=(), *, snapshot=False) -> dict:
             heading = by_line.get(line)
             selection = bc._direct_open_items(tokens, heading, headings) if heading else []
             if heading is None or heading["title"] != c["title"] or len(selection) != c["items"]:
-                # The working-tree queue changed between the two reads.
                 raise QueueError(f"{label} changed while listing ({label}:{line}); retry")
         items = [item["text"] for item in selection]
         ref = _ref(label, line)
@@ -775,7 +774,7 @@ def github_list(req: dict, runner=gh_runner, max_pages: int = MAX_PAGES, *, rese
     for reservation in reservations:
         candidate = reservation["candidate"]
         for covered_ref in {candidate["ref"], *candidate["item_refs"]}:
-            claims.setdefault(int(covered_ref[1:]), f"dispatch reservation {candidate['ref']}")
+            claims.setdefault(int(covered_ref[1:]), _reservation_claimant(reservation))
 
     def is_queued_parent(issue: dict) -> bool:
         p = issue.get("parent")
@@ -1179,11 +1178,12 @@ def pending_path(repo: str) -> str:
 
 
 QUEUE_LOCK_TIMEOUT = 10
+RESERVATION_STORE_TIMEOUT = 120
+RESERVATION_STORE_LOCK = "reservation-store.lock"
 
 
 @contextmanager
-def _queue_write_lock(repo: str, name: str = "write.lock"):
-    """Serialize queue writes and reservation transitions across linked worktrees."""
+def _queue_write_lock(repo: str, name: str = "write.lock", timeout: float | None = None):
     path = os.path.join(os.path.dirname(pending_path(repo)), name)
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1191,7 +1191,7 @@ def _queue_write_lock(repo: str, name: str = "write.lock"):
     except OSError as e:
         raise QueueError(f"cannot open queue writer lock {path}: {e}") from e
     with lock:
-        deadline = time.monotonic() + QUEUE_LOCK_TIMEOUT
+        deadline = time.monotonic() + (QUEUE_LOCK_TIMEOUT if timeout is None else timeout)
         while True:
             try:
                 if os.name == "nt":
@@ -1266,8 +1266,12 @@ def _read_reservations(repo):
 
 
 def _backend_reservations(repo, backend, *, exclude=()):
-    return [unit for token, unit in _read_reservations(repo).items()
+    return [dict(unit, reservation=token) for token, unit in _read_reservations(repo).items()
             if unit["backend"] == backend and token not in exclude]
+
+
+def _reservation_claimant(unit):
+    return f"dispatch reservation {unit['candidate']['ref']} ({unit['reservation']})"
 
 
 def _wave_snapshot(repo, base, env, runner, *, exclude=()):
@@ -1338,7 +1342,6 @@ def _unit_covers(candidate, backend):
 
 
 def _claim_tasks(repo, unit):
-    """Compose the ordinary task-next claim at the pinned base."""
     candidate = unit["candidate"]
     tasks = _read_queue(os.path.join(repo, "tasks.md"), unit["base"], optional=True)
     if candidate["ref"].startswith("tasks.md:"):
@@ -1359,13 +1362,12 @@ def _worktree_record(repo, path):
     listing = _git(repo, "worktree", "list", "--porcelain", "-z") or ""
     for record in listing.split("\x00\x00"):
         fields = dict(field.partition(" ")[::2] for field in record.split("\x00") if field)
-        if Path(fields.get("worktree", "")).resolve() == Path(path).resolve():
+        if fields.get("worktree") and Path(fields["worktree"]).resolve() == Path(path).resolve():
             return fields
     return {}
 
 
 def _claim_status(repo, unit, token, content):
-    """Recognize only worktrees created for this reservation, including interrupted publication."""
     record = _worktree_record(repo, unit["worktree"])
     owned = record.get("locked") == f"dispatch reservation {token}"
     if not (owned or unit.get("published")):
@@ -1388,7 +1390,6 @@ def _materialize_claim(repo, unit, token, content, owned):
         raise QueueError("reserved worktree location changed")
     destination = Path(path) / "tasks.md"
     destination.parent.parent.mkdir(parents=True, exist_ok=True)
-    # Prepare the complete claim before creating a branch. Publication is a same-filesystem rename.
     fd, temp = tempfile.mkstemp(dir=destination.parent.parent, prefix="tasks.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
@@ -1410,25 +1411,33 @@ def _finish_reservation(op, req, env, runner):
     repo = req["repo"]
     token = _reservation_token(req.get("reservation"))
     release = op == "release-reservation"
-    with _queue_write_lock(repo, f"reservation-{token}.lock"):
+    name = f"reservation-{token}.lock"
+    store = _reservation_store(repo)
+    with _queue_write_lock(repo, name):
         unit = _read_reservations(repo).get(token)
-        if release:
-            if unit is None:
-                return {"released": False}
-            record = _worktree_record(repo, unit["worktree"])
-            if unit.get("published") or record.get("locked") == f"dispatch reservation {token}":
-                return {"released": False, "reason": "worktree creation already started; resume the claim"}
-        else:
-            _claim_reservation(req, env, runner, token, unit)
-        with _queue_write_lock(repo):
-            units = _read_reservations(repo)
-            del units[token]
-            _write_queue_json(_reservation_store(repo), {"version": 1, "units": units})
-    return {"released": True} if release else unit
+        if unit is None and not release:
+            raise QueueError("reservation is missing or assigned to another delivery receipt")
+        if unit is not None:
+            if release:
+                record = _worktree_record(repo, unit["worktree"])
+                if record.get("locked") == f"dispatch reservation {token}":
+                    return {"released": False, "reason": "worktree creation already started; resume the claim"}
+            else:
+                _claim_reservation(req, env, runner, token, unit)
+            with _queue_write_lock(repo, RESERVATION_STORE_LOCK, RESERVATION_STORE_TIMEOUT):
+                units = _read_reservations(repo)
+                del units[token]
+                _write_queue_json(store, {"version": 1, "units": units})
+    try:
+        store.with_name(name).unlink(missing_ok=True)
+    except PermissionError:
+        # Windows keeps the lock file open while another caller checks the retired token.
+        pass
+    return {"released": unit is not None} if release else unit
 
 
 def _claim_reservation(req, env, runner, token, unit):
-    if not unit or not unit.get("delivery") or req.get("delivery") != unit["delivery"]:
+    if not unit.get("delivery") or req.get("delivery") != unit["delivery"]:
         raise QueueError("reservation is missing or assigned to another delivery receipt")
     candidate = unit["candidate"]
     if req.get("base") != unit["base"] or req.get("ref") != candidate["ref"]:
@@ -1448,8 +1457,7 @@ def _claim_reservation(req, env, runner, token, unit):
         _materialize_claim(repo, unit, token, content, owned)
         owned = True
     if not unit.get("published"):
-        # Keep proof of ownership across a failure between unlocking and retiring the reservation.
-        with _queue_write_lock(repo):
+        with _queue_write_lock(repo, RESERVATION_STORE_LOCK, RESERVATION_STORE_TIMEOUT):
             units = _read_reservations(repo)
             units[token]["published"] = True
             _write_queue_json(_reservation_store(repo), {"version": 1, "units": units})
@@ -1458,7 +1466,6 @@ def _claim_reservation(req, env, runner, token, unit):
 
 
 def _match_shifted_file_unit(snapshot, candidate):
-    # In the current queue, unrelated edits can move line numbers without changing this scope.
     def content(unit):
         return {k: v for k, v in unit.items() if k not in ("id", "ref")}
 
@@ -1476,7 +1483,7 @@ def _wave_op(op, req, env, runner):
         return _wave_snapshot(repo, _origin_base(repo), env, runner)
     if op in ("release-reservation", "claim-reservation"):
         return _finish_reservation(op, req, env, runner)
-    with _queue_write_lock(repo):
+    with _queue_write_lock(repo, RESERVATION_STORE_LOCK, RESERVATION_STORE_TIMEOUT):
         store = _reservation_store(repo)
         units = _read_reservations(repo)
         if op == "reserve-wave":

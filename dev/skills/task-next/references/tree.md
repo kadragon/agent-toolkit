@@ -10,7 +10,8 @@ claim-reservation` using the values from the handoff:
 ```
 
 The helper validates the reserved snapshot, creates its pinned worktree, and writes the normal
-active claim to `tasks.md`. On a mismatch or any error, report blocked and stop. On success, use
+active claim to `tasks.md`. On a mismatch, report blocked. For interrupted publication, see the
+queue backend contract's *Local wave reservations*. On success, use
 the returned `worktree`, `branch`, `base`, `candidate`, and `covers`. Continue in that worktree
 at Step 3 after reading the selected bodies with `show`. Read the Phase index's Branch, Plan gate
 and Sprint Contract sections, then archive the contract as usual. The helper already performed

@@ -2085,7 +2085,8 @@ def send_wave(args):
         for unit in bound["reservations"]:
             path = Path(unit["delivery"])
             metadata = {"ref": unit["candidate"]["ref"], "base": unit["base"],
-                        "reservation": unit["reservation"], "delivery": unit["delivery"]}
+                        "reservation": unit["reservation"], "delivery": unit["delivery"],
+                        "worktree": unit["worktree"], "branch": unit["branch"]}
             runs[path]["handoff"]["queue_reservation"] = metadata
             write_json(path, runs[path])
             units[path] = metadata
