@@ -705,7 +705,6 @@ def free_name(base, explicit, taken):
         return base
     if explicit:
         raise SystemExit(f"terminal name {base!r} is taken by a live terminal")
-    # Keep existing names for one- and two-digit suffixes.
     prefix = base[:TERMINAL_NAME_LIMIT - len("-99")]
     n = 2
     while True:
