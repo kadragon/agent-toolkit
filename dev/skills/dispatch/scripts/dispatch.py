@@ -756,7 +756,21 @@ def pre_merge_stop(cli, message, handoff):
     command = queue_command if kind == "queue" else new_command
     invocation, *body = message.lstrip().splitlines()
     return (invocation.split()[:2] == [command, "--tree"]
-            and "Dispatch mode: parallel-worktree" in body)
+            and any(line.startswith("Dispatch mode: parallel-worktree") for line in body))
+
+
+def resumes_pre_merge_stop(path, run, cwd, cli, message):
+    invocation = (message or "").splitlines()
+    command = invocation[0].split() if invocation else []
+    if (run.get("pre_merge_stop") is not True or run.get("cwd") != str(cwd)
+            or len(command) != 3 or command[:2] != [TASK_COMMANDS[cli][0], "--resume"]):
+        return False
+    try:
+        result, _ = current_result(path, run)
+    except SystemExit:
+        return False
+    worktree = (result or {}).get("worktree")
+    return isinstance(worktree, str) and Path(worktree) == cwd / ".worktrees" / command[2]
 
 
 def first_prompt(cli, message, handoff):
@@ -792,9 +806,7 @@ def first_prompt(cli, message, handoff):
             "Quote them in a separate section of the Sprint Contract for handoff and resume. "
             "Keep the Git limits field set to implementation-only."
         )
-    invocation, *body = message.lstrip().splitlines()
-    if (handoff["work_kind"] == "queue" and invocation.split()[:2] == [commands[0], "--tree"]
-            and any(line.startswith("Dispatch mode: parallel-worktree") for line in body)):
+    if handoff["work_kind"] == "queue" and pre_merge_stop(cli, message, handoff):
         prompt += (
             "\n\nRead the installed task-next SKILL.md sections listed in Phase index as each phase starts. "
             "Locate Markdown headings outside code fences with rg -n '^#{2,3} ' and read the current ranges. "
@@ -1157,9 +1169,13 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
     result_path = None
     child = None
     previous = getattr(args, "relaunch_from", None)
+    resumes_pre_merge = False
     if previous:
         previous = Path(previous).expanduser().resolve()
-        load_run(previous)
+        previous_run = load_run(previous)
+        resumes_pre_merge = resumes_pre_merge_stop(
+            previous, previous_run, cwd.resolve(), args.cli, args.message or args.task,
+        )
         try:
             history = phase_timing.read(timing_path(previous))
         except TIMING_DATA_ERRORS as error:
@@ -1315,7 +1331,7 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
     run["review_policy"] = "three-source" if three_source else "head-bound"
     if three_source:
         run["require_review_sources"] = True
-    if args.cli == "claude" and pre_merge_stop("claude", args.message, handoff):
+    if resumes_pre_merge or (args.cli == "claude" and pre_merge_stop("claude", args.message, handoff)):
         run["pre_merge_stop"] = True
     if args.cli != "claude":
         save_launch_timing()
@@ -2347,27 +2363,30 @@ def confirm_ready_merge(path, result):
     head = result["head"]
     merge = timing_report(path, result)["merge"]
     if merge and merge["head"] == head:
-        return True
+        return "merged"
     pr = result.get("pr")
     if not isinstance(pr, str) or not GITHUB_PR_URL.fullmatch(pr):
-        return False
+        return None
     try:
         reply = subprocess.run(
             ["gh", "pr", "view", pr, "--json", "state,headRefOid,mergeCommit"],
             capture_output=True, encoding="utf-8", check=True, timeout=5,
         )
         info = json.loads(reply.stdout)
+        live_head = info["headRefOid"]
+        if isinstance(live_head, str) and phase_timing.HEAD.fullmatch(live_head) and live_head != head:
+            return "head-mismatch"
         oid = (info["mergeCommit"] or {}).get("oid")
-        if (info["state"] != "MERGED" or info["headRefOid"] != head
+        if (info["state"] != "MERGED" or live_head != head
                 or not isinstance(oid, str) or not phase_timing.HEAD.fullmatch(oid)):
-            return False
+            return None
     except (subprocess.SubprocessError, OSError, ValueError, TypeError, KeyError, AttributeError):
-        return False
+        return None
     try:
         record_timing(path, phase_timing.merged, head)
     except (*TIMING_DATA_ERRORS, SystemExit) as error:
         print(f"dispatch timing unavailable: {error}", file=sys.stderr)
-    return True
+    return "merged"
 
 
 def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadline=None):
@@ -2420,9 +2439,10 @@ def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadli
     if close:
         ready = False
         if not force and result and result["status"] == "ready" and (finished or status in {"idle", "done"}):
-            merged = confirm_ready_merge(path, result)
+            merge_status = confirm_ready_merge(path, result)
             reserved = (run.get("handoff") or {}).get("queue_reservation")
-            ready = merged or run.get("pre_merge_stop") is True or bool(reserved)
+            pre_merge = run.get("pre_merge_stop") is True or bool(reserved)
+            ready = merge_status == "merged" or (merge_status is None and pre_merge)
             if ready and not finished:
                 current = hc_json("get", run["address"])
                 verify_terminal(run, current)
@@ -2430,7 +2450,8 @@ def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadli
                 status = (current.get("status") or {}).get("state")
                 if not finished and (status not in {"idle", "done"}
                                      or current.get("turn") != terminal.get("turn")
-                                     or current.get("status_ms") != terminal.get("status_ms")):
+                                     or current.get("status_ms") != terminal.get("status_ms")
+                                     or current_result(path, run) != (result, written)):
                     raise SystemExit("terminal changed while checking the final result; left intact")
                 terminal = current
         if force:

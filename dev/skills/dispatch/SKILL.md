@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 3.11.3
+version: 3.12.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo listed in
   the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to

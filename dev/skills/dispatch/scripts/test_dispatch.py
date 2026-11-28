@@ -46,6 +46,7 @@ from dispatch import (
     report_instruction,
     requires_review_sources,
     resolve_codex_model,
+    resumes_pre_merge_stop,
     send,
     send_wave,
     terminal_name,
@@ -191,8 +192,21 @@ class DispatchReceiptTests(DispatchTestCase):
                     task = f"{prefix}{command} --tree unit"
                     mode = "\nDispatch mode: parallel-worktree"
                     self.assertTrue(pre_merge_stop(cli, task + mode, handoff))
+                    self.assertTrue(pre_merge_stop(cli, task + mode + ". Work only on unit.", handoff))
                     self.assertFalse(pre_merge_stop(cli, task, handoff))
                     self.assertFalse(pre_merge_stop(cli, task.replace("--tree", "--all") + mode, handoff))
+
+    def test_relaunch_preserves_pre_merge_stop_for_same_worktree(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cwd = Path(directory)
+            receipt = cwd / "run.json"
+            run = {**self.RECEIPT, "cwd": str(cwd), "pre_merge_stop": True}
+            write_json(receipt.with_name("result.json"), {
+                "status": "working", "phase": "review", "summary": "Review in progress",
+                "worktree": str(cwd / ".worktrees" / "unit"),
+            })
+            self.assertTrue(resumes_pre_merge_stop(receipt, run, cwd, "claude", "/dev:task-next --resume unit"))
+            self.assertFalse(resumes_pre_merge_stop(receipt, run, cwd, "claude", "/dev:task-next --resume another"))
 
     def launch_args(self, cwd, **overrides):
         args = dict(cwd=str(cwd), name="repo", parent="t6", cli="codex", model="gpt-6.1-terra",
@@ -892,12 +906,13 @@ class DispatchReceiptTests(DispatchTestCase):
         head = "a" * 40
         pr = "https://github.com/acme/widget/pull/595"
         merged = {"state": "MERGED", "headRefOid": head, "mergeCommit": {"oid": "b" * 40}}
-        for outcome in ("merged", "recorded", "open", "different_head", "active",
-                        "resumed", "reviews_missing", "lookup_failed"):
+        for outcome in ("merged", "recorded", "open", "different_head", "pre_merge_head_changed",
+                        "active", "resumed", "replaced_result", "reviews_missing", "lookup_failed"):
             with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as directory:
                 receipt = Path(directory) / "run.json"
                 write_json(receipt, {
                     **self.RECEIPT, "cli": "claude", "require_review_sources": outcome == "reviews_missing",
+                    "pre_merge_stop": outcome == "pre_merge_head_changed",
                 })
                 result = {
                     "status": "ready", "phase": "review", "summary": "CI passed", "head": head, "pr": pr,
@@ -912,20 +927,28 @@ class DispatchReceiptTests(DispatchTestCase):
                 reply = {
                     "open": {**merged, "state": "OPEN", "mergeCommit": None},
                     "different_head": {**merged, "headRefOid": "c" * 40},
+                    "pre_merge_head_changed": {"state": "OPEN", "mergeCommit": None, "headRefOid": "c" * 40},
                 }.get(outcome, merged)
                 active = {**terminal, "turn": 2, "status": {"state": "working"}}
                 terminal_reply = active if outcome == "active" else terminal
                 responses = [terminal_reply]
-                if outcome in {"merged", "recorded"}:
+                if outcome in {"merged", "recorded", "replaced_result"}:
                     responses.append(terminal)
                 elif outcome == "resumed":
                     responses.append(active)
                 responses += [{}, finished, {}]
                 query_error = FileNotFoundError("gh") if outcome == "lookup_failed" else None
+
+                def lookup(*args, **kwargs):
+                    if query_error:
+                        raise query_error
+                    if outcome == "replaced_result":
+                        write_json(receipt.with_name("result.json"), {**result, "status": "blocked"})
+                    return SimpleNamespace(stdout=json.dumps(reply))
+
                 with (
                     patch("dispatch.hc_json", side_effect=responses) as hc,
-                    patch("dispatch.subprocess.run", return_value=SimpleNamespace(stdout=json.dumps(reply)),
-                          side_effect=query_error) as gh,
+                    patch("dispatch.subprocess.run", side_effect=lookup) as gh,
                     patch("dispatch.phase_timing.now_ms", return_value=2000),
                     redirect_stdout(StringIO()) as output,
                 ):
@@ -945,7 +968,7 @@ class DispatchReceiptTests(DispatchTestCase):
                     })
                     self.assertEqual(phase_timing.read(timing_path)["merge"]["confirmed_ms"], confirmed)
                     self.assertIn(call("kill", "t7"), hc.call_args_list)
-                elif outcome == "resumed":
+                elif outcome in {"resumed", "replaced_result"}:
                     self.assertEqual(phase_timing.read(timing_path)["merge"]["head"], head)
                     self.assertEqual(hc.call_args_list, [call("get", "t7")] * 2)
                 else:

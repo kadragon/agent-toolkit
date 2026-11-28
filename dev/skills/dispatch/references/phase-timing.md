@@ -28,4 +28,4 @@ after verifying the merge. Omit the SHA if the verified source does not provide 
 
 When closing a child with a current `ready` result, `collect --close` uses any recorded merge for
 the reported head. Otherwise it checks the reported GitHub PR and records when it confirms that
-the same head was merged.
+the same head was merged. If GitHub reports a different head, refresh the child's report before closing.
