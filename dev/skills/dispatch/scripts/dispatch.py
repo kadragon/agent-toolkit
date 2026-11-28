@@ -1184,6 +1184,7 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
         except OSError as error:
             raise SystemExit(f"pinned launch withheld; could not register child: {error}") from None
     versions = {}
+    guard_enabled_at_launch = None
     started_ms = phase_timing.now_ms()
     try:
         phase_timing.new_launch(history, started_ms)
@@ -1209,6 +1210,11 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
                     children = shared_cache_children(shared_label)
                     require_shared_cache_available(children, parent=home)
                     versions = installed_plugin_versions()
+                    if "guard" in versions:
+                        try:
+                            guard_enabled_at_launch = shared_codex.guard_enabled(shared_home, cwd.resolve())
+                        except (OSError, ValueError, AttributeError):
+                            guard_enabled_at_launch = False
                     if children:
                         verify_shared_cache_versions(shared_home, versions)
                 stdout = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", check=True,
@@ -1262,6 +1268,8 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
         run.update(wave=str(wave_path), wave_trusted_at_start=pinned_startup)
     elif versions:
         run["plugin_versions"] = versions
+        if guard_enabled_at_launch is not None:
+            run["shared_guard_enabled_at_launch"] = guard_enabled_at_launch
     if title:
         run["title"] = title
     if args.cli == "codex" and handoff["work_kind"] != "standalone":
@@ -1602,11 +1610,11 @@ def verify_pinned_delivery(run, terminal):
         raise SystemExit(f"{run['address']}: pinned task withheld; {error}") from None
 
 
-def require_shared_guard(run):
+def require_shared_guard(run, terminal):
     versions = installed_plugin_versions()
     started = (run or {}).get("plugin_versions") or {}
     dev = versions.get("dev")
-    if not dev or ("guard" in versions and (not started or "guard" in started)):
+    if not dev:
         return
     manifest = plugin_cache() / "dev" / dev / pinned_wave.MANIFEST
     try:
@@ -1615,14 +1623,32 @@ def require_shared_guard(run):
         return
     except (OSError, ValueError) as error:
         raise SystemExit(f"task withheld; can't read the installed dev plugin manifest: {error}") from None
-    if "hooks" not in installed:
+    if "hooks" in installed:
+        return
+    if "guard" not in versions or (started and "guard" not in started):
         raise SystemExit("task withheld; install guard@kadragon, restart the idle Codex child, and review its hooks")
+    if ("guard" in started and not (plugin_cache() / "guard" / started["guard"]).is_dir()
+            or (run or {}).get("shared_guard_enabled_at_launch") is False):
+        raise SystemExit("task withheld; enable guard@kadragon, restart the idle Codex child, and review its hooks")
+
+    # Starting an app server here could refresh the cache used by live children.
+    target = ((terminal.get("foreground") or {}).get("cwd") or (run or {}).get("cwd")
+              or terminal.get("cwd"))
+    if not target:
+        raise SystemExit("task withheld; cannot locate the target directory to verify guard@kadragon")
+    try:
+        cwd = Path(target).resolve(strict=True)
+        enabled = shared_codex.guard_enabled(codex_home(), cwd)
+    except (OSError, ValueError, TypeError, AttributeError) as error:
+        raise SystemExit(f"task withheld; cannot verify guard@kadragon settings: {error}") from None
+    if not enabled:
+        raise SystemExit("task withheld; enable guard@kadragon, restart the idle Codex child, and review its hooks")
 
 
 def verify_delivery_turn(run, terminal):
     verify_pinned_delivery(run, terminal)
     if not run or not run.get("wave"):
-        require_shared_guard(run)
+        require_shared_guard(run, terminal)
     else:
         current = hc_json("get", run["address"])
         verify_terminal(run, current)

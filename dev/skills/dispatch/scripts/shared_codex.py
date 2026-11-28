@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import re
+import tomllib
 from pathlib import Path
 
 from codex_app_server import request
@@ -11,6 +12,33 @@ from pinned_wave import CATALOG, MANIFEST, TIMEOUT, catalog_plugins, command
 LABEL = "dispatch_shared_codex"
 MARKET = "kadragon"
 PENDING = {"modified", "untrusted"}
+
+
+def guard_enabled(home, cwd):
+    """Read the installed guard's settings without starting a cache refresher."""
+    plugin_id = f"guard@{MARKET}"
+
+    def settings(path):
+        try:
+            with path.open("rb") as stream:
+                config = tomllib.load(stream)
+        except FileNotFoundError:
+            return None, None
+        enabled = config.get("plugins", {}).get(plugin_id, {}).get("enabled")
+        return enabled, config.get("features", {}).get("plugins")
+
+    enabled, plugins = settings(home / "config.toml")
+    if enabled is not True or plugins is False:
+        return False
+    # A project can disable shared guards. Do not use a project's settings to
+    # override a disabled user installation or depend on its trust status.
+    for directory in (cwd, *cwd.parents):
+        enabled, plugins = settings(directory / ".codex/config.toml")
+        if enabled is False or plugins is False:
+            return False
+        if (directory / ".git").exists():
+            break
+    return True
 
 
 def cache_label(home):
