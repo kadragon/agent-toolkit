@@ -3106,7 +3106,12 @@ class CodexSendTests(DispatchTestCase):
                                    encoding="utf-8")
                 after_redraw = self.READY if closes else self.BYPASS_NOTICE
                 reflowed_notice = self.BYPASS_NOTICE.replace("may run\n  without", "may run without")
-                frames = iter([self.BYPASS_NOTICE, self.BYPASS_NOTICE, reflowed_notice])
+                frames = iter([
+                    f"Starting MCP servers (3s)\n{self.BYPASS_NOTICE}",
+                    f"Starting MCP servers (4s)\n{self.BYPASS_NOTICE}",
+                    reflowed_notice,
+                    *[after_redraw] * 8,
+                ])
                 operations = []
                 now = 0
 
@@ -3118,7 +3123,9 @@ class CodexSendTests(DispatchTestCase):
                     if command == "get":
                         return {**terminal, **self.WORKING} if operations[-1:] == ["send"] else terminal
                     if command == "read":
-                        return self.screen(next(frames, after_redraw))
+                        frame = next(frames, None)
+                        self.assertIsNotNone(frame, "Dispatch should stop polling a surviving warning")
+                        return self.screen(frame)
                     operations.append(args[-1] if command == "keys" else command)
                     return {}
 

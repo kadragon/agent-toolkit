@@ -1537,10 +1537,9 @@ def startup_warning_page(text):
     if body and WARNING_VIEW_FOOTER.fullmatch(body[-1]):
         body.pop()
     notice = " ".join(body)
-    is_bypass = notice == HOOK_BYPASS_NOTICE
-    if is_bypass or UNSTABLE_FEATURES_NOTICE.fullmatch(notice):
+    if notice == HOOK_BYPASS_NOTICE or UNSTABLE_FEATURES_NOTICE.fullmatch(notice):
         page, count = map(int, title.groups())
-        return page, count, is_bypass
+        return page, count, notice
     return None
 
 
@@ -1670,9 +1669,9 @@ def send_task(args, run_path):
                 raise SystemExit(f"{address}: resend withheld; the Codex composer is not clear")
             if screen == "hooks":
                 raise SystemExit(f"{address}: task withheld; inspect the Codex hook status with /hooks")
+            position = startup_warning_page(text) if screen == "warning-view" else None
             if closing_warning is not None and screen != "waiting":
-                if (screen == "warning-view" and " ".join(text.split()) == closing_warning
-                        and time.monotonic() < closing_warning_until):
+                if position == closing_warning and time.monotonic() < closing_warning_until:
                     time.sleep(SCREEN_POLL_SECONDS)
                     continue
                 closing_warning = None
@@ -1681,10 +1680,9 @@ def send_task(args, run_path):
                         or dismissed_startup_warnings):
                     raise SystemExit(warning_withheld)
                 if screen == "warning-view":
-                    position = startup_warning_page(text)
                     if position is None:
                         raise SystemExit(warning_withheld)
-                    page, count, is_bypass = position
+                    page, count, notice = position
                     if warning_count is None:
                         # A viewer already open at startup can be on any page.
                         next_warning_page = page
@@ -1694,7 +1692,7 @@ def send_task(args, run_path):
                     if page == next_warning_page:
                         rewinding = page > 1 and (warning_page == 0 or page < warning_page)
                         if not rewinding:
-                            saw_bypass_notice = saw_bypass_notice or is_bypass
+                            saw_bypass_notice = saw_bypass_notice or notice == HOOK_BYPASS_NOTICE
                             if page == count and not saw_bypass_notice:
                                 raise SystemExit(warning_withheld)
                         terminal = hc_json("get", address)
@@ -1711,7 +1709,7 @@ def send_task(args, run_path):
                             hc_json("keys", address, "esc")
                             warning_turn = None
                             dismissed_startup_warnings = True
-                            closing_warning = " ".join(text.split())
+                            closing_warning = position
                             closing_warning_until = min(deadline, time.monotonic() + WARNING_CLOSE_SETTLE_SECONDS)
                             time.sleep(SCREEN_POLL_SECONDS)
                             continue
