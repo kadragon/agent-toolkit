@@ -70,10 +70,13 @@ Use `wait --first` after delivery and keep merges into the base sequential.
 ## Resync a pushed child PR
 
 The child session performs the resync. It holds the `commit` and `feature-push` authority through its
-archived contract and owns the branch's worktree, so it merges the PR base, preserving shared queue
-entries from both sides, and pushes within its own Git limits. The home session only requests it
-through *Continue with another phase* and never commits to or pushes the child's branch. After the
-push, the child resumes at final verification (`task-review-cycle` → *Dispatch pre-merge report*).
+archived contract and owns the branch's worktree. The home session only requests it through
+*Continue with another phase* and never commits to or pushes the child's branch. In its feature
+worktree the child runs `cycle_state.py authorize --action commit` and `--action feature-push`, then
+`task-review-cycle/scripts/pre_merge_resync.py --base <BASE_BRANCH>`, which fetches, merges the base,
+reapplies the version bump and queue entries, and pushes. It stops on a failed check or a
+`conflict`, `denied` or `error` result, and then resumes at final verification
+(`task-review-cycle` → *Dispatch pre-merge report*).
 
 ## Home merges a child PR
 
@@ -84,8 +87,7 @@ the target repo. Scope that contract to the repository, PR and feature branch to
 record the verified grant with `base-merge` as its allowed action.
 
 Before merging, match the live PR to that scope and apply the review and CI checks in
-`SKILL.md` → *Push and merge*. Merge one PR at a time. Syncing the pushed branch with its
-base keeps the push fast-forward, and squash-merging the PR keeps that sync commit off the base.
+`SKILL.md` → *Push and merge*. Merge one PR at a time. A behind branch is resynced by its child per *Resync a pushed child PR*, which keeps the push fast-forward, and squash-merging the PR keeps that sync commit off the base.
 In the target repo, run `cycle_state.py authorize --branch
 <home-contract-branch> --action base-merge` per
 `../../task-next/references/git-authorization.md` → *Check before execution*. On GitHub, pass the
