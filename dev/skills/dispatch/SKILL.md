@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 3.11.3
+version: 3.12.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo listed in
   the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to
@@ -229,11 +229,11 @@ from `origin/<base>`, and nothing is stashed. Anything that fails a check stays;
 
 ### Close the child terminal
 
-Run `dispatch.py collect <receipt> --close` before cleaning up the child's worktree. For a live child with a final
-result, it ends the program, waits up to 10 seconds for Herdr to report `state: finished`, then removes the terminal
-and records `closed_reason` in the receipt. A finished terminal closes without a final result. If the result file is
-unreadable, reconfirm `state: finished` and use `collect --close --force`. For a live child, use `--force` only when
-authorized to close it irrespective of its reported status.
+Run `dispatch.py collect <receipt> --close` before worktree cleanup. It ends a live child with a final result,
+waits up to 10 seconds for `state: finished`, removes the terminal and records `closed_reason`. A review-verified `ready`
+result is final for an idle or done child with a recorded pre-merge stop or [confirmed merge](references/phase-timing.md).
+A finished terminal closes without a final result. For an unreadable result, confirm `state: finished` and use `--force`.
+For a live child, use `--force` only with authorization to close it irrespective of its status.
 
 After close returns `"closed": true`, save any result or receipt details you still need. Once every child of the
 wave is closed (and a pinned wave released), run the [wave retrospect](references/retrospect.md) before removing any receipt.
