@@ -20,7 +20,8 @@
       Send to a clear Codex composer. A receipt allows startup, phase reuse, or recovery.
   dispatch.py report-review RESULT
       Read a Codex pre-merge report from stdin and atomically write ready or blocked.
-  dispatch.py timing RUN [start PHASE HEAD | finish PHASE ATTEMPT OUTCOME | merged [HEAD]]
+  dispatch.py timing RUN [start PHASE SHA [--tree] | finish PHASE ATTEMPT OUTCOME
+                         | bind-review ATTEMPT HEAD | merged [HEAD]]
       Read timing or record a review/CI attempt or an independently confirmed merge.
   dispatch.py collect RECEIPT [--stall-minutes N] [--close [--force]]
       Read the result, status and any stop reason. Close an owned child.
@@ -108,6 +109,7 @@ LOST_SETTLE_SECONDS = 2
 RESULT_STATES = {"done", "ready", "blocked", "merged", "working"}
 RESULT_LIMIT = 8192
 REVIEW_SOURCES = ("claude", "agy", "codex")
+TIMING_DATA_ERRORS = (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError)
 PR_REFERENCE = re.compile(r"\b(?:PR|pull request)\s*[#-]?\d+\b|/pulls?/\d+\b", re.IGNORECASE | re.ASCII)
 NO_WORK_PREFIX = re.compile(
     r"^\s*(?:no (?:eligible )?(?:work|changes)\b|작업 없음|처리할 (?:작업|이슈)(?:이|가)? 없)",
@@ -300,46 +302,52 @@ def timing_path(receipt):
     return receipt.with_name("timing.json")
 
 
-def record_timing(receipt, update, *args):
+def record_timing(receipt, update, *args, at=None):
     path = timing_path(receipt)
     with lock_run(path, blocking=True):
         data = phase_timing.read(path)
         before = serialize_result(data)
-        value = update(data, *args, phase_timing.now_ms())
+        value = update(data, *args, phase_timing.now_ms() if at is None else at)
         after = serialize_result(data)
         if before != after:
             write_atomic(path, after)
         return value
 
 
-def mark_timing(receipt, field):
+def mark_timing(receipt, field, *, at=None):
     try:
-        record_timing(receipt, phase_timing.mark, field)
-    except (OSError, ValueError, KeyError, TypeError, IndexError, SystemExit) as error:
+        record_timing(receipt, phase_timing.mark, field, at=at)
+    except (*TIMING_DATA_ERRORS, SystemExit) as error:
         print(f"dispatch timing unavailable: {error}", file=sys.stderr)
 
 
 def timing_report(receipt, result):
     try:
         return phase_timing.report(phase_timing.read(timing_path(receipt)), result)
-    except (OSError, ValueError, KeyError, TypeError, IndexError) as error:
+    except TIMING_DATA_ERRORS as error:
         return {"final_head": None, "launches": [], "merge": None, "error": str(error)}
 
 
 def timing(args):
     receipt = Path(args.run).resolve()
-    load_run(receipt)
+    run = load_run(receipt)
     try:
         if args.event == "start":
-            print(record_timing(receipt, phase_timing.start, args.phase, args.head))
+            print(record_timing(receipt, phase_timing.start, args.phase, args.sha, args.tree))
         elif args.event == "finish":
             record_timing(receipt, phase_timing.finish, args.phase, args.attempt, args.outcome)
         elif args.event == "merged":
             record_timing(receipt, phase_timing.merged, args.head)
+        elif args.event == "bind-review":
+            if not phase_timing.HEAD.fullmatch(args.head):
+                raise ValueError("expected a full head SHA")
+            tree = subprocess.check_output(["git", "rev-parse", "--verify", f"{args.head}^{{tree}}"],
+                                           encoding="utf-8", stderr=subprocess.DEVNULL).strip()
+            record_timing(receipt, phase_timing.bind_review, args.attempt, args.head, tree)
         else:
-            result, _ = read_result(receipt)
+            result, _ = current_result(receipt, run)
             print(json.dumps(timing_report(receipt, result), ensure_ascii=False))
-    except (OSError, ValueError, KeyError, TypeError, IndexError) as error:
+    except (*TIMING_DATA_ERRORS, subprocess.CalledProcessError) as error:
         raise SystemExit(f"dispatch timing unavailable: {error}") from None
 
 
@@ -473,6 +481,15 @@ def read_result(path):
         return None, None
     except (OSError, ValueError) as error:
         raise SystemExit(f"cannot read dispatch result {result_path}: {error}") from None
+
+
+def current_result(path, run):
+    result, written = read_result(path)
+    if written == run.get("previous_result"):
+        return None, None
+    if result is not None and run.get("cli") == "claude":
+        mark_timing(path, "delivered_ms", at=written // 1_000_000)
+    return result, written
 
 
 def hc_json(*args, timeout=None):
@@ -790,8 +807,9 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
         load_run(previous)
         try:
             history = phase_timing.read(timing_path(previous))
-        except (OSError, ValueError) as error:
-            raise SystemExit(f"cannot carry dispatch timing from {previous}: {error}") from None
+        except TIMING_DATA_ERRORS as error:
+            print(f"warning: cannot carry dispatch timing from {previous}: {error}", file=sys.stderr)
+            history = phase_timing.empty_history()
     else:
         history = phase_timing.empty_history()
     if wave:
@@ -849,6 +867,7 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
             raise SystemExit(f"pinned launch withheld; could not register child: {error}") from None
     versions = installed_plugin_versions() if args.cli == "codex" and not wave else {}
     started_ms = phase_timing.now_ms()
+    phase_timing.new_launch(history, started_ms)
     launched_ms = started_ms - 1000  # slack for clock rounding between processes
     try:
         if wave:
@@ -904,9 +923,6 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
         run["title"] = title
     if args.cli == "codex" and handoff["work_kind"] != "standalone":
         run["require_review_sources"] = True
-    phase_timing.new_launch(history, started_ms)
-    if args.cli == "claude" and lookup_error is None and terminal.get("parent") == home:
-        phase_timing.mark(history, "delivered_ms", phase_timing.now_ms())
     try:
         write_json(timing_path(receipt), history)
     except OSError as error:
@@ -1746,13 +1762,11 @@ def recent_missing_codex_hook(address):
 def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadline=None):
     run = load_run(path)
     try:
-        result, written = read_result(path)
+        result, written = current_result(path, run)
     except SystemExit as error:
         if not force:
             raise
         print(error, file=sys.stderr)
-        result, written = None, None
-    if written == run.get("previous_result"):
         result, written = None, None
     if result and run.get("require_review_sources"):
         result = gate_required_reviews(result)
@@ -1998,11 +2012,15 @@ def main(argv):
     events = timing_parser.add_subparsers(dest="event")
     start_parser = events.add_parser("start")
     start_parser.add_argument("phase", choices=phase_timing.PHASES)
-    start_parser.add_argument("head")
+    start_parser.add_argument("sha")
+    start_parser.add_argument("--tree", action="store_true")
     finish_parser = events.add_parser("finish")
     finish_parser.add_argument("phase", choices=phase_timing.PHASES)
     finish_parser.add_argument("attempt", type=int)
     finish_parser.add_argument("outcome", choices=phase_timing.OUTCOMES)
+    bind_parser = events.add_parser("bind-review")
+    bind_parser.add_argument("attempt", type=int)
+    bind_parser.add_argument("head")
     events.add_parser("merged").add_argument("head", nargs="?")
     collect_parser = sub.add_parser("collect")
     collect_parser.add_argument("run")

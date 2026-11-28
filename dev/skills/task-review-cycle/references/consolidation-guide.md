@@ -61,6 +61,8 @@ fallback policy. Keep the original launch history and the accepted blockers acro
 
 ## Fix rounds and re-review
 
+For dispatched work, record each review launch and consolidation per *Dispatch timing*.
+
 - Run at most **one general independent re-review per cycle** after the initial review. Use it
   only when the first repair materially changes behavior. Check the route floor before spending
   the re-review on a lite repair. Reuse the primary reviewer, with the current diff and targeted
@@ -125,7 +127,7 @@ the final evidence in the merge commit message before retiring the archive.
 
 Use the receipt beside the assigned `result.json`. Start one measurement before each
 independent review round, including a re-review or a focused confirmation. Use the
-candidate's full Git SHA from before reviewer launch. Keep the printed attempt number in
+committed candidate's full Git SHA. Keep the printed attempt number in
 the review checkpoint and finish that attempt when consolidating its verdict. Use
 `incomplete` if the attempt produced no verdict. Reuse the number when reclaiming the
 same attempt. A new reviewer launch gets a new number.
@@ -140,8 +142,14 @@ ATTEMPT=$(python3 -I "$DISPATCH" timing "$DISPATCH_TIMING_RUN" start review "$HE
 python3 -I "$DISPATCH" timing "$DISPATCH_TIMING_RUN" finish review "$ATTEMPT" complete
 ```
 
-Report unavailable timing and continue the review when recording fails. For the CI wait and
-merge helper, set `DISPATCH_TIMING_RUN` to the same receipt. For a separately verified merge
+When reviewing changes before committing them, stage the exact reviewed changes and verify the
+working tree matches the index. Capture the reviewed SHA with `git write-tree`. Start with
+`timing <receipt> start review <tree SHA> --tree`. After committing, run
+`timing <receipt> bind-review <attempt> <commit SHA>`. The helper verifies that the commit
+contains that tree before assigning the head.
+
+Report unavailable timing and continue the review when recording fails. Pass the same receipt
+to the CI wait and merge helper per `ci-failure-handling.md`. For a separately verified merge
 (including a confirmed lite push), run
 `dispatch.py timing <receipt> merged <confirmed feature head>`. Omit the head when unavailable.
 

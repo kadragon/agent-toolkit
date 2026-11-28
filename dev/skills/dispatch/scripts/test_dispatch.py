@@ -1851,22 +1851,49 @@ class DispatchWatchTests(unittest.TestCase):
             self.assertFalse(receipt.with_name("timing.json").exists())
 
             head = "a" * 40
-            data = phase_timing.read(receipt.with_name("timing.json"))
-            for at in range(phase_timing.MAX_LAUNCHES):
+            data = phase_timing.empty_history()
+            for at in range(phase_timing.MAX_LAUNCHES + 1):
                 phase_timing.new_launch(data, at)
             for at in range(phase_timing.MAX_ATTEMPTS + 1):
-                phase_timing.start(data, "review", head, at)
+                phase_timing.start(data, "review", head, False, at)
             phase_timing.finish(data, "review", 1, "complete", 30)
             phase_timing.finish(data, "review", 2, "complete", 0)
+            phase_timing.merged(data, None, 40)
             report = phase_timing.report(data, {"head": head})
             self.assertEqual(report["dropped_launches"], 1)
+            self.assertEqual(report["merge"], {"head": None, "confirmed_ms": 40, "elapsed_ms": 40})
+            self.assertEqual(report["final_head"], head)
             launch = report["launches"][-1]
             self.assertEqual(launch["dropped_review"], 1)
             self.assertEqual(len(launch["review"]), phase_timing.MAX_ATTEMPTS)
             self.assertEqual(launch["review"][0]["attempt"], 2)
             self.assertIsNone(launch["review"][0]["elapsed_ms"])  # Clock moved backward.
-            with self.assertRaisesRegex(ValueError, "full head SHA"):
-                phase_timing.start(data, "ci", "a prompt or a credential", 1)
+            with self.assertRaisesRegex(ValueError, "full Git object SHA"):
+                phase_timing.start(data, "ci", "a prompt or a credential", False, 1)
+
+    def test_timing_observes_claude_delivery_and_ignores_stale_results(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            report_path = receipt.with_name("result.json")
+            timing_file = receipt.with_name("timing.json")
+            args = SimpleNamespace(run=receipt, event=None)
+
+            def measure():
+                with redirect_stdout(StringIO()) as output:
+                    timing(args)
+                return json.loads(output.getvalue())
+
+            write_json(receipt, {"address": "t7", "cli": "claude", "sent": True})
+            write_json(timing_file, phase_timing.new_launch(phase_timing.empty_history(), 1000))
+            self.assertIsNone(measure()["launches"][0]["startup_ms"])
+            head = "a" * 40
+            write_json(report_path, {"status": "working", "phase": "review", "summary": "review", "head": head})
+            os.utime(report_path, ns=(1_500_000_000, 1_500_000_000))
+            self.assertEqual(measure()["launches"][0]["startup_ms"], 500)
+            os.utime(report_path, ns=(1_600_000_000, 1_600_000_000))
+            self.assertEqual(measure()["launches"][0]["startup_ms"], 500)
+            write_json(receipt, {"address": "t7", "cli": "codex", "previous_result": report_path.stat().st_mtime_ns})
+            self.assertIsNone(measure()["final_head"])
 
     def test_wait_ignores_legacy_done_while_working_and_emits_only_changes(self):
         report = {"address": "t7", "status": "working", "state": "live", "stop_reason": None,
@@ -2109,6 +2136,22 @@ class CodexSendTests(DispatchTestCase):
             launch(saved.launch_args(directory, **options))
         return mocked_hc.call_args_list
 
+    def test_relaunch_keeps_working_when_only_timing_history_is_invalid(self):
+        with tempfile.TemporaryDirectory() as previous, tempfile.TemporaryDirectory() as replacement:
+            receipt = Path(previous) / "run.json"
+            write_json(receipt, {"address": "t7", "closed_reason": "finished"})
+            timing_file = receipt.with_name("timing.json")
+            write_json(timing_file, {"launches": None})
+            with redirect_stderr(StringIO()) as warnings:
+                self.launch_codex(replacement, lambda *_: DispatchReceiptTests.TERMINAL,
+                                  relaunch_from=receipt, task=None)
+            self.assertIn("cannot carry dispatch timing", warnings.getvalue())
+            self.assertEqual(json.loads(timing_file.read_text(encoding="utf-8")), {"launches": None})
+            self.assertEqual(json.loads((Path(replacement) / "run.json").read_text(encoding="utf-8"))["address"], "t7")
+            started = phase_timing.read(Path(replacement) / "timing.json")
+            self.assertEqual(len(started["launches"]), 1)
+            self.assertIsNotNone(started["first_launched_ms"])
+
     def test_phase_timing_survives_retry_relaunch_and_repeated_collection(self):
         terminal = DispatchReceiptTests.TERMINAL
         sent = False
@@ -2125,7 +2168,7 @@ class CodexSendTests(DispatchTestCase):
 
         def event(receipt, at, verb, **options):
             with patch("dispatch.phase_timing.now_ms", return_value=at), redirect_stdout(StringIO()) as output:
-                timing(SimpleNamespace(run=receipt, event=verb, **options))
+                timing(SimpleNamespace(run=receipt, event=verb, **({"tree": False} | options)))
             return output.getvalue().strip()
 
         first_head, final_head = "a" * 40, "b" * 40
@@ -2133,13 +2176,13 @@ class CodexSendTests(DispatchTestCase):
             first = Path(directory) / "run.json"
             with patch("dispatch.phase_timing.now_ms", side_effect=[1000, 1100]):
                 self.launch_codex(directory, respond, task="$task-next #520 private prompt")
-            review = int(event(first, 5000, "start", phase="review", head=first_head))
+            review = int(event(first, 5000, "start", phase="review", sha=first_head))
             event(first, 5200, "finish", phase="review", attempt=review, outcome="complete")
             event(first, 5300, "finish", phase="review", attempt=review, outcome="complete")
-            pending_review = int(event(first, 5350, "start", phase="review", head=first_head))
-            attempt = int(event(first, 5400, "start", phase="ci", head=first_head))
+            pending_review = int(event(first, 5350, "start", phase="review", sha=first_head))
+            attempt = int(event(first, 5400, "start", phase="ci", sha=first_head))
             event(first, 5500, "finish", phase="ci", attempt=attempt, outcome="incomplete")
-            attempt = int(event(first, 5600, "start", phase="ci", head=first_head))
+            attempt = int(event(first, 5600, "start", phase="ci", sha=first_head))
             event(first, 5800, "finish", phase="ci", attempt=attempt, outcome="failed")
             finished = {**terminal, "state": "finished"}
             with (
@@ -2155,10 +2198,16 @@ class CodexSendTests(DispatchTestCase):
             sent = False
             with patch("dispatch.phase_timing.now_ms", side_effect=[6500, 6700]):
                 self.launch_codex(replacement, respond, relaunch_from=first)
-            review = int(event(second, 8000, "start", phase="review", head=final_head))
+            tree = "c" * 40
+            review = int(event(second, 8000, "start", phase="review", sha=tree, tree=True))
             event(second, 8050, "finish", phase="review", attempt=pending_review, outcome="complete")
-            attempt = int(event(second, 8100, "start", phase="ci", head=final_head))
+            attempt = int(event(second, 8100, "start", phase="ci", sha=final_head))
             event(second, 8200, "finish", phase="review", attempt=review, outcome="complete")
+            with patch("dispatch.subprocess.check_output", side_effect=["d" * 40, tree]) as git:
+                with self.assertRaisesRegex(SystemExit, "does not match"):
+                    event(second, 8300, "bind-review", attempt=review, head=final_head)
+                event(second, 8300, "bind-review", attempt=review, head=final_head)
+            self.assertEqual(git.call_args.args[0], ["git", "rev-parse", "--verify", f"{final_head}^{{tree}}"])
             event(second, 8350, "finish", phase="ci", attempt=attempt, outcome="passed")
             event(second, 8500, "merged", head=None)
             event(second, 8550, "merged", head=final_head)

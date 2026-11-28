@@ -230,7 +230,7 @@ Exit 126/127 → stop and report; never retry as `bash <path>`:
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 [[ -x "$SKILL_DIR/scripts/merge-and-cleanup.sh" ]] && echo "$SKILL_DIR/scripts/merge-and-cleanup.sh" || { echo "Bundled merge helper not executable" >&2; exit 1; }
-<printed path> <PR_NUMBER> <BASE_BRANCH> <FEATURE_BRANCH> '<MERGE_STRATEGY_JSON>' [<WORKTREE_PATH>] [--expected-head <REVIEWED_HEAD>]
+<printed path> <PR_NUMBER> <BASE_BRANCH> <FEATURE_BRANCH> '<MERGE_STRATEGY_JSON>' [<WORKTREE_PATH>] [--expected-head <REVIEWED_HEAD>] [--dispatch-run <receipt>]
 ```
 
 ## Error handling

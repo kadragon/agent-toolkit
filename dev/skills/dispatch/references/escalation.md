@@ -64,3 +64,4 @@ step 4 with the new pair, the same first message, and `--relaunch-from <old-rece
 phase measurements and unfinished attempts. For a `--tree` run, keep its worktree and use
 `/dev:task-next --resume <slug>` as the first message. After launch prints the replacement
 receipt, clean up the old one per [Close the child terminal](../SKILL.md#close-the-child-terminal).
+If the replacement reports it could not carry timing, preserve the old timing file for diagnosis.

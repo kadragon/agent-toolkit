@@ -90,8 +90,8 @@ increment it (they route to the user-escalation branch in "Wait for CI" instead)
 
 ## Merge and Clean Up
 
-SKILL.md Step 6 → *Hub path* issues the merge. Export `DISPATCH_TIMING_RUN` to the absolute
-`run.json` path for a dispatched run. Record a separately confirmed merge per
+SKILL.md Step 6 → *Hub path* issues the merge. Append `--dispatch-run <absolute run.json path>`
+to that invocation for a dispatched run. Record a separately confirmed merge per
 `consolidation-guide.md` → *Dispatch timing*. In the helper's JSON, `merge_ok: false` → report
 the error (conflicts, branch protection) and suggest the user resolve it; `queued: true` = in a
 merge queue, not merged yet; `unconfirmed: true` = state unknown, check the PR before retrying.

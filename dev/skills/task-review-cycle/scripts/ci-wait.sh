@@ -147,10 +147,15 @@ fi
 # One measurement per invocation, regardless of the number of status polls.
 CI_OUTCOME=incomplete
 if [ -n "${DISPATCH_TIMING_RUN:-}" ] && [ -n "$WATCH_SHA" ]; then
-  TIMING=(python3 -I "$SCRIPT_DIR/../../dispatch/scripts/dispatch.py" timing "$DISPATCH_TIMING_RUN")
-  CI_ATTEMPT=$("${TIMING[@]}" start ci "$WATCH_SHA") || CI_ATTEMPT=""
-  if [ -n "$CI_ATTEMPT" ]; then
-    trap '"${TIMING[@]}" finish ci "$CI_ATTEMPT" "$CI_OUTCOME" || true' EXIT
+  TIMING_PY=$(command -v python3 || command -v python || true)
+  if [ -z "$TIMING_PY" ]; then
+    echo "WARN: dispatch CI timing unavailable without Python" >&2
+  else
+    TIMING=("$TIMING_PY" -I "$SCRIPT_DIR/../../dispatch/scripts/dispatch.py" timing "$DISPATCH_TIMING_RUN")
+    CI_ATTEMPT=$("${TIMING[@]}" start ci "$WATCH_SHA") || CI_ATTEMPT=""
+    if [ -n "$CI_ATTEMPT" ]; then
+      trap '"${TIMING[@]}" finish ci "$CI_ATTEMPT" "$CI_OUTCOME" || true' EXIT
+    fi
   fi
 fi
 
@@ -184,6 +189,7 @@ while true; do
   case "$STATUS" in
     success)
       clear_strikes
+      CI_OUTCOME=passed-unverified
       if [ -n "$WATCH_SHA" ] && [ "$STATUS_SHA" = "$WATCH_SHA" ]; then
         CI_OUTCOME=passed
       fi
@@ -191,6 +197,7 @@ while true; do
       exit 0
       ;;
     failure)
+      CI_OUTCOME=failed-unverified
       if [ -n "$WATCH_SHA" ] && [ "$STATUS_SHA" = "$WATCH_SHA" ]; then
         CI_OUTCOME=failed
       fi
