@@ -69,7 +69,7 @@ Use `wait --first` after delivery and keep merges into the base sequential.
 
 ## Resync a pushed child PR
 
-Before collecting a PR's pre-merge report, and after each merge into the base, the home session checks
+Right before collecting the next-in-merge-order PR's pre-merge report, the home session checks
 that the current base is an ancestor of the PR head. If not, it asks that PR's child to resync,
 through *Continue with another phase*. The child
 performs the resync; the home session never commits to or pushes the child's branch. The child
