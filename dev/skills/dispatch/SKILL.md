@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 3.3.0
+version: 3.4.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo listed in
   the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to
@@ -186,11 +186,12 @@ More than one session:
 
 Tell the user each terminal's name, address and repo. Watch in the background and keep context small:
 
-- After confirming task delivery to every new child, run `dispatch.py wait <receipt>...` in the
-  background. It prints the initial status and changes until every receipt reaches a selected
-  outcome or 1800 seconds elapse. A receipt that reaches its outcome leaves the watch set.
-  For task completion, use `--until ready,blocked,done,merged,stop`
-  to keep waiting through ordinary idle states. Keep the timeout under the prompt-cache lifetime.
+- After confirming task delivery to every new child, watch in the background. For multiple
+  children, run `dispatch.py wait --first <receipt>...`. It prints the first receipt observed at a
+  selected outcome and returns. Handle that outcome, then restart the watch with the remaining
+  receipts. For one child, run `dispatch.py wait <receipt>` to also see initial status and changes.
+  For task completion, use `--until ready,blocked,done,merged,stop` to wait through ordinary idle
+  states. The default timeout is 1800 seconds. Keep it under the prompt-cache lifetime.
 - `dispatch.py collect <receipt> --brief` prints the same one-line status on demand. Use full
   `collect` for details and review evidence. `--stall-minutes N` overrides the 30-minute
   inactivity threshold. Report the stop reason, model, effort and any measured token totals or

@@ -1428,14 +1428,18 @@ def wait(args):
             working = None
             for path in pending:
                 report = collect_result(path, False, False, args.stall_minutes, warn_drift=False, deadline=deadline)
-                line = brief_report(report)
-                if previous.get(path) != line:
-                    print(line, flush=True)
-                    previous[path] = line
                 if not reached_outcome(report, args.until):
                     next_pending.append(path)
                     if working is None and report["state"] == "live" and report["status"] == "working":
                         working = report["address"]
+                    if args.first:
+                        continue
+                line = brief_report(report)
+                if previous.get(path) != line:
+                    print(line, flush=True)
+                    previous[path] = line
+                if args.first:
+                    return
             pending = next_pending
             if not pending:
                 return
@@ -1829,6 +1833,7 @@ def main(argv):
     collect_parser.set_defaults(func=collect)
     wait_parser = sub.add_parser("wait", help="watch receipts until each reaches a selected outcome")
     wait_parser.add_argument("runs", nargs="+")
+    wait_parser.add_argument("--first", action="store_true", help="return after printing the first selected outcome")
     wait_parser.add_argument("--until", default=",".join(WAIT_DEFAULT),
                              help=f"comma-separated outcomes (default: {','.join(WAIT_DEFAULT)})")
     wait_parser.add_argument("--timeout", type=int, default=WAIT_TIMEOUT_SECONDS, metavar="SECONDS")

@@ -9,7 +9,7 @@ import tempfile
 import time
 import unittest
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
-from io import StringIO
+from io import BytesIO, StringIO, TextIOWrapper
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import ANY, call, patch
@@ -28,6 +28,7 @@ from dispatch import (
     free_name,
     launch,
     lock_run,
+    main,
     pick,
     release,
     report_instruction,
@@ -1755,7 +1756,7 @@ class DispatchWatchTests(unittest.TestCase):
         same = {**report, "result": {**report["result"], "review_retries": 2}}
         ready = {**report, "status": "done", "result": {"status": "ready", "phase": "review",
                                                        "summary": "검증 완료", "pr": "#10"}}
-        args = SimpleNamespace(runs=["run.json"], until={"ready", "blocked", "merged", "idle", "stop"},
+        args = SimpleNamespace(first=False, runs=["run.json"], until={"ready", "blocked", "merged", "idle", "stop"},
                                timeout=30, stall_minutes=30)
         with patch("dispatch.collect_result", side_effect=[report, same, ready]) as probe, \
              patch("dispatch.hc_rpc", return_value={"result": {}}) as hc, patch("dispatch.time.sleep"), redirect_stdout(StringIO()) as output:
@@ -1769,12 +1770,26 @@ class DispatchWatchTests(unittest.TestCase):
             "t7 · ready · review · 검증 완료 · #10 · -",
         ])
 
-    def test_wait_requires_all_receipts_and_a_stopped_terminal_for_done(self):
+    def test_wait_first_returns_on_the_first_selected_outcome(self):
+        idle = {"address": "t7", "status": "idle", "state": "live", "stop_reason": None, "result": None}
+        ready = {**idle, "address": "t8", "status": "done", "result": {"status": "ready", "pr": "#10"}}
+        reports = [idle, ready, {**ready, "address": "t9"}, {**ready, "address": "t7"}]
+        with TextIOWrapper(BytesIO(), encoding="utf-8") as output, redirect_stdout(output), \
+             patch("dispatch.collect_result", side_effect=reports) as probe, \
+             patch("dispatch.hc_rpc") as hc, patch("dispatch.time.sleep") as sleep:
+            main(["wait", "--first", "--until", "ready", "a.json", "b.json", "c.json"])
+            output.seek(0)
+            printed = output.read()
+        self.assertEqual([invocation.args[0].name for invocation in probe.call_args_list], ["a.json", "b.json"])
+        hc.assert_not_called()
+        sleep.assert_not_called()
+        self.assertEqual(printed, "t8 · ready · - · - · #10 · -\n")
+
         working = {"address": "t7", "status": "working", "state": "live", "stop_reason": None,
                    "result": {"status": "done", "phase": "implement", "summary": "phase complete"}}
         stopped = {**working, "status": "done"}
         second = {**working, "address": "t8", "result": None, "stop_reason": "hooks_broken"}
-        args = SimpleNamespace(runs=["a.json", "b.json"], until={"done", "stop"}, timeout=30, stall_minutes=30)
+        args = SimpleNamespace(first=False, runs=["a.json", "b.json"], until={"done", "stop"}, timeout=30, stall_minutes=30)
         with patch("dispatch.collect_result", side_effect=[working, second, stopped]) as probe, \
              patch("dispatch.hc_rpc", return_value={"result": {}}), patch("dispatch.time.sleep"), redirect_stdout(StringIO()) as output:
             wait(args)
@@ -1785,7 +1800,7 @@ class DispatchWatchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
             receipt.write_text(json.dumps({"address": "t7", "closed_reason": "finished"}), encoding="utf-8")
-            args = SimpleNamespace(runs=[receipt], until={"stop"}, timeout=30, stall_minutes=30)
+            args = SimpleNamespace(first=False, runs=[receipt], until={"stop"}, timeout=30, stall_minutes=30)
             with patch("dispatch.hc_json") as hc, redirect_stdout(StringIO()) as output:
                 wait(args)
         hc.assert_not_called()
@@ -1794,7 +1809,7 @@ class DispatchWatchTests(unittest.TestCase):
     def test_wait_stops_and_surfaces_drift_even_while_old_hook_directory_exists(self):
         report = {"address": "t7", "status": "working", "state": "live", "stop_reason": None,
                   "result": None, "plugin_drift": ["dev old -> new"]}
-        args = SimpleNamespace(runs=["run.json"], until={"stop"}, timeout=30, stall_minutes=30)
+        args = SimpleNamespace(first=False, runs=["run.json"], until={"stop"}, timeout=30, stall_minutes=30)
         with patch("dispatch.collect_result", return_value=report), patch("dispatch.hc_rpc") as hc, \
              redirect_stdout(StringIO()) as output:
             wait(args)
@@ -1805,7 +1820,7 @@ class DispatchWatchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
             receipt.write_text(json.dumps({"address": "t7", "created_ms": 1}), encoding="utf-8")
-            args = SimpleNamespace(runs=[receipt], until={"stop"}, timeout=30, stall_minutes=30)
+            args = SimpleNamespace(first=False, runs=[receipt], until={"stop"}, timeout=30, stall_minutes=30)
             gone = subprocess.CalledProcessError(3, "hc", stderr='{"error":{"kind":"not_found"}}')
             with patch("dispatch.hc_json", side_effect=gone), redirect_stdout(StringIO()) as output:
                 wait(args)
@@ -1815,7 +1830,7 @@ class DispatchWatchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
             receipt.write_text(json.dumps({"address": "t7", "created_ms": 1}), encoding="utf-8")
-            args = SimpleNamespace(runs=[receipt], until={"stop"}, timeout=1, stall_minutes=30)
+            args = SimpleNamespace(first=False, runs=[receipt], until={"stop"}, timeout=1, stall_minutes=30)
             with patch("dispatch.hc_json", side_effect=subprocess.TimeoutExpired("hc", 1)) as hc, \
                  self.assertRaisesRegex(SystemExit, "timed out"):
                 wait(args)
@@ -1824,7 +1839,7 @@ class DispatchWatchTests(unittest.TestCase):
 
     def test_wait_times_out_when_no_selected_outcome_occurs(self):
         report = {"address": "t7", "status": "idle", "state": "live", "stop_reason": None, "result": None}
-        args = SimpleNamespace(runs=["run.json"], until={"ready"}, timeout=1, stall_minutes=30)
+        args = SimpleNamespace(first=False, runs=["run.json"], until={"ready"}, timeout=1, stall_minutes=30)
         with patch("dispatch.collect_result", return_value=report), \
              patch("dispatch.time.monotonic", side_effect=[0, 2]), redirect_stdout(StringIO()) as output:
             with self.assertRaisesRegex(SystemExit, "timed out"):
