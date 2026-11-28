@@ -53,7 +53,21 @@ LOG_FILE="$RUN_DIR/codex-stderr.log"
 KEEP_RUN_DIR=""
 LOCK_DIR=""
 LOCK_HELD=""
+BROKER_TEMP=""
+clean_review_brokers() {
+  [ -n "$BROKER_TEMP" ] || return 0
+  local py
+  py=$(command -v python3 || command -v python || true)
+  if [ -n "$py" ] && "$py" -I -X utf8 "$SCRIPT_DIR/broker-cleanup.py" "$PWD" --owned-temp "$BROKER_TEMP" &&
+    rm -rf "$BROKER_TEMP"; then
+    BROKER_TEMP=""
+    return 0
+  fi
+  printf 'WARN: could not clean review brokers under %s\n' "$BROKER_TEMP" >&2
+  return 1
+}
 cleanup() {
+  clean_review_brokers || true
   # Release only a lock this process still owns: after a reclaim race the directory at that path can
   # belong to someone else, and dropping it would admit a third run.
   if [ -n "$LOCK_HELD" ] && [ -n "$LOCK_DIR" ] &&
@@ -62,7 +76,9 @@ cleanup() {
   fi
   [ -n "$KEEP_RUN_DIR" ] || rm -rf "$RUN_DIR"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # Exit status for "another cycle already owns this workspace's Codex slot". Distinct from 1 so the
 # caller can record a skipped reviewer instead of a dead one — a failed review and a review that
@@ -668,11 +684,20 @@ case "$CODEX_MODE" in
     # loses the diagnostic detail.
     retry_count=0
     while :; do
+      # Use fresh private state on each attempt. Incomplete broker startup may
+      # have written a PID file before the companion updated its state record.
+      BROKER_TEMP=$(mktemp -d -t cr.XXXXXX) || exit 1
+      broker_native_temp="$BROKER_TEMP"
+      if command -v cygpath >/dev/null 2>&1; then
+        broker_native_temp=$(cygpath -m "$BROKER_TEMP") || exit 1
+      fi
       RAW=""
       codex_status=0
       # The companion's native review does not accept focus text. Its branch-scoped
       # adversarial review accepts the same instructions as the standalone CLI.
-      RAW=$(node "$CODEX_COMPANION_PATH" adversarial-review --base "$BASE_BRANCH" --scope branch --json "$REVIEW_PROMPT" 2>"$LOG_FILE") || codex_status=$?
+      RAW=$(CLAUDE_PLUGIN_DATA="$broker_native_temp" TMPDIR="$broker_native_temp" \
+        TEMP="$broker_native_temp" TMP="$broker_native_temp" CODEX_COMPANION_APP_SERVER_ENDPOINT= \
+        node "$CODEX_COMPANION_PATH" adversarial-review --base "$BASE_BRANCH" --scope branch --json "$REVIEW_PROMPT" 2>"$LOG_FILE") || codex_status=$?
       if [ "$codex_status" -ne 0 ]; then
         printf 'WARN: codex companion exited %s\n' "$codex_status" >&2
         [ -n "$RAW" ] && emit_blob_tail "$RAW" "companion failure payload"
@@ -745,6 +770,7 @@ case "$CODEX_MODE" in
           printf 'WARN: the review names plugin paths missing on disk (likely a Codex startup cache refresh); retrying once:\n%s\n' \
             "$STALE_PATHS" >&2
           emit_blob_tail "$TEXT" "first run review text"
+          clean_review_brokers || break
           continue
         fi
         break
@@ -752,8 +778,9 @@ case "$CODEX_MODE" in
       if [ "$retry_count" -eq 0 ]; then
         retry_count=1
         printf 'WARN: companion payload was empty or unparseable; retrying once after pruning broker state\n' >&2
-        prune_stale_codex_state
-        continue
+        if clean_review_brokers; then
+          continue
+        fi
       fi
       [ -n "$JQ_ERR" ] && printf 'WARN: jq parse error: %s\n' "$JQ_ERR" >&2
       printf 'ERROR: could not extract .codex.stdout from companion JSON (payload status: %s)\n' \

@@ -17,4 +17,9 @@ if [[ -f "$MAINTENANCE" ]]; then
   bash "$MAINTENANCE" || true
 fi
 
+PY=$(command -v python3 || command -v python || true)
+if [[ -n "$PY" ]]; then
+  "$PY" -I -X utf8 "$SCRIPT_DIR/worktree_sweep.py" "$PWD" 2>&1 || true
+fi
+
 exit 0

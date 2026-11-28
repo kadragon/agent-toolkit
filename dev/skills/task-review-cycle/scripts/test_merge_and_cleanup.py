@@ -61,10 +61,12 @@ def make_script_dir(tmp):
     d = Path(tempfile.mkdtemp(dir=tmp)) / "skills/task-review-cycle/scripts"
     d.mkdir(parents=True)
     shutil.copy(SCRIPT, d / "merge-and-cleanup.sh")
+    shutil.copy(SCRIPT.with_name("broker-cleanup.py"), d)
     shutil.copy(SCRIPT.parent / "git-authority.sh", d / "git-authority.sh")
     state = d / "../../task-next/scripts/cycle_state.py"
     state.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy(SCRIPT.parent / "../../task-next/scripts/cycle_state.py", state)
+    shutil.copy(SCRIPT.parent / "../../task-next/scripts/worktree_sweep.py", state.parent)
     (d / "hub.sh").write_text(HUB_STUB, newline="\n")
     return d
 
@@ -196,10 +198,12 @@ def run_hub_merge(tmp, view, api_rc=0, api_err=""):
 
 def case_hub_remote_delete_when(tmp):
     # The remote head is deleted only once the PR is MERGED from a same-repo branch.
-    merged = {"state": "MERGED", "headRefName": "feat/x", "isCrossRepository": False}
+    merged = {"state": "MERGED", "headRefName": "feat/x", "isCrossRepository": False, "headRefOid": "a" * 40}
     out, calls = run_hub_merge(tmp, merged)
     if out["merge_ok"] is not True or out.get("queued") is not False:
         fail("hub_remote_delete_when", f"MERGED: got {out!r}")
+    if out.get("head_sha") != merged["headRefOid"]:
+        fail("hub_remote_delete_when", f"MERGED head not returned: {out!r}")
     if calls != ["api -X DELETE repos/{owner}/{repo}/git/refs/heads/feat/x"]:
         fail("hub_remote_delete_when", f"MERGED: api calls {calls!r}")
     _, calls = run_hub_merge(tmp, dict(merged, isCrossRepository=True))
@@ -271,7 +275,8 @@ def case_forgejo_expected_head_is_rejected(tmp):
     bindir = Path(tempfile.mkdtemp(dir=tmp))
     log = bindir / "curl.log"
     curl = bindir / "curl"
-    curl.write_text("#!/usr/bin/env bash\necho called >> \"$CURL_LOG\"\nprintf '{}\\n200'\n",
+    curl.write_text("#!/usr/bin/env bash\necho called >> \"$CURL_LOG\"\n"
+                    "if [[ $3 == GET ]]; then printf '%s\\n200' \"$PR_RESPONSE\"; else printf '{}\\n200'; fi\n",
                     encoding="utf-8", newline="\n")
     curl.chmod(0o755)
     env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}",
@@ -282,8 +287,10 @@ def case_forgejo_expected_head_is_rejected(tmp):
     out = json.loads(proc.stdout)
     if out["merge_ok"] or log.exists():
         fail(case, f"the hub allowed an explicitly pinned Forgejo merge: {out!r}")
+    env["PR_RESPONSE"] = json.dumps({"merged": True, "head": {"sha": reviewed}})
     proc = subprocess.run(args, cwd=repo, env=env, capture_output=True, text=True, check=True)
-    if not json.loads(proc.stdout)["merge_ok"] or not log.exists():
+    out = json.loads(proc.stdout)
+    if not out["merge_ok"] or out.get("head_sha") != reviewed or not log.exists():
         fail(case, f"the existing Forgejo merge no longer reaches the API: {proc.stdout!r}")
     print("ok Forgejo keeps its existing merge and rejects an explicit GitHub-only SHA pin")
 
@@ -320,9 +327,9 @@ def case_run_from_inside_worktree(tmp):
     git(repo, "checkout", "-q", "main")
     wt = Path(tempfile.mkdtemp(dir=tmp)) / "wt"
     git(repo, "worktree", "add", "-q", str(wt), FEATURE)
-    proc = subprocess.run(["bash", str(d / "merge-and-cleanup.sh"), "1", "main", FEATURE,
-                           '{"squash":true}', "."], cwd=wt, check=False,
-                          capture_output=True, text=True)
+    proc = subprocess.run(["bash", "-c", 'bash "$@"; result=$?; cd /; exit "$result"', "caller",
+                           str(d / "merge-and-cleanup.sh"), "1", "main", FEATURE, '{"squash":true}', "."],
+                          cwd=wt, check=False, capture_output=True, text=True)
     if proc.returncode != 0:
         fail("run_from_inside_worktree", f"exit {proc.returncode}: {proc.stderr.strip()!r}")
     out = json.loads(proc.stdout)
@@ -332,15 +339,24 @@ def case_run_from_inside_worktree(tmp):
     print("ok run_from_inside_worktree")
 
 
+def case_already_removed_worktree_does_not_keep_branch(tmp):
+    repo, scripts = make_repo(tmp), make_script_dir(tmp)
+    gone = Path(tmp) / "already-removed"
+    out = run("already_removed_worktree", repo, scripts, worktree=gone)
+    if branch_exists(repo) or "deleted" not in out["cleanup_message"]:
+        fail("already_removed_worktree", f"got {out!r}")
+    print("ok already_removed_worktree")
+
+
 def case_inside_worktree_keeps_main_branch(tmp):
     # Moving to the main worktree must never switch the branch someone else has checked out there.
     repo, d = make_repo(tmp), make_script_dir(tmp)
     git(repo, "checkout", "-q", "-b", "feat/other", "main")
     wt = Path(tempfile.mkdtemp(dir=tmp)) / "wt"
     git(repo, "worktree", "add", "-q", str(wt), FEATURE)
-    proc = subprocess.run(["bash", str(d / "merge-and-cleanup.sh"), "1", "main", FEATURE,
-                           '{"squash":true}', "."], cwd=wt, check=False,
-                          capture_output=True, text=True)
+    proc = subprocess.run(["bash", "-c", 'bash "$@"; result=$?; cd /; exit "$result"', "caller",
+                           str(d / "merge-and-cleanup.sh"), "1", "main", FEATURE, '{"squash":true}', "."],
+                          cwd=wt, check=False, capture_output=True, text=True)
     out = json.loads(proc.stdout)
     current = git(repo, "branch", "--show-current").stdout.strip()
     if current != "feat/other" or wt.exists() or branch_exists(repo) \
@@ -478,6 +494,33 @@ def case_script_dir_ignores_cdpath(tmp):
     print("ok script_dir_ignores_cdpath")
 
 
+def case_dispatch_records_only_confirmed_merge(tmp):
+    repo, scripts = make_repo(tmp), make_script_dir(tmp)
+    dispatch = scripts / "../../dispatch/scripts"
+    dispatch.mkdir(parents=True)
+    for name in ("dispatch.py", "phase_timing.py", "pinned_wave.py", "codex_app_server.py", "shared_codex.py"):
+        shutil.copy(SCRIPT.parent / "../../dispatch/scripts" / name, dispatch)
+    receipt = scripts / "run.json"
+    receipt.write_text('{"address": "t7"}', encoding="utf-8")
+    head = git(repo, "rev-parse", "HEAD").stdout.strip()
+    command = ["bash", str(scripts / "merge-and-cleanup.sh"), "1", "main", FEATURE,
+               '{"squash":true}', "--dispatch-run", str(receipt)]
+    measurements = receipt.with_name("timing.json")
+    case = "dispatch_records_only_confirmed_merge"
+    for response in ({"merge_ok": False, "queued": True}, {"merge_ok": False, "unconfirmed": True},
+                     {"merge_ok": True, "head_sha": head}):
+        (scripts / "hub.sh").write_text(f"echo '{json.dumps(response)}'\n", encoding="utf-8")
+        proc = subprocess.run(command, cwd=repo, check=True, capture_output=True, text=True)
+        if json.loads(proc.stdout)["merge_ok"] != response["merge_ok"]:
+            fail(case, f"unexpected merge response: {proc.stdout}")
+        if measurements.exists() != response["merge_ok"]:
+            fail(case, f"timing file does not match merge confirmation: {response}")
+    recorded = json.loads(measurements.read_text(encoding="utf-8"))["merge"]
+    if recorded["head"] != head or not isinstance(recorded["confirmed_ms"], int):
+        fail(case, f"invalid merge timing: {recorded}")
+    print(f"ok {case}")
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="merge-cleanup-")
     try:
@@ -496,11 +539,13 @@ def main():
         case_hub_ref_is_encoded_and_failure_reported(tmp)
         case_cleanup_reports_queued(tmp)
         case_run_from_inside_worktree(tmp)
+        case_already_removed_worktree_does_not_keep_branch(tmp)
         case_inside_worktree_keeps_main_branch(tmp)
         case_linked_worktree_without_path_stays(tmp)
         case_hub_merge_state_unconfirmed(tmp)
         case_dirty_main_checkout_not_fast_forwarded(tmp)
         case_script_dir_ignores_cdpath(tmp)
+        case_dispatch_records_only_confirmed_merge(tmp)
     finally:
         shutil.rmtree(tmp, onerror=_force_remove)
     print("PASS")

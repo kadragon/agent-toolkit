@@ -22,8 +22,9 @@ home, settings and trust decisions intact.
 2. In the native hook dialog, review and approve each required hook individually. Check the
    hook paths and commands in the pinned cache. Close the review child with
    `collect <child receipt> --close --force`. The restart runs SessionStart with approval.
-3. Start the task children idle with the same `--wave`. Use `send --run <child receipt>`
-   for each task. Launch never accepts `--trust-hooks` with a wave. A warning, a changed or
+3. Start the task children idle with the same `--wave`. Use `send-wave` for
+   [reserved queue assignments](launch-handoff.md#reserved-queue-waves), or
+   `send --run <child receipt>` for an individual task. Launch never accepts `--trust-hooks` with a wave. A warning, a changed or
    incomplete hook inventory, a missing snapshot, or an unverifiable Herdr process holds delivery.
 4. Close each child with `collect --close` when it stops. Retain those receipts until
    `dispatch.py release <wave receipt>` removes the private home and snapshot. An uncertain
@@ -60,11 +61,13 @@ Claude and agy launches. Their approval checks cited the absence of a grant cove
 data and destination. Comparable calls reached the shell with an explicit review request and
 scoped approval descriptions. Those observed decisions are specific to their call context.
 
-Before dispatch, capture the user's approval for the target repository, the review data
-(diff, relevant source, Sprint Contract and `REVIEW.md` where applicable), and each authorized
-engine or account. If it is part of the original request, keep it there verbatim. Pass a separate
-user grant verbatim with `--review-transfer-approval`. The receipt preserves it for the first
-send and any first-message retry. Git authority, public visibility and hook trust each have
+Queue, new and `task-review` launches carry the standing review transfer approval. The
+`task-review` invocation approves sending the target repository's diff, relevant source, Sprint
+Contract and `REVIEW.md` to Anthropic Claude, OpenAI Codex and Google Antigravity, so do not ask
+before dispatch. Pass a separate user grant verbatim with `--review-transfer-approval`; it
+replaces the standing line. When the user restricted transfers, keep the restriction in the
+original request and pass `--no-standing-review-approval`. The receipt preserves the field for
+the first send and any first-message retry. Git authority, public visibility and hook trust each have
 their own scope. The child follows [Data-sharing policy](../../task-review-cycle/references/review-sources.md#data-sharing-policy)
 for approval requests and reports a denial to the merge owner as `blocked`.
 
@@ -104,6 +107,21 @@ unverified. Check that in the child's transcript when enabling the rules for a w
 Sources: [Codex command rules](https://developers.openai.com/codex/rules) and
 [configuration reference](https://developers.openai.com/codex/config-reference).
 
+## Windows worktree readiness
+
+`dispatch.py launch` sets `PYTHONUTF8=1` and `PYTHONIOENCODING=utf-8` for Codex shell
+commands. Run Bash-labeled task-cycle snippets through Git Bash on Windows. Python's
+environment settings govern Python I/O. PowerShell console encoding is configured separately.
+
+`git fetch origin` requires network access and permission to write `FETCH_HEAD` in the Git
+directory. Worktree creation also writes to the shared Git directory. If a child receives
+`Permission denied`, use normal approval for the affected Git command. On a machine that
+allows these commands inside its sandbox, check the child's effective local Codex permissions
+for the exact Git directory (`git rev-parse --path-format=absolute --git-dir --git-common-dir`).
+The machine's permission policy may protect `.git` even within a writable checkout. Configure
+any approved write access in the machine's Codex permission profile and confirm it from the
+child. See the [Codex sandbox documentation](https://learn.chatgpt.com/docs/sandboxing).
+
 ## Hook trust at launch
 
 On the shared cache, Herdr's `dispatch.py launch --trust-hooks` passes `--dangerously-bypass-hook-trust` to Codex
@@ -111,10 +129,18 @@ with or without `--task`. Check `codex --help` for support (verified on Codex CL
 Verify the enabled hook sources and commands and get explicit authorization for the bypass.
 The flag runs enabled hooks without requiring persisted trust for this process and does not
 save approval. Repository trust, hook failures, plugin cache checks and delivery checks still apply.
-On the first send for a verified opt-in receipt, dispatch opens a single warning with F2.
-It closes the viewer with Esc only when the sole Startup page contains the exact native
-hook-trust bypass notice. It then rechecks the composer and waits for the terminal to be idle
-before sending. Other warnings still require manual review.
+On the first send for a verified opt-in receipt, dispatch opens the warning viewer with F2
+and reads each page in order. It recognizes these native Startup notices:
+
+- The `--dangerously-bypass-hook-trust` notice that enabled hooks may run without review.
+- The `Under-development features enabled:` notice, with the feature list and the
+  `suppress_unstable_features_warning = true` setting in the Codex config path. Dispatch checks
+  the full message template.
+
+Dispatch closes the viewer with Esc only after recognizing every page and finding the bypass
+notice. It then rechecks the composer and waits for an idle terminal before sending. An
+unrecognized page or a missing bypass notice leaves the viewer open and withholds the task
+for manual review.
 Omit `--trust-hooks` to use the manual review below.
 
 ## Before a shared-cache Codex wave
@@ -125,28 +151,40 @@ requires review. A dev-only or prod-only release preserves the guard approval.
 Dispatch holds task delivery when the installed dev has moved its hooks and guard is missing
 from the shared cache.
 
-Before starting a shared-cache child while another is mid-cycle, fetch agent-toolkit and
-compare the plugin versions in `origin/main` with
-`~/.codex/plugins/cache/kadragon/<plugin>/<version>`. A changed version can remove files
-that a running session still uses. Launch only after the fetch succeeds and all versions
-match. Treat a live agent-toolkit child that may merge as a mismatch.
-If a wave needs multiple Codex children, launch all of them idle (omit `--task`), then
-send tasks with `dispatch.py send --run <receipt> -- <address> '<first message>'`.
+Run the preparation command from the home session and specify the trusted target directory.
 
-When a plugin version may have changed, wait for active Codex cycles to finish, then prepare the wave:
+```sh
+python3 -I "<dispatch>/scripts/dispatch.py" prepare-codex --repo "<agent-toolkit checkout>" --cwd "<target repo>"
+```
 
-1. Start an idle Codex child and wait for the plugin update at startup. Close the child.
-2. After installing or updating guard, start a second idle Codex child if a task child will
-   rely on persisted trust. Use **Review hooks** in the startup dialog or `/hooks` to check
-   that the guard hooks are trusted and active, then close the child.
-3. Launch the task children once the warm-up children are closed. Pass `--trust-hooks` at
-   launch for each child authorized to use it.
+The command fetches the checkout's default remote branch, compares installed kadragon plugin
+versions, upgrades that marketplace if needed, then starts and closes an idle Herdr child.
+Read `pending_hooks` in its JSON for the exact enabled hooks Codex marks untrusted or modified.
+`hook_content_diffs` compares the affected kadragon plugin's hook manifest and bundled hook
+files with a previously observed trusted copy in this Codex home. If native startup refresh
+replaces the old cache before its trust can be inspected, the command uses the last recorded
+trusted copy or reports that no trusted copy is available. Third-party pending hooks appear in `pending_hooks` with their
+native source paths and review status.
 
-Close an idle warm-up with `dispatch.py collect <receipt> --close --force` after verifying that
-it is the idle child started for this preparation.
+If hooks need approval, launch an idle child and use **Review hooks** or `/hooks`. Close the
+review child and restart so approved SessionStart hooks can run. Start the task children idle,
+then use [Reserved queue waves](launch-handoff.md#reserved-queue-waves) for independent queue units
+or `dispatch.py send --run <receipt> -- <address> '<first message>'` for an individual task.
 
-Before a long wave, run `codex plugin marketplace upgrade` and then the warm-up above, so no
-startup during the wave finds a newer plugin to install.
+Preparation and dispatch startup share a local lock scoped to the Codex home. Prepared
+launches carry a Herdr label for that cache. While a labeled child is live, preparation is
+held, and launches from a different home session are warned and held. Before launching a sibling,
+dispatch fetches from the checkout saved by preparation and verifies the remote and installed
+versions still match. Use an explicit Herdr parent when launching from outside a home session.
+A failed check or a version mismatch holds startup. Close the wave before
+preparing another one. Standalone Codex startup and dispatch versions predating the label can
+still refresh the cache.
+
+Startup update deferral is unverified on Codex 0.172.0. Its source starts a configured-marketplace
+upgrade when plugins are enabled. The `auto_update` field describes checks during plugin
+listing. Use a [verified wave](#verified-wave) when concurrent work needs a fixed plugin version.
+[Codex startup implementation](https://github.com/openai/codex/blob/rust-v0.172.0/codex-rs/core-plugins/src/manager.rs#L3139-L3181),
+[marketplace config type](https://github.com/openai/codex/blob/rust-v0.172.0/codex-rs/config/src/types.rs#L1291-L1299).
 
 ## Plugin update during a shared-cache wave
 
@@ -192,7 +230,8 @@ Read the live screen with `hc read --lines 0 <address>` before resolving a block
 Retry with `dispatch.py send --run <receipt> -- <address> '<first message>'` once the hooks are
 active, all blockers are resolved, and the composer is clear. If the source cannot be verified,
 approval is unavailable during manual review, or a warning remains, report the blocker and
-withhold the task. For an unconfirmed send, inspect whether the task already started before retrying.
+withhold the task. For an unconfirmed send, check for work with `dispatch.py peek <receipt>`.
+If no work is visible, inspect the raw screen for the submitted prompt, drafts, or dialogs before retrying.
 
 A send hold with a clear composer can indicate a stale installed plugin. Update it or use the current script.
 If a marketplace update replaced the installed directory, run `send --run <receipt>` using

@@ -21,6 +21,7 @@ class GuardPluginTests(unittest.TestCase):
         pairs = [
             ("commit-guard/guard.py", "task-review-cycle/guard.py"),
             ("memory-guard/guard.py", "harness-capture/guard.py"),
+            ("session-start/worktree_sweep.py", "task-next/scripts/worktree_sweep.py"),
         ]
         pairs.extend(
             (f"session-start/{name}", f"harness-init/scripts/{name}")

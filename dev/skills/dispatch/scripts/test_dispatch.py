@@ -8,33 +8,47 @@ import sys
 import tempfile
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
-from io import StringIO
+from io import BytesIO, StringIO, TextIOWrapper
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 from unittest.mock import ANY, call, patch
 
+import phase_timing
 import pinned_wave
+import shared_codex
 from dispatch import (
+    DEFAULT_GIT_LIMITS,
     POST_SEND_SETTLE_SECONDS,
     QUEUE_BACKEND,
+    STANDING_REVIEW_TRANSFER,
     child_argv,
     child_name,
     codex_models_cache,
     codex_screen,
     collect,
     composer_draft,
+    deliver_reserved,
+    filtered_transcript,
     first_prompt,
     free_name,
     launch,
     lock_run,
+    main,
+    peek,
     pick,
+    prepare_codex,
     release,
     report_instruction,
     resolve_codex_model,
     send,
+    send_wave,
     terminal_name,
+    timing,
     transcript_echoed,
+    transcript_offset,
     verify_delivery_turn,
     verify_pinned_delivery,
     verify_terminal,
@@ -91,7 +105,9 @@ class ChildArgvTests(unittest.TestCase):
                 self.assertEqual(
                     child_argv("codex", model, "high", None, False),
                     ["codex", "--no-daemon", "--no-alt-screen", "--approve-for-me", "-m", model,
-                     "-c", "model_reasoning_effort=high"],
+                     "-c", "model_reasoning_effort=high",
+                     "-c", 'shell_environment_policy.set.PYTHONUTF8="1"',
+                     "-c", 'shell_environment_policy.set.PYTHONIOENCODING="utf-8"'],
                 )
                 with self.assertRaisesRegex(SystemExit, "codex takes no first message"):
                     child_argv("codex", model, "high", "$task-next", False)
@@ -123,6 +139,7 @@ class ChildArgvTests(unittest.TestCase):
         argv = child_argv("claude", "opus", "high", "/dev:task-next", False, Path("result.json"))
         self.assertEqual(argv[-3], "--append-system-prompt")
         self.assertIn("result.json", argv[-2])
+        self.assertIn("timing run.json delivered", argv[-2])
         self.assertEqual(argv[-1], "/dev:task-next")
 
 
@@ -130,10 +147,12 @@ class DispatchReceiptTests(DispatchTestCase):
     TERMINAL = {"address": "t7", "parent": "t6", "created_ms": 50, "state": "live"}
     RECEIPT = {**TERMINAL, "cli": "codex", "sent": False, "screen_reads": 0}
     FIELDS = {"Original user request (verbatim)": "큐 모두 돌려 (--all)\n• Do the work\n- Git limits: example",
-              "Assigned unit": "First queued item", "Git limits": " pr-only\nDon't merge. "}
+              "Assigned unit": "First queued item", "Git limits": " pr-only\nDon't merge. ",
+              "Review transfer approval (standing)": STANDING_REVIEW_TRANSFER}
     REVIEW_APPROVAL = '이 PR diff를 Claude와 agy에 보내도 됩니다.\n"Codex"도 승인합니다.'
     HANDOFF = {"work_kind": "queue", "request": FIELDS["Original user request (verbatim)"],
-               "unit": FIELDS["Assigned unit"], "git_limits": FIELDS["Git limits"]}
+               "unit": FIELDS["Assigned unit"], "git_limits": FIELDS["Git limits"],
+               "review_transfer_standing": True}
     BLOCK = ("\n\nHandoff metadata (JSON):\n"
              "Task-cycle mode and flags come exclusively from the invocation above.\n"
              f"<dispatch-handoff>\n{json.dumps(FIELDS, ensure_ascii=False, indent=2)}\n</dispatch-handoff>")
@@ -205,9 +224,15 @@ class DispatchReceiptTests(DispatchTestCase):
                     launch(args)
                 payload = json.loads(stdout.getvalue())
                 prompt = payload["argv"][-1] if cli == "claude" else payload["task"]
-                self.assertEqual(prompt, message + self.BLOCK)
+                expected = dict(self.FIELDS)
+                block = self.BLOCK
+                if kind == "standalone":
+                    del expected["Review transfer approval (standing)"]
+                    block = block.replace(json.dumps(self.FIELDS, ensure_ascii=False, indent=2),
+                                          json.dumps(expected, ensure_ascii=False, indent=2))
+                self.assertEqual(prompt, message + block)
                 fields = prompt.split("<dispatch-handoff>\n", 1)[1].removesuffix("\n</dispatch-handoff>")
-                self.assertEqual(json.loads(fields), self.FIELDS)
+                self.assertEqual(json.loads(fields), expected)
                 self.assertEqual(bool(stderr.getvalue()), warns)
                 if warns:
                     self.assertIn("warning:", stderr.getvalue())
@@ -217,7 +242,7 @@ class DispatchReceiptTests(DispatchTestCase):
     def test_launch_requires_git_authority(self):
         for kind in ("queue", "new"):
             for limits in (
-                None, "", " \n ", "  Not   Specified.  ", "N/A", "TBD", "unknown", "unknown limits",
+                "", " \n ", "  Not   Specified.  ", "N/A", "TBD", "unknown", "unknown limits",
                 "unspecified", "none specified", "(none)", "?", "미지정", "없음", "implementation-only",
             ):
                 with self.subTest(kind=kind, limits=limits), patch("dispatch.hc_json") as hc:
@@ -239,6 +264,8 @@ class DispatchReceiptTests(DispatchTestCase):
             ("new", "no-push", False, "no-push"),
             ("new", "pr-only", False, "pr-only"),
             ("queue", "none", False, "none"),
+            ("queue", None, False, DEFAULT_GIT_LIMITS),
+            ("new", None, False, DEFAULT_GIT_LIMITS),
             ("queue", "", True, "implementation-only"),
             ("queue", "not specified", True, "implementation-only"),
             ("new", None, True, "implementation-only"),
@@ -261,14 +288,89 @@ class DispatchReceiptTests(DispatchTestCase):
             launch(args)
         prompt = json.loads(stdout.getvalue())["task"]
         handoff = prompt.split("<dispatch-handoff>\n", 1)[1].split("\n</dispatch-handoff>", 1)[0]
+        expected = {key: value for key, value in self.FIELDS.items()
+                    if key != "Review transfer approval (standing)"}
         self.assertEqual(json.loads(handoff), {
-            **self.FIELDS,
+            **expected,
             "Git limits": "implementation-only",
             "Additional Git limits (verbatim)": restrictions,
             "Review transfer approval (verbatim)": self.REVIEW_APPROVAL,
         })
         self.assertIn("including worktree preparation", prompt)
         self.assertIn("Quote them in a separate section of the Sprint Contract for handoff and resume.", prompt)
+
+    def test_cli_launch_without_git_limits_uses_the_dispatch_default(self):
+        for kind, invocation in (("queue", "/dev:task-next"), ("new", "/dev:task-new Update docs")):
+            with self.subTest(kind=kind):
+                result = subprocess.run(
+                    [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "launch",
+                     "--cli", "claude", "--model", "sonnet", "--effort", "medium", "--cwd", str(SCRIPTS),
+                     "--work-kind", kind, "--request", "Run it", "--unit", "Unit", "--dry-run", invocation],
+                    capture_output=True, text=True, encoding="utf-8",
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                prompt = json.loads(result.stdout)["argv"][-1]
+                fields = prompt.split("<dispatch-handoff>\n", 1)[1].split("\n</dispatch-handoff>", 1)[0]
+                self.assertEqual(json.loads(fields), {
+                    "Original user request (verbatim)": "Run it",
+                    "Assigned unit": "Unit",
+                    "Git limits": DEFAULT_GIT_LIMITS,
+                    "Review transfer approval (standing)": STANDING_REVIEW_TRANSFER,
+                })
+        result = subprocess.run(
+            [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "launch",
+             "--cli", "claude", "--model", "sonnet", "--effort", "medium", "--cwd", str(SCRIPTS),
+             "--work-kind", "standalone", "--request", "Explain", "--unit", "Unit", "--dry-run", "Explain"],
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--git-limits must not be blank", result.stderr)
+
+    def test_standing_review_transfer_follows_the_task_cycle_and_yields_to_the_user(self):
+        for kind, message, overrides, standing in (
+            ("queue", "/dev:task-next", {}, True),
+            ("new", "/dev:task-new Fix it", {}, True),
+            ("queue", "/dev:task-next", {"no_git_writes": True, "git_limits": None}, True),
+            ("standalone", "/dev:task-review", {}, True),
+            ("standalone", "$task-review --pr 12", {}, True),
+            ("standalone", "Review the pending changes", {}, False),
+            ("queue", "/dev:task-next", {"no_standing_review_approval": True}, False),
+            ("standalone", "/dev:task-review", {"no_standing_review_approval": True}, False),
+            ("new", "/dev:task-new Fix it", {"review_transfer_approval": self.REVIEW_APPROVAL}, False),
+        ):
+            with self.subTest(kind=kind, message=message, overrides=overrides):
+                args = self.launch_args(Path.cwd(), cli="claude", task=None, message=message, work_kind=kind,
+                                        dry_run=True, **overrides)
+                with (patch("dispatch.warn_linked_worktree"), redirect_stderr(StringIO()),
+                      redirect_stdout(StringIO()) as stdout):
+                    launch(args)
+                prompt = json.loads(stdout.getvalue())["argv"][-1]
+                fields = json.loads(prompt.split("<dispatch-handoff>\n", 1)[1].split("\n</dispatch-handoff>", 1)[0])
+                self.assertEqual(fields.get("Review transfer approval (standing)"),
+                                 STANDING_REVIEW_TRANSFER if standing else None)
+                if "review_transfer_approval" in overrides:
+                    self.assertEqual(fields["Review transfer approval (verbatim)"], self.REVIEW_APPROVAL)
+
+    def test_standing_review_transfer_follows_a_task_review_sent_after_an_idle_codex_launch(self):
+        base = {"request": "Review it", "unit": "PR review", "git_limits": "pr-only", "work_kind": "standalone"}
+        for handoff, message, standing in (
+            (base, "$task-review --pr 12", True),
+            (base, "Review the pending changes", False),
+            ({**base, "no_standing_review_approval": True}, "$task-review --pr 12", False),
+            ({**base, "review_transfer_approval": self.REVIEW_APPROVAL}, "$task-review --pr 12", False),
+        ):
+            with self.subTest(handoff=handoff, message=message):
+                prompt = first_prompt("codex", message, handoff)
+                fields = json.loads(prompt.split("<dispatch-handoff>\n", 1)[1].split("\n</dispatch-handoff>", 1)[0])
+                self.assertEqual(fields.get("Review transfer approval (standing)"),
+                                 STANDING_REVIEW_TRANSFER if standing else None)
+
+    def test_recorded_grant_flag_without_limits_stops_instead_of_using_the_default(self):
+        for kind in ("queue", "new"):
+            with self.subTest(kind=kind), patch("dispatch.hc_json") as hc:
+                with self.assertRaisesRegex(SystemExit, "--git-grant-recorded needs"):
+                    launch(self.launch_args(Path.cwd(), work_kind=kind, git_limits=None, git_grant_recorded=True))
+                hc.assert_not_called()
 
     def test_review_transfer_approval_survives_launch_and_first_send(self):
         grant = self.REVIEW_APPROVAL
@@ -471,9 +573,11 @@ class DispatchReceiptTests(DispatchTestCase):
             owner = {"address": "t6", "state": "live", "cwd": str(home.parent)}
             live_owner = {**owner, "foreground": {"cwd": str(home)}}
             child = SimpleNamespace(stdout=json.dumps(self.TERMINAL))
-            calls = [{"terminals": [owner]}, live_owner, self.TERMINAL]
+            sibling = {"address": "t9", "state": "live", "parent": "t6"}
+            calls = [{"terminals": [owner, sibling]}, live_owner, {"terminals": [sibling]}, self.TERMINAL]
             with (
                 patch("dispatch.Path.cwd", return_value=home),
+                patch("dispatch.verify_shared_cache_versions") as verify_versions,
                 patch("dispatch.hc_json", side_effect=calls),
                 patch("dispatch.subprocess.run", return_value=child) as run,
                 patch("dispatch.tempfile.mkdtemp", return_value=directory),
@@ -481,11 +585,13 @@ class DispatchReceiptTests(DispatchTestCase):
                 patch("builtins.print") as output,
             ):
                 launch(args)
+            verify_versions.assert_called_once()
             git_call, launch_call = run.call_args_list
             self.assertEqual(git_call.args[0][0], "git")
             argv = launch_call.args[0]
             self.assertEqual(argv[:3], ["hc", "run", "--bg"])
             self.assertIn("--no-notify", argv)
+            self.assertTrue(any(arg.startswith(f"{shared_codex.LABEL}=") for arg in argv))
             self.assertEqual(argv[argv.index("--parent") + 1], "t6")
             self.assertIn("--dangerously-bypass-hook-trust", argv[argv.index("codex") + 1:])
             payload = json.loads(output.call_args.args[0])
@@ -516,7 +622,8 @@ class DispatchReceiptTests(DispatchTestCase):
                          "foreground": {"cwd": str(home)}}
                 with (
                     patch("dispatch.Path.cwd", return_value=home),
-                    patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, lookup]),
+                    patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner,
+                                                               *([{"terminals": []}] if cli == "codex" else []), lookup]),
                     patch("dispatch.subprocess.run",
                           return_value=SimpleNamespace(stdout=json.dumps(self.TERMINAL))),
                     patch("dispatch.tempfile.mkdtemp", return_value=directory),
@@ -557,7 +664,7 @@ class DispatchReceiptTests(DispatchTestCase):
         owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd().parent),
                  "foreground": {"cwd": str(Path.cwd())}}
         with tempfile.TemporaryDirectory() as directory, (
-            patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner])
+            patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, {"terminals": []}])
         ), patch("dispatch.subprocess.run", return_value=SimpleNamespace(stdout="{}")), (
             patch("dispatch.tempfile.mkdtemp", return_value=directory)
         ), patch("dispatch.send") as submit:
@@ -566,7 +673,7 @@ class DispatchReceiptTests(DispatchTestCase):
             submit.assert_not_called()
         failed = subprocess.TimeoutExpired(["hc", "run"], 30)
         with tempfile.TemporaryDirectory() as directory, (
-            patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner])
+            patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, {"terminals": []}])
         ), patch("dispatch.subprocess.run", side_effect=[SimpleNamespace(stdout=""), failed]), (
             patch("dispatch.tempfile.mkdtemp", return_value=directory)
         ):
@@ -581,7 +688,7 @@ class DispatchReceiptTests(DispatchTestCase):
                      "foreground": {"cwd": str(Path.cwd())}}
             child = SimpleNamespace(stdout=json.dumps(self.TERMINAL))
             with (
-                patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, self.TERMINAL]),
+                patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, {"terminals": []}, self.TERMINAL]),
                 patch("dispatch.subprocess.run", return_value=child) as run,
                 patch("dispatch.tempfile.mkdtemp", return_value=directory),
                 patch("dispatch.send"),
@@ -618,9 +725,12 @@ class DispatchReceiptTests(DispatchTestCase):
             receipt = Path(directory) / "run.json"
             receipt.write_text(json.dumps(self.RECEIPT), encoding="utf-8")
             result = receipt.with_name("result.json")
+            head = "a" * 40
             for status in ("ready", "merged"):
-                result.write_text(json.dumps({"status": status, "phase": "review", "summary": "CI passed"}),
-                                  encoding="utf-8")
+                write_json(result, {
+                    "status": status, "phase": "review", "summary": "CI passed", "head": head,
+                    "review": {"head": head, "status": "passed", "sources": ["codex"]},
+                })
                 args = SimpleNamespace(run=receipt, close=True)
                 with (
                     patch("dispatch.hc_json", side_effect=[done, {}, done, finished, {}]) as hc,
@@ -630,7 +740,9 @@ class DispatchReceiptTests(DispatchTestCase):
                     if status == "ready":
                         with self.assertRaisesRegex(SystemExit, "left intact"):
                             collect(args)
-                        hc.assert_called_once_with("get", "t7")
+                        self.assertEqual(hc.call_args_list, [
+                            call("get", "t7"), call("read", "--lines", "0", "t7", timeout=ANY),
+                        ])
                     else:
                         collect(args)
                         self.assertEqual(hc.call_args_list, [
@@ -674,6 +786,91 @@ class DispatchReceiptTests(DispatchTestCase):
                     ])
                     self.assertEqual(json.loads(receipt.read_text(encoding="utf-8"))["closed_reason"], "final_result")
 
+    def test_collect_close_after_drift(self):
+        change = ["dev 5.0.1 -> 5.0.4"]
+        head = "a" * 40
+        composer = "\n\n› Ask Codex to do anything"
+        missing_hook = "• Hook failed\n  └ failed to spawn hook (os error 2)"
+        cases = (
+            ("idle", "ready", change, ["dev"], None, None, "hooks_broken"),
+            ("idle", "ready", change, [], None, None, "plugin_drift"),
+            ("idle", "ready", [], [], missing_hook + composer, ("idle", 10), "hooks_broken"),
+            ("idle", "ready", [], [], missing_hook + composer, ("working", 11), None),
+            ("idle", "ready", [], [], missing_hook + composer, ("idle", 12), None),
+            ("idle", "ready", [], [], missing_hook + "\n\n• Review finished" + composer, None, None),
+            ("idle", "ready", [], [], "• Hook failed\n  └ hook exited 1" + composer, None, None),
+            ("done", "merged", change, ["dev"], None, None, "hooks_broken"),
+            ("working", "ready", change, ["dev"], None, None, None),
+            ("idle", "working", change, ["dev"], None, None, None),
+            ("idle", None, change, ["dev"], None, None, None),
+        )
+        for state, status, changed, removed, screen, next_state, reason in cases:
+            with self.subTest(state=state, result=status, screen=screen, next_state=next_state, reason=reason), \
+                 tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "run.json"
+                write_json(receipt, self.RECEIPT)
+                if status:
+                    write_json(receipt.with_name("result.json"), {
+                        "status": status, "phase": "review", "summary": "Review result", "head": head,
+                        "review": {"head": head, "status": "passed", "sources": ["codex"]},
+                    })
+                terminal = {**self.TERMINAL, "status": {"state": state}, "status_ms": 10}
+                replies = [terminal]
+                calls = [call("get", "t7")]
+                if screen:
+                    replies.append({"how": "screen", "text": screen})
+                    calls.append(call("read", "--lines", "0", "t7", timeout=ANY))
+                if next_state:
+                    current_state, status_ms = next_state
+                    replies.append({**terminal, "status": {"state": current_state}, "status_ms": status_ms})
+                    calls.append(call("get", "t7"))
+                if reason or screen:
+                    replies.extend([{}, {**terminal, "state": "finished"}, {}])
+                if reason:
+                    calls.extend([call("kill", "t7"), call("get", "t7", timeout=ANY), call("rm", "t7")])
+                output = StringIO()
+                with (
+                    patch("dispatch.plugin_drift", return_value=(changed, removed)),
+                    patch("dispatch.hc_json", side_effect=replies) as hc,
+                    redirect_stderr(StringIO()),
+                    redirect_stdout(output),
+                ):
+                    if reason:
+                        try:
+                            collect(SimpleNamespace(run=receipt, close=True))
+                        except SystemExit as error:
+                            self.fail(str(error))
+                        self.assertEqual(json.loads(output.getvalue())["closed_reason"], reason)
+                    else:
+                        with self.assertRaisesRegex(SystemExit, "left intact"):
+                            collect(SimpleNamespace(run=receipt, close=True))
+                    self.assertEqual(hc.call_args_list, calls)
+                self.assertEqual(json.loads(receipt.read_text(encoding="utf-8")).get("closed_reason"), reason)
+
+    def test_collect_close_does_not_treat_unverifiable_wave_as_drift(self):
+        terminal = {**self.TERMINAL, "status": {"state": "idle"}}
+        screen = {"how": "screen", "text": "› Ask Codex to do anything"}
+        head = "a" * 40
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            write_json(receipt, {**self.RECEIPT, "wave": str(Path(directory) / "wave.json")})
+            write_json(receipt.with_name("result.json"), {
+                "status": "ready", "phase": "review", "summary": "Review result", "head": head,
+                "review": {"head": head, "status": "passed", "sources": ["codex"]},
+            })
+            with (
+                patch("dispatch.pinned_wave.wave_path", return_value=Path(directory) / "wave.json"),
+                patch("dispatch.pinned_wave.read_wave", side_effect=OSError("unreadable wave")),
+                patch("dispatch.hc_json", side_effect=[terminal, screen, {**terminal, "state": "finished"}, {}]) as hc,
+                redirect_stderr(StringIO()),
+            ):
+                with self.assertRaisesRegex(SystemExit, "left intact"):
+                    collect(SimpleNamespace(run=receipt, close=True))
+            self.assertEqual(hc.call_args_list, [
+                call("get", "t7"), call("read", "--lines", "0", "t7", timeout=ANY),
+            ])
+            self.assertNotIn("closed_reason", json.loads(receipt.read_text(encoding="utf-8")))
+
     def test_collect_blocks_pr_outcomes_until_every_required_review_completes(self):
         terminal = {**self.TERMINAL, "status": {"state": "done"}}
         cases = (
@@ -703,6 +900,84 @@ class DispatchReceiptTests(DispatchTestCase):
                         self.assertEqual(reported["pr"], "example-pr")
                         for blocker in blockers:
                             self.assertIn(blocker, reported["summary"])
+
+    def test_collect_gates_ready_and_warns_on_completed_reports(self):
+        terminal = {**self.TERMINAL, "status": {"state": "done"}}
+        cases = (
+            (None, ("claude", "agy", "codex", "no completed result")),
+            ({"claude": "approval denied", "agy": "still running", "codex": "complete"},
+             ("claude", "approval denied", "agy", "still running")),
+            ({"claude": "complete", "agy": "complete", "codex": "complete"}, ()),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            receipt.write_text(json.dumps({**self.RECEIPT, "require_review_sources": True}), encoding="utf-8")
+            for status in ("ready", "done", "merged"):
+                for sources, blockers in cases:
+                    with self.subTest(status=status, sources=sources):
+                        result = {"status": status, "phase": "review", "summary": "CI passed", "pr": "example-pr"}
+                        if sources is not None:
+                            result["review_sources"] = sources
+                        if status == "ready":
+                            result["head"] = "a" * 40
+                            result["review"] = {"head": result["head"], "sources": ["claude", "agy", "codex"],
+                                                "status": "passed"}
+                        write_json(receipt.with_name("result.json"), result)
+                        output = StringIO()
+                        with patch("dispatch.hc_json", return_value=terminal), redirect_stdout(output):
+                            collect(SimpleNamespace(run=receipt, close=False))
+                        reported = json.loads(output.getvalue())["result"]
+                        expected = "blocked" if blockers and status == "ready" else status
+                        self.assertEqual(reported["status"], expected)
+                        self.assertEqual(reported["pr"], "example-pr")
+                        if status != "ready":
+                            self.assertEqual(reported["summary"], "CI passed")
+                            self.assertEqual(reported["phase"], "review")
+                        warning = reported["summary"] if status == "ready" else reported.get("review_warning", "")
+                        for blocker in blockers:
+                            self.assertIn(blocker, warning)
+
+    def test_collect_warns_about_missing_reviews_without_blocking_done(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for details, warning in (
+                ({"head": "a" * 40}, True),
+                ({"summary": "Opened PR #123"}, True),
+                ({"summary": "PR #123을 열었습니다."}, True),
+                ({"evidence": {"review": "https://github.com/acme/widget/pull/123을 열었습니다."}}, True),
+                ({"summary": "No eligible work. PR #123 already merged."}, False),
+                ({"summary": "처리할 이슈가 없습니다. PR #123은 이미 병합되었습니다."}, False),
+                ({}, False),
+            ):
+                with self.subTest(details=details):
+                    report, _ = self.collect_report(
+                        directory, {"state": "done"}, receipt_fields={"require_review_sources": True},
+                        result={"status": "done", "phase": "review", "summary": "Cycle completed", **details},
+                    )
+                    self.assertEqual(report["result"]["status"], "done")
+                    self.assertEqual(report["result"]["summary"], details.get("summary", "Cycle completed"))
+                    if warning:
+                        self.assertIn("review_warning", report["result"])
+                        self.assertIn("codex: no completed result", report["result"]["review_warning"])
+                    else:
+                        self.assertNotIn("review_warning", report["result"])
+
+    def test_collect_can_close_a_merged_child_with_missing_review_evidence(self):
+        terminal = {**self.TERMINAL, "status": {"state": "done"}}
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            write_json(receipt, {**self.RECEIPT, "require_review_sources": True})
+            write_json(receipt.with_name("result.json"), {
+                "status": "merged", "phase": "merge", "summary": "Merged", "pr": "example-pr",
+            })
+            output = StringIO()
+            with (
+                patch("dispatch.hc_json", side_effect=[terminal, {}, {**terminal, "state": "finished"}, {}]),
+                redirect_stdout(output),
+            ):
+                collect(SimpleNamespace(run=receipt, close=True, brief=True))
+            self.assertIn("merged · merge · Merged", output.getvalue())
+            self.assertIn("codex: no completed result", output.getvalue())
+            self.assertEqual(json.loads(receipt.read_text(encoding="utf-8"))["closed_reason"], "final_result")
 
     def test_collect_requires_passed_review_on_the_reported_pr_head(self):
         terminal = {**self.TERMINAL, "status": {"state": "done"}}
@@ -808,6 +1083,32 @@ class DispatchReceiptTests(DispatchTestCase):
                         collect(SimpleNamespace(run=receipt, close=False))
                     self.assertEqual(json.loads(output.getvalue())["result"], saved)
 
+    def test_report_review_preserves_a_near_limit_blocked_result(self):
+        result = {
+            "status": "ready", "phase": "review", "summary": "CI passed",
+            "review_sources": {"claude": "complete", "agy": "리뷰 진행 중" * 25, "codex": "complete"},
+            "evidence": "",
+        }
+        base_size = len(json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        result["evidence"] = "x" * (8192 - base_size)
+        raw = json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        self.assertEqual(len(raw), 8192)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "result.json"
+            write_json(path, {"status": "working", "phase": "review", "summary": "CI passed"})
+            completed = subprocess.run(
+                [sys.executable, str(SCRIPTS / "dispatch.py"), "report-review", str(path)],
+                input=raw, check=False, capture_output=True,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr.decode("utf-8"))
+            self.assertLessEqual(path.stat().st_size, 8192)
+            blocked = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(blocked["status"], "blocked")
+            self.assertIn("agy:", blocked["summary"])
+            details = json.loads((path.parent / blocked["evidence"]).read_text(encoding="utf-8"))
+            self.assertEqual(details["review_sources"], result["review_sources"])
+            self.assertEqual(details["evidence"], result["evidence"])
+
     def test_collect_cannot_close_on_a_result_from_the_previous_phase(self):
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
@@ -824,19 +1125,25 @@ class DispatchReceiptTests(DispatchTestCase):
 
     def test_collect_closes_a_finished_terminal_without_a_final_result(self):
         finished = {**self.TERMINAL, "state": "finished", "status": None}
+        head = "a" * 40
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
             receipt.write_text(json.dumps(self.RECEIPT), encoding="utf-8")
-            receipt.with_name("result.json").write_text(
-                json.dumps({"status": "ready", "phase": "review", "summary": "PR open"}), encoding="utf-8")
+            write_json(receipt.with_name("result.json"), {
+                "status": "ready", "phase": "review", "summary": "PR open", "head": head,
+                "review": {"head": head, "status": "passed", "sources": ["codex"]},
+            })
             with patch("dispatch.hc_json", return_value=finished) as hc, patch("builtins.print"):
                 collect(SimpleNamespace(run=receipt, close=True))
             self.assertEqual(hc.call_args_list, [call("get", "t7"), call("rm", "t7")])
             live = {**self.TERMINAL, "status": {"state": "idle"}}
-            with patch("dispatch.hc_json", return_value=live) as hc:
+            screen = {"how": "screen", "text": "› Ask Codex to do anything"}
+            with patch("dispatch.hc_json", side_effect=[live, screen]) as hc:
                 with self.assertRaisesRegex(SystemExit, "left intact"):
                     collect(SimpleNamespace(run=receipt, close=True))
-                hc.assert_called_once_with("get", "t7")
+                self.assertEqual(hc.call_args_list, [
+                    call("get", "t7"), call("read", "--lines", "0", "t7", timeout=ANY),
+                ])
 
     def test_collect_reads_a_result_without_status_as_working(self):
         done = {**self.TERMINAL, "status": {"state": "done"}}
@@ -931,6 +1238,40 @@ class DispatchReceiptTests(DispatchTestCase):
                         result={"status": "merged", "phase": "merge", "summary": "Merged"})
                 self.assertIsNone(report["stop_reason"])
 
+    def test_another_home_cannot_launch_into_a_live_shared_codex_wave(self):
+        args = self.launch_args(Path.cwd(), parent="t8")
+        owner = {"address": "t8", "state": "live", "cwd": str(Path.cwd())}
+        first_home_child = {"address": "t7", "state": "live", "parent": "t6"}
+        with patch("dispatch.hc_json", side_effect=[
+            {"terminals": [owner, first_home_child]}, owner, {"terminals": [first_home_child]},
+        ]) as hc, patch("dispatch.subprocess.run") as run:
+            with self.assertRaisesRegex(SystemExit, r"live wave uses this cache \(t7\)"):
+                launch(args)
+        self.assertEqual(hc.call_args.args[:2], ("ls", "--label"))
+        self.assertTrue(hc.call_args.args[2].startswith(f"{shared_codex.LABEL}="))
+        self.assertTrue(all(entry.args[0][0] != "hc" for entry in run.call_args_list))
+
+    def test_same_home_launch_checks_the_fresh_remote_versions(self):
+        owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd())}
+        sibling = {"address": "t7", "state": "live", "parent": "t6"}
+        versions = {"guard": "1.0.0"}
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            write_json(home / "dispatch-prepared-cache.json", {"repo": str(home), "versions": versions})
+            with (
+                patch.dict(os.environ, {"CODEX_HOME": directory}),
+                patch("dispatch.hc_json", side_effect=[
+                    {"terminals": [owner, sibling]}, owner, {"terminals": [sibling]},
+                ]),
+                patch("dispatch.installed_plugin_versions", return_value=versions),
+                patch("shared_codex.remote_versions", return_value={"guard": "1.1.0"}) as remote,
+                patch("dispatch.subprocess.run") as run,
+            ):
+                with self.assertRaisesRegex(SystemExit, "marketplace versions changed"):
+                    launch(self.launch_args(Path.cwd()))
+            remote.assert_called_once_with(home, versions)
+            self.assertTrue(all(entry.args[0][0] != "hc" for entry in run.call_args_list))
+
     def test_launch_records_the_installed_codex_plugin_versions(self):
         with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as home:
             cache = Path(home) / "plugins" / "cache" / "kadragon"
@@ -942,7 +1283,7 @@ class DispatchReceiptTests(DispatchTestCase):
             child = SimpleNamespace(stdout=json.dumps(self.TERMINAL))
             with (
                 patch.dict(os.environ, {"CODEX_HOME": home}),
-                patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, self.TERMINAL]),
+                patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, {"terminals": []}, self.TERMINAL]),
                 patch("dispatch.subprocess.run", return_value=child),
                 patch("dispatch.tempfile.mkdtemp", return_value=directory),
                 patch("dispatch.send"),
@@ -1357,6 +1698,31 @@ class PickTests(unittest.TestCase):
             with patch("dispatch.queue_op", side_effect=queue_op), redirect_stdout(out), redirect_stderr(err):
                 pick(SimpleNamespace(repo=str(repo), tree=False, full_scan=True))
 
+            git = ["git", "-c", "core.hooksPath=no-hooks", "-c", "commit.gpgsign=false",
+                   "-c", "user.name=Test", "-c", "user.email=test@example.invalid"]
+            subprocess.run([*git, "commit", "--allow-empty", "-qm", "base"], cwd=repo, check=True)
+            subprocess.run([*git, "update-ref", "refs/remotes/origin/HEAD", "HEAD"], cwd=repo, check=True)
+            request = {"contract": 1, "repo": str(repo)}
+            snapshot = queue_op("prepare-wave", request)
+            single, parent = snapshot["candidates"]
+            wave = queue_op("reserve-wave", {**request, "base": snapshot["base"], "units": [single, parent]})
+            unit, grouped = wave["reservations"]
+            self.assertEqual(grouped["covers"], ["- #4 [DOCS] Child one", "- #6 [DOCS] Child two", "- #3 Parent"])
+            listing = queue_op("list", {**request, "full_scan": True})
+            self.assertEqual({c["ref"] for c in listing["claimed"]}, {"#1", "#3", "#4", "#5", "#6"})
+            delivery = {"reservation": unit["reservation"], "ref": "#1", "delivery": str(repo / "run.json")}
+            issues[0]["body"] = "Edited scope, same title"
+            with self.assertRaisesRegex(queue_backend.QueueError, "#1: selection changed"):
+                queue_op("bind-wave", {**request, "assignments": [delivery]})
+            issues[0]["body"] = ""
+            queue_op("bind-wave", {**request, "assignments": [delivery]})
+            issues[0]["blockedBy"] = connection([{"number": 3, "state": "OPEN", "repository": repository}])
+            with self.assertRaisesRegex(queue_backend.QueueError, "#1: blocked: #3"):
+                queue_op("claim-reservation", {**request, **delivery, "base": wave["base"]})
+            self.assertFalse((repo / ".worktrees").exists())
+            self.assertEqual(queue_op("release-reservation", {**request, "reservation": unit["reservation"]}),
+                             {"released": True})
+
         self.assertTrue(any("visibility } }" in q for q in calls), "the missing backlog.md asks for the backend")
         candidates = json.loads(out.getvalue())
         self.assertEqual([(c["ref"], c["title"], c["items"], c["open"]) for c in candidates],
@@ -1472,7 +1838,8 @@ class CodexModelTests(DispatchTestCase):
                      "foreground": {"cwd": str(Path.cwd())}}
             child = SimpleNamespace(stdout=json.dumps(DispatchReceiptTests.TERMINAL))
             with (
-                patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, DispatchReceiptTests.TERMINAL]),
+                patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, {"terminals": []},
+                                                               DispatchReceiptTests.TERMINAL]),
                 patch("dispatch.subprocess.run", return_value=child) as run,
                 patch("dispatch.tempfile.mkdtemp", return_value=directory),
                 patch("dispatch.send"),
@@ -1517,6 +1884,171 @@ class SharedGuardMigrationTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "restart the idle Codex child"):
                 verify_delivery_turn({"plugin_versions": {"dev": "5.0.1"}}, {})
             verify_delivery_turn({"plugin_versions": {"dev": "5.0.1", "guard": "1.0.0"}}, {})
+
+
+class SharedCodexPreparationTests(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.home = self.root / "codex"
+        self.cache = self.home / "plugins/cache/kadragon/guard"
+        self.binary = str(self.root / "bin" / "codex.cmd")
+        self.enterContext(patch("dispatch.shutil.which", return_value=self.binary))
+        self.enterContext(patch.dict(os.environ, {"CODEX_HOME": str(self.home)}))
+        self.args = SimpleNamespace(repo=self.root, cwd=self.root, parent="t6")
+        self.terminal = {"address": "t7", "parent": "t6", "state": "live",
+                         "name": "dispatch-warmup-00112233", "created_ms": 2000}
+        self.events = []
+        self.screen = "  Hooks need review"
+        self.screen_updates = []
+        self.native_refresh = False
+        self.guard_enabled = True
+        self.fail_close_get = False
+        self.enterContext(patch("dispatch.WARMUP_SETTLE_SECONDS", 0))
+        self.enterContext(patch("dispatch.secrets.token_hex", return_value="00112233"))
+        self.enterContext(patch("dispatch.time.time_ns", return_value=2_000_000_000))
+
+    def install(self, version, content):
+        root = self.cache / version
+        (root / "hooks").mkdir(parents=True)
+        (root / ".codex-plugin").mkdir()
+        (root / ".codex-plugin/plugin.json").write_text('{"hooks":"hooks.json"}', encoding="utf-8")
+        (root / "hooks.json").write_text("{}", encoding="utf-8")
+        (root / "hooks/guard.py").write_text(content + "\n", encoding="utf-8")
+
+    def codex(self, argv, **kwargs):
+        if argv[0] == self.binary:
+            self.events.append(argv)
+            self.assertEqual(kwargs["cwd"], self.root)
+            self.install("1.1.0", "new guard")
+            shutil.rmtree(self.cache / "1.0.0")
+            return ""
+        git = argv[3:]
+        if git == ["fetch", "origin"]:
+            self.events.append("git fetch")
+            return ""
+        commit = "a" * 40
+        if git == ["ls-remote", "--exit-code", "origin", "HEAD"]:
+            return f"{commit}\tHEAD\n"
+        if git == ["show", f"{commit}:{pinned_wave.CATALOG}"]:
+            plugins = [{"name": name, "source": {"source": "local", "path": f"./{name}"}} for name in pinned_wave.PLUGINS]
+            return json.dumps({"name": "kadragon", "plugins": plugins})
+        self.assertEqual(git, ["show", f"{commit}:guard/{pinned_wave.MANIFEST}"])
+        return json.dumps({"version": self.expected})
+
+    def hooks(self, binary, home, method, params, **kwargs):
+        self.assertEqual((binary, home, method, params), (self.binary, self.home, "hooks/list", {"cwds": [str(self.root)]}))
+        self.assertTrue(kwargs["experimental"])
+        version = next(self.cache.iterdir()).name
+        self.events.append(f"hooks {version}")
+        if self.native_refresh and version == "1.0.0":
+            self.install("1.1.0", "new guard")
+            shutil.rmtree(self.cache / version)
+            raise ValueError("native inventory raced the old cache")
+        hook = {"pluginId": "guard@kadragon", "source": "plugin", "key": "hook-key", "enabled": self.guard_enabled,
+                "eventName": "preToolUse", "matcher": "Bash", "command": "python guard.py",
+                "sourcePath": str(self.cache / version / "hooks.json"),
+                "trustStatus": "trusted" if version == "1.0.0" else "modified"}
+        return {"data": [{"cwd": str(self.root), "errors": [], "warnings": [], "hooks": [
+            hook, {**hook, "pluginId": None, "key": "disabled", "enabled": False, "trustStatus": "untrusted"},
+        ]}]}
+
+    def hc(self, command, *args, **kwargs):
+        if command == "ls":
+            self.assertEqual(args, ("--label", shared_codex.cache_label(self.home)))
+            return {"terminals": []}
+        if command == "run":
+            self.events.append("hc run")
+            self.assertEqual(args[-3:], (self.binary, "--no-daemon", "--no-alt-screen"))
+            self.assertIn("--no-notify", args)
+            return {"address": "t7"}
+        self.assertEqual(args[-1], "t7")
+        if command == "get":
+            if self.fail_close_get and kwargs.get("timeout") == 10:
+                self.fail_close_get = False
+                raise subprocess.TimeoutExpired(["hc", "get"], 10)
+            return self.terminal
+        if command == "read":
+            text = self.screen_updates.pop(0) if self.screen_updates else self.screen
+            return {"text": text, "how": "screen", "complete": True}
+        self.events.append(f"hc {command}")
+        if command == "kill":
+            self.terminal["state"] = "finished"
+        return {}
+
+    def prepare(self, expected):
+        self.expected = expected
+        with (patch("dispatch.hc_json", side_effect=self.hc),
+              patch("shared_codex.command", side_effect=self.codex),
+              patch("shared_codex.request", side_effect=self.hooks), redirect_stdout(StringIO()) as output):
+            prepare_codex(self.args)
+        return json.loads(output.getvalue())
+
+    def test_upgrade_reports_exact_pending_hooks_and_retains_trusted_baseline(self):
+        self.install("1.0.0", "trusted guard")
+        report = self.prepare("1.1.0")
+        self.assertEqual(self.events, ["git fetch", "hooks 1.0.0",
+                                       [self.binary, "plugin", "marketplace", "upgrade", "kadragon"],
+                                       "hc run", "hc kill", "hc rm", "hooks 1.1.0"])
+        self.assertTrue(report["upgraded"])
+        self.assertEqual(report["installed"], {"guard": "1.1.0"})
+        self.assertEqual([(hook["key"], hook["trustStatus"]) for hook in report["pending_hooks"]],
+                         [("hook-key", "modified")])
+        diff = report["hook_content_diffs"]["guard"]
+        self.assertEqual(diff["trusted_version"], "1.0.0")
+        self.assertIn("-trusted guard\n+new guard", diff["diff"])
+
+        self.events.clear()
+        self.terminal["state"] = "live"
+        report = self.prepare("1.1.0")
+        self.assertFalse(report["upgraded"])
+        self.assertEqual(report["hook_content_diffs"]["guard"], diff)
+
+    def test_equal_versions_without_a_trusted_baseline_still_report_pending_hooks(self):
+        self.install("1.1.0", "new guard")
+        report = self.prepare("1.1.0")
+        self.assertFalse(report["upgraded"])
+        self.assertEqual(self.events, ["git fetch", "hooks 1.1.0", "hc run", "hc kill", "hc rm", "hooks 1.1.0"])
+        self.assertEqual(report["hook_content_diffs"]["guard"],
+                         {"reason": "no locally recorded trusted hook contents"})
+
+    def test_native_refresh_reports_changed_versions_and_the_baseline_gap(self):
+        self.install("1.0.0", "trusted guard")
+        self.native_refresh = True
+        report = self.prepare("1.1.0")
+        self.assertTrue(report["upgraded"])
+        self.assertEqual(report["before"], {"guard": "1.0.0"})
+        self.assertEqual(report["hook_content_diffs"]["guard"],
+                         {"reason": "no locally recorded trusted hook contents"})
+        self.assertEqual(self.events, ["git fetch", "hooks 1.0.0", "hc run", "hc kill", "hc rm", "hooks 1.1.0"])
+
+    def test_preparation_refuses_a_disabled_guard(self):
+        self.install("1.1.0", "new guard")
+        self.guard_enabled = False
+        with self.assertRaisesRegex(SystemExit, "guard@kadragon hook is disabled"):
+            self.prepare("1.1.0")
+        self.assertIn("hc rm", self.events)
+        self.assertFalse((self.home / "dispatch-prepared-cache.json").exists())
+
+    def test_preparation_refuses_a_failed_startup_hook_and_closes_the_child(self):
+        self.install("1.1.0", "new guard")
+        self.screen_updates = ["  Hooks need review", "• Hook failed\n  └ SessionStart command exited 1"]
+        self.fail_close_get = True
+        with (patch("dispatch.WARMUP_SETTLE_SECONDS", 2), patch("dispatch.time.sleep"),
+              self.assertRaisesRegex(SystemExit, "warm-up startup hook failed")):
+            self.prepare("1.1.0")
+        self.assertEqual(self.events[-2:], ["hc kill", "hc rm"])
+        self.assertFalse(self.fail_close_get)
+        self.assertFalse((self.home / "dispatch-prepared-cache.json").exists())
+
+    def test_preparation_leaves_live_wave_untouched_even_from_its_home(self):
+        terminals = {"terminals": [{"address": "t7", "state": "live", "parent": "t6"}]}
+        with (patch("dispatch.hc_json", return_value=terminals) as hc,
+              patch("shared_codex.command") as cmd, patch("shared_codex.request") as hooks):
+            with self.assertRaisesRegex(SystemExit, "live wave uses this cache"):
+                prepare_codex(self.args)
+        hc.assert_called_once_with("ls", "--label", shared_codex.cache_label(self.home), timeout=ANY)
+        cmd.assert_not_called()
+        hooks.assert_not_called()
 
 
 class PinnedWaveTests(unittest.TestCase):
@@ -1790,6 +2322,73 @@ class PinnedWaveTests(unittest.TestCase):
 
 
 class DispatchWatchTests(unittest.TestCase):
+    def test_timing_bounds_history_and_reports_missing_measurements(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            write_json(receipt, {"address": "t7"})
+            output = StringIO()
+            with redirect_stdout(output):
+                timing(SimpleNamespace(run=receipt, event=None))
+            report = json.loads(output.getvalue())
+            self.assertIsNone(report["final_head"])
+            self.assertIsNone(report["merge"])
+            self.assertIsNone(report["launches"][0]["startup_ms"])
+            self.assertFalse(receipt.with_name("timing.json").exists())
+
+            head = "a" * 40
+            data = phase_timing.empty_history()
+            for at in range(phase_timing.MAX_LAUNCHES + 1):
+                phase_timing.new_launch(data, at)
+            attempts = [phase_timing.start(data, "review", head, False, at)
+                        for at in range(phase_timing.MAX_ATTEMPTS + 1)]
+            with self.assertRaisesRegex(ValueError, "unknown review attempt"):
+                phase_timing.finish(data, "review", attempts[0], "complete", 30)
+            phase_timing.finish(data, "review", attempts[1], "complete", 0)
+            phase_timing.merged(data, None, 40)
+            report = phase_timing.report(data, {"head": head})
+            self.assertEqual(report["dropped_launches"], 1)
+            self.assertEqual(report["merge"], {"head": None, "confirmed_ms": 40, "elapsed_ms": 40})
+            self.assertEqual(report["final_head"], head)
+            launch = report["launches"][-1]
+            self.assertEqual(launch["dropped_review"], 1)
+            self.assertEqual(len(launch["review"]), phase_timing.MAX_ATTEMPTS)
+            self.assertEqual(launch["review"][0]["attempt"], attempts[1])
+            self.assertIsNone(launch["review"][0]["elapsed_ms"])
+            with self.assertRaisesRegex(ValueError, "full Git object SHA"):
+                phase_timing.start(data, "ci", "a prompt or a credential", False, 1)
+
+    def test_timing_uses_claude_acknowledgment_and_ignores_stale_results(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            report_path = receipt.with_name("result.json")
+            timing_file = receipt.with_name("timing.json")
+            args = SimpleNamespace(run=receipt, event=None)
+
+            def measure():
+                with redirect_stdout(StringIO()) as output:
+                    timing(args)
+                return json.loads(output.getvalue())
+
+            write_json(timing_file, phase_timing.new_launch(phase_timing.empty_history(), 1000))
+            with patch("dispatch.phase_timing.now_ms", return_value=1500):
+                timing(SimpleNamespace(run=receipt, event="delivered"))
+            self.assertFalse(receipt.exists())
+            write_json(receipt, {"address": "t7", "cli": "claude", "sent": True})
+            head = "a" * 40
+            write_json(report_path, {"status": "working", "phase": "review", "summary": "review", "head": head})
+            self.assertEqual(measure()["launches"][0]["startup_ms"], 500)
+            with patch("dispatch.phase_timing.now_ms", return_value=2500):
+                timing(SimpleNamespace(run=receipt, event="delivered"))
+            self.assertEqual(measure()["launches"][0]["startup_ms"], 500)
+            late_ack = phase_timing.new_launch(phase_timing.empty_history(), 1000)
+            phase_timing.start(late_ack, "review", head, False, 2000)
+            write_json(timing_file, late_ack)
+            with patch("dispatch.phase_timing.now_ms", return_value=2500):
+                timing(SimpleNamespace(run=receipt, event="delivered"))
+            self.assertIsNone(measure()["launches"][0]["startup_ms"])
+            write_json(receipt, {"address": "t7", "cli": "codex", "previous_result": report_path.stat().st_mtime_ns})
+            self.assertIsNone(measure()["final_head"])
+
     def test_wait_ignores_legacy_done_while_working_and_emits_only_changes(self):
         report = {"address": "t7", "status": "working", "state": "live", "stop_reason": None,
                   "result": {"status": "done", "phase": "implement", "summary": "작업 중\nsecond line",
@@ -1797,7 +2396,7 @@ class DispatchWatchTests(unittest.TestCase):
         same = {**report, "result": {**report["result"], "review_retries": 2}}
         ready = {**report, "status": "done", "result": {"status": "ready", "phase": "review",
                                                        "summary": "검증 완료", "pr": "#10"}}
-        args = SimpleNamespace(runs=["run.json"], until={"ready", "blocked", "merged", "idle", "stop"},
+        args = SimpleNamespace(first=False, runs=["run.json"], until={"ready", "blocked", "merged", "idle", "stop"},
                                timeout=30, stall_minutes=30)
         with patch("dispatch.collect_result", side_effect=[report, same, ready]) as probe, \
              patch("dispatch.hc_rpc", return_value={"result": {}}) as hc, patch("dispatch.time.sleep"), redirect_stdout(StringIO()) as output:
@@ -1811,12 +2410,31 @@ class DispatchWatchTests(unittest.TestCase):
             "t7 · ready · review · 검증 완료 · #10 · -",
         ])
 
+    def test_wait_first_returns_on_the_first_selected_outcome(self):
+        idle = {"address": "t7", "status": "idle", "state": "live", "stop_reason": None, "result": None}
+        ready = {**idle, "address": "t8", "status": "done", "result": {"status": "ready", "pr": "#10"}}
+        reports = [idle, ready, {**ready, "address": "t9"}, {**ready, "address": "t7"}]
+        with TextIOWrapper(BytesIO(), encoding="utf-8") as output, redirect_stdout(output), \
+             TextIOWrapper(BytesIO(), encoding="utf-8") as progress, redirect_stderr(progress), \
+             patch("dispatch.collect_result", side_effect=reports) as probe, \
+             patch("dispatch.hc_rpc") as hc, patch("dispatch.time.sleep") as sleep:
+            main(["wait", "--first", "--until", "ready", "a.json", "b.json", "c.json"])
+            output.seek(0)
+            printed = output.read()
+            progress.seek(0)
+            statuses = progress.read()
+        self.assertEqual([invocation.args[0].name for invocation in probe.call_args_list], ["a.json", "b.json"])
+        hc.assert_not_called()
+        sleep.assert_not_called()
+        self.assertEqual(printed, f"{Path('b.json').resolve()} · t8 · ready · - · - · #10 · -\n")
+        self.assertEqual(statuses, "t7 · idle · - · - · - · -\n")
+
     def test_wait_requires_all_receipts_and_a_stopped_terminal_for_done(self):
         working = {"address": "t7", "status": "working", "state": "live", "stop_reason": None,
                    "result": {"status": "done", "phase": "implement", "summary": "phase complete"}}
         stopped = {**working, "status": "done"}
         second = {**working, "address": "t8", "result": None, "stop_reason": "hooks_broken"}
-        args = SimpleNamespace(runs=["a.json", "b.json"], until={"done", "stop"}, timeout=30, stall_minutes=30)
+        args = SimpleNamespace(first=False, runs=["a.json", "b.json"], until={"done", "stop"}, timeout=30, stall_minutes=30)
         with patch("dispatch.collect_result", side_effect=[working, second, stopped]) as probe, \
              patch("dispatch.hc_rpc", return_value={"result": {}}), patch("dispatch.time.sleep"), redirect_stdout(StringIO()) as output:
             wait(args)
@@ -1827,7 +2445,7 @@ class DispatchWatchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
             receipt.write_text(json.dumps({"address": "t7", "closed_reason": "finished"}), encoding="utf-8")
-            args = SimpleNamespace(runs=[receipt], until={"stop"}, timeout=30, stall_minutes=30)
+            args = SimpleNamespace(first=False, runs=[receipt], until={"stop"}, timeout=30, stall_minutes=30)
             with patch("dispatch.hc_json") as hc, redirect_stdout(StringIO()) as output:
                 wait(args)
         hc.assert_not_called()
@@ -1836,7 +2454,7 @@ class DispatchWatchTests(unittest.TestCase):
     def test_wait_stops_and_surfaces_drift_even_while_old_hook_directory_exists(self):
         report = {"address": "t7", "status": "working", "state": "live", "stop_reason": None,
                   "result": None, "plugin_drift": ["dev old -> new"]}
-        args = SimpleNamespace(runs=["run.json"], until={"stop"}, timeout=30, stall_minutes=30)
+        args = SimpleNamespace(first=False, runs=["run.json"], until={"stop"}, timeout=30, stall_minutes=30)
         with patch("dispatch.collect_result", return_value=report), patch("dispatch.hc_rpc") as hc, \
              redirect_stdout(StringIO()) as output:
             wait(args)
@@ -1847,7 +2465,7 @@ class DispatchWatchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
             receipt.write_text(json.dumps({"address": "t7", "created_ms": 1}), encoding="utf-8")
-            args = SimpleNamespace(runs=[receipt], until={"stop"}, timeout=30, stall_minutes=30)
+            args = SimpleNamespace(first=False, runs=[receipt], until={"stop"}, timeout=30, stall_minutes=30)
             gone = subprocess.CalledProcessError(3, "hc", stderr='{"error":{"kind":"not_found"}}')
             with patch("dispatch.hc_json", side_effect=gone), redirect_stdout(StringIO()) as output:
                 wait(args)
@@ -1857,7 +2475,7 @@ class DispatchWatchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
             receipt.write_text(json.dumps({"address": "t7", "created_ms": 1}), encoding="utf-8")
-            args = SimpleNamespace(runs=[receipt], until={"stop"}, timeout=1, stall_minutes=30)
+            args = SimpleNamespace(first=False, runs=[receipt], until={"stop"}, timeout=1, stall_minutes=30)
             with patch("dispatch.hc_json", side_effect=subprocess.TimeoutExpired("hc", 1)) as hc, \
                  self.assertRaisesRegex(SystemExit, "timed out"):
                 wait(args)
@@ -1866,7 +2484,7 @@ class DispatchWatchTests(unittest.TestCase):
 
     def test_wait_times_out_when_no_selected_outcome_occurs(self):
         report = {"address": "t7", "status": "idle", "state": "live", "stop_reason": None, "result": None}
-        args = SimpleNamespace(runs=["run.json"], until={"ready"}, timeout=1, stall_minutes=30)
+        args = SimpleNamespace(first=False, runs=["run.json"], until={"ready"}, timeout=1, stall_minutes=30)
         with patch("dispatch.collect_result", return_value=report), \
              patch("dispatch.time.monotonic", side_effect=[0, 2]), redirect_stdout(StringIO()) as output:
             with self.assertRaisesRegex(SystemExit, "timed out"):
@@ -1896,8 +2514,8 @@ class WorkflowDocsTests(unittest.TestCase):
                       "to the assigned unit.", layout_step)
         self.assertIn("If the file is unreadable or lacks that handling, report the worktree layout as unsupported.",
                       layout_step)
-        self.assertIn("If a required action is still unauthorized, ask once before launch "
-                      "which Git actions the user authorizes", launch_step)
+        self.assertIn("When the user states no Git limits, omit `--git-limits` for queue or new work", launch_step)
+        self.assertNotIn("ask once before launch", launch_step)
         self.assertIn("If an explicit full-workflow invocation grants the required Git writes and sets no narrower "
                       "limits, pass `--git-limits='none'`.", launch_step)
         self.assertIn("For standalone work that needs no Git writes and has no user-provided limits, "
@@ -1916,6 +2534,163 @@ class WorkflowDocsTests(unittest.TestCase):
                 self.assertIsNone(re.search(r"gpt-\d", doc.read_text(encoding="utf-8"), re.IGNORECASE))
 
 
+class PeekTests(unittest.TestCase):
+    def test_codex_capture_keeps_work_and_followup(self):
+        screen = """
+  >_ OpenAI Codex (v0.172.0)
+     ~/Dev/agent-toolkit
+
+  Tip: Use /hooks to view and manage lifecycle hooks.
+
+› <hc from="t2t">$task-next --tree #512
+  Dispatch mode: parallel-worktree
+
+  Handoff metadata (JSON):
+  <dispatch-handoff>
+  {"Assigned unit": "issue #512"}
+  </dispatch-handoff>
+
+  Write progress at phase boundaries.
+
+• Ran git status --short --branch
+  └ ## main...origin/main [behind 60]
+
+› Continue to review
+
+• Checking evidence.
+
+› Ask Codex to do anything
+
+  GPT-6.2-Sol medium · ~/Dev/agent-toolkit · main · Context 10% used · weekly 45% left
+  ← for agents · ? for shortcuts
+"""
+        self.assertEqual(filtered_transcript(screen, "codex"), [
+            "• Ran git status --short --branch", "  └ ## main...origin/main [behind 60]",
+            "", "› Continue to review", "", "• Checking evidence.",
+        ])
+
+    def test_claude_capture_keeps_response(self):
+        screen = """
+ ▐▛███▛█   Claude Code v2.1.332
+▝▜██████▀  Opus 5.5 · Claude Team
+ ▝▝   ▝▝   /tmp/claude-fixture
+
+⚠ Code Mode (experimental) is on · this session can be resumed only with Code Mode on
+
+❯ Reply with the exact sentence: Fixture response.
+
+  Handoff metadata (JSON):
+  <dispatch-handoff>
+  {"Assigned unit": "fixture"}
+  </dispatch-handoff>
+
+● Fixture response.
+
+✻ Sautéed for 1s · done 오전 9:26
+
+                                                    [-]
+[Opus 5.5 ◔ medium] │ claude-fixture
+Context 3% │ 5h: 21% (1h 43m) │ 7d: 59% (4d 4h) │ cache 59m
+                                    ◐ medium · /effort
+───────────────────────────────────────────────────────
+❯
+───────────────────────────────────────────────────────
+
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+"""
+        self.assertEqual(filtered_transcript(screen, "claude"), [
+            "⚠ Code Mode (experimental) is on · this session can be resumed only with Code Mode on",
+            "", "● Fixture response.", "", "✻ Sautéed for 1s · done 오전 9:26",
+        ])
+
+    def test_hidden_codex_composer_preserves_indented_work(self):
+        screen = "› a task\n\n  • Completed\n\n  GPT-6.2-Sol medium · main\n  ← for agents · ? for shortcuts"
+        self.assertEqual(filtered_transcript(screen, "codex"), ["› a task", "", "  • Completed"])
+
+    def test_cropped_dispatch_echo_is_removed(self):
+        screen = '    "Assigned unit": "issue #512"\n  }\n  </dispatch-handoff>\n'
+        screen += "\n  Write progress at phase boundaries.\n\n• Checking evidence."
+        self.assertEqual(filtered_transcript(screen, "codex"), ["• Checking evidence."])
+
+    def test_handoff_filter_preserves_indented_claude_error(self):
+        screen = ("❯ /dev:task-next\n\n  Handoff metadata (JSON):\n  <dispatch-handoff>\n"
+                  "  {}\n  </dispatch-handoff>\n  ⎿  API Error: Usage Policy")
+        self.assertEqual(filtered_transcript(screen, "claude"), ["  ⎿  API Error: Usage Policy"])
+
+    def test_handoff_filter_preserves_indented_codex_hook_notice(self):
+        screen = ("› $task-next #512\n\n  Handoff metadata (JSON):\n  <dispatch-handoff>\n"
+                  "  {}\n  </dispatch-handoff>\n  Hooks need review")
+        self.assertEqual(filtered_transcript(screen, "codex"), ["  Hooks need review"])
+
+    def test_alternative_claude_status_and_codex_working_timer(self):
+        rule = "─" * 30
+        claude = f"● Fixture response.\n\n~/repo · main · 12%\n{rule}\n❯\n{rule}"
+        codex = "• Checking evidence.\n\nWorking (1m 59s • esc to interrupt)\n\n› Ask Codex to do anything"
+        self.assertEqual(filtered_transcript(claude, "claude"), ["● Fixture response."])
+        self.assertEqual(filtered_transcript(codex, "codex"), ["• Checking evidence."])
+
+    def test_progress_timers_do_not_move_the_cursor(self):
+        for seconds in (41, 42):
+            claude = f"● Checking evidence.\n\n✻ Thinking… ({seconds}s · ↑ 50 tokens)\n  ⎿  ☐ Run tests"
+            codex = f"• Checking evidence.\n\n◦ Exploring repository ({seconds}s • esc to interrupt)"
+            self.assertEqual(filtered_transcript(claude, "claude"), ["● Checking evidence.", "", "  ⎿  ☐ Run tests"])
+            self.assertEqual(filtered_transcript(codex, "codex"), ["• Checking evidence."])
+
+    def test_peek_cursor_survives_history_rollover_and_keeps_receipt_fields(self):
+        terminal = {"address": "t7", "parent": "t1", "created_ms": 42}
+        receipt = {**terminal, "cli": "codex", "sent": True}
+        screens = iter(("• Old\n• Retained", "• Retained\n• New", "• Retained\n• New"))
+
+        def hc(command, *_args, **_kwargs):
+            return terminal if command == "get" else {"text": next(screens), "how": "history", "complete": False}
+
+        with tempfile.TemporaryDirectory() as directory, patch("dispatch.hc_json", side_effect=hc):
+            path = Path(directory) / "run.json"
+            write_json(path, receipt)
+            for since_last, expected in ((False, "• Old\n• Retained\n"), (True, "• New\n"), (True, "")):
+                with redirect_stdout(StringIO()) as output:
+                    peek(SimpleNamespace(run=str(path), since_last=since_last))
+                self.assertEqual(output.getvalue(), expected)
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual({key: saved[key] for key in receipt}, receipt)
+            self.assertEqual(len(saved["peek_cursor"]), 2)
+            self.assertNotIn("• New", json.dumps(saved, ensure_ascii=False))
+
+    def test_peek_rejects_recycled_terminal_without_updating_cursor(self):
+        receipt = {"address": "t7", "parent": "t1", "created_ms": 42, "cli": "codex"}
+        responses = [receipt, {"text": "unrelated"}, {**receipt, "created_ms": 43}]
+        with tempfile.TemporaryDirectory() as directory, patch("dispatch.hc_json", side_effect=responses):
+            path = Path(directory) / "run.json"
+            write_json(path, receipt)
+            with self.assertRaisesRegex(SystemExit, "terminal identity changed"), redirect_stdout(StringIO()) as output:
+                peek(SimpleNamespace(run=str(path), since_last=True))
+            self.assertEqual(output.getvalue(), "")
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), receipt)
+
+    def test_peek_leaves_receipt_unlocked_during_read(self):
+        receipt = {"address": "t7", "parent": "t1", "created_ms": 42, "cli": "codex", "sent": False}
+
+        def hc(command, *_args, **_kwargs):
+            if command == "get":
+                return receipt
+            with lock_run(path):
+                write_json(path, {**receipt, "sent": True})
+            return {"text": "• Started"}
+
+        with tempfile.TemporaryDirectory() as directory, patch("dispatch.hc_json", side_effect=hc):
+            path = Path(directory) / "run.json"
+            write_json(path, receipt)
+            with redirect_stdout(StringIO()) as output:
+                peek(SimpleNamespace(run=str(path), since_last=True))
+            self.assertEqual(output.getvalue(), "• Started\n")
+            self.assertTrue(json.loads(path.read_text(encoding="utf-8"))["sent"])
+
+    def test_streamed_line_redraw_and_no_overlap(self):
+        self.assertEqual(transcript_offset(["ready", "stream"], ["ready", "streamed", "next"]), 1)
+        self.assertEqual(transcript_offset(["old", "ready", "stream"], ["ready", "streamed", "next"]), 1)
+        self.assertEqual(transcript_offset(["irrelevant"], ["new"]), 0)
+
+
 class CodexSendTests(DispatchTestCase):
     READY = "› Ask Codex to do anything\n\n  GPT-6.2-Sol default · ~/repo"
     PASTE = "› [Pasted Content 1576 chars]\n\n  GPT-6.2-Sol default · ~/repo"
@@ -1927,11 +2702,21 @@ class CodexSendTests(DispatchTestCase):
     IDLE = {"turn": 0, "status": {"state": "idle"}}
     WORKING = {"turn": 0, "status": {"state": "working"}}
     SINGLE_WARNING = f"{READY}\n  ⚠ 1 warning · f2 to view"
+    TWO_WARNINGS = f"{READY}\n  ⚠ 2 warnings · f2 to view"
+    WARNING_CONTROLS = "  k keep & next · esc dismiss & close · ctrl+shift+c copy · ←/→ warning"
     BYPASS_NOTICE = (
         "  Warnings · 1 of 1 · Startup\n\n"
         "  `--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run\n"
         "  without review for this invocation.\n\n"
-        "  k keep & next · esc dismiss & close · ctrl+shift+c copy · ←/→ warning"
+        f"{WARNING_CONTROLS}"
+    )
+    UNSTABLE_FEATURES_NOTICE = (
+        "  Warnings · 2 of 2 · Startup\n\n"
+        "  Under-development features enabled: code_mode, example_feature.\n"
+        "  Under-development features are incomplete and may behave unpredictably.\n"
+        "  To suppress this warning, set `suppress_unstable_features_warning = true` in\n"
+        "  /tmp/Codex Config/config.toml.\n\n"
+        f"{WARNING_CONTROLS}"
     )
     HOOK_REVIEW = (
         "  Hooks need review\n  2 hooks are new or changed.\n\n"
@@ -1987,7 +2772,7 @@ class CodexSendTests(DispatchTestCase):
 
         def hc(command, *args, timeout=None):
             if command == "ls":
-                return {"terminals": [owner]}
+                return {"terminals": [] if args else [owner]}
             if command == "get" and args == ("t6",):
                 return owner
             return respond(command, *args)
@@ -2001,6 +2786,116 @@ class CodexSendTests(DispatchTestCase):
         ):
             launch(saved.launch_args(directory, **options))
         return mocked_hc.call_args_list
+
+    def test_relaunch_keeps_working_when_only_timing_history_is_invalid(self):
+        with tempfile.TemporaryDirectory() as previous, tempfile.TemporaryDirectory() as replacement:
+            receipt = Path(previous) / "run.json"
+            write_json(receipt, {"address": "t7", "closed_reason": "finished"})
+            timing_file = receipt.with_name("timing.json")
+            head = "a" * 40
+            old = phase_timing.new_launch(phase_timing.empty_history(), 1000)
+            saved_attempt = phase_timing.start(old, "review", head, False, 2000)
+            write_json(timing_file, {"launches": None})
+            with redirect_stderr(StringIO()) as warnings:
+                self.launch_codex(replacement, lambda *_: DispatchReceiptTests.TERMINAL,
+                                  relaunch_from=receipt, task=None)
+            self.assertIn("cannot carry dispatch timing", warnings.getvalue())
+            self.assertEqual(json.loads(timing_file.read_text(encoding="utf-8")), {"launches": None})
+            self.assertEqual(json.loads((Path(replacement) / "run.json").read_text(encoding="utf-8"))["address"], "t7")
+            started = phase_timing.read(Path(replacement) / "timing.json")
+            self.assertEqual(len(started["launches"]), 1)
+            self.assertIsNotNone(started["first_launched_ms"])
+            current_attempt = phase_timing.start(started, "review", head, False, 3000)
+            with self.assertRaisesRegex(ValueError, "unknown review attempt"):
+                phase_timing.finish(started, "review", saved_attempt, "complete", 4000)
+            self.assertNotEqual(saved_attempt, current_attempt)
+            self.assertIsNone(started["launches"][0]["review"][0]["finished_ms"])
+
+    def test_phase_timing_survives_retry_relaunch_and_repeated_collection(self):
+        terminal = DispatchReceiptTests.TERMINAL
+        sent = False
+
+        def respond(command, *args):
+            nonlocal sent
+            if command == "get":
+                return {**terminal, **(self.WORKING if sent else self.IDLE)}
+            if command == "read":
+                return self.screen(self.READY)
+            self.assertEqual(command, "send")
+            sent = True
+            return {"started": True}
+
+        def event(receipt, at, verb, **options):
+            with patch("dispatch.phase_timing.now_ms", return_value=at), redirect_stdout(StringIO()) as output:
+                timing(SimpleNamespace(run=receipt, event=verb, **({"tree": False} | options)))
+            return output.getvalue().strip()
+
+        first_head, final_head = "a" * 40, "b" * 40
+        with tempfile.TemporaryDirectory() as directory:
+            first = Path(directory) / "run.json"
+            with patch("dispatch.phase_timing.now_ms", side_effect=[1000, 1100]):
+                self.launch_codex(directory, respond, task="$task-next #520 private prompt")
+            review = event(first, 5000, "start", phase="review", sha=first_head)
+            event(first, 5200, "finish", phase="review", attempt=review, outcome="complete")
+            event(first, 5300, "finish", phase="review", attempt=review, outcome="complete")
+            pending_review = event(first, 5350, "start", phase="review", sha=first_head)
+            attempt = event(first, 5400, "start", phase="ci", sha=first_head)
+            event(first, 5500, "finish", phase="ci", attempt=attempt, outcome="incomplete")
+            attempt = event(first, 5600, "start", phase="ci", sha=first_head)
+            event(first, 5800, "finish", phase="ci", attempt=attempt, outcome="failed")
+            finished = {**terminal, "state": "finished"}
+            with (
+                patch("dispatch.phase_timing.now_ms", return_value=6000),
+                patch("dispatch.hc_json", side_effect=[finished, {}]),
+                redirect_stdout(StringIO()),
+            ):
+                collect(SimpleNamespace(run=first, close=True))
+
+            replacement = Path(directory) / "replacement"
+            replacement.mkdir()
+            second = replacement / "run.json"
+            sent = False
+            with patch("dispatch.phase_timing.now_ms", side_effect=[6500, 6700]):
+                self.launch_codex(replacement, respond, relaunch_from=first)
+            tree = "c" * 40
+            review = event(second, 8000, "start", phase="review", sha=tree, tree=True)
+            event(second, 8050, "finish", phase="review", attempt=pending_review, outcome="complete")
+            attempt = event(second, 8100, "start", phase="ci", sha=final_head)
+            event(second, 8200, "finish", phase="review", attempt=review, outcome="complete")
+            with patch("dispatch.subprocess.check_output", side_effect=["d" * 40, tree]) as git:
+                with self.assertRaisesRegex(SystemExit, "does not match"):
+                    event(second, 8300, "bind-review", attempt=review, head=final_head)
+                event(second, 8300, "bind-review", attempt=review, head=final_head)
+            self.assertEqual(git.call_args.args[0], ["git", "rev-parse", "--verify", f"{final_head}^{{tree}}"])
+            event(second, 8350, "finish", phase="ci", attempt=attempt, outcome="passed")
+            event(second, 8500, "merged", head=None)
+            event(second, 8550, "merged", head=final_head)
+            event(second, 8600, "merged", head=first_head)
+            saved = second.with_name("timing.json")
+            original = saved.read_bytes()
+            self.assertNotIn(b"private prompt", original)
+            with (
+                patch("dispatch.phase_timing.now_ms", side_effect=AssertionError("poll is read-only")),
+                patch("dispatch.hc_json", return_value=finished),
+                redirect_stdout(StringIO()) as output,
+            ):
+                for _ in range(2):
+                    collect(SimpleNamespace(run=second, close=False))
+                collect(SimpleNamespace(run=second, close=False, brief=True))
+            earlier, later, brief = output.getvalue().splitlines()
+            self.assertEqual(earlier, later)
+            self.assertEqual(saved.read_bytes(), original)
+            self.assertIn("startup=200ms implementation=1300ms review=200ms ci=250ms restart=500ms", brief)
+            report = json.loads(earlier)["timing"]
+            self.assertEqual(report["final_head"], final_head)
+            self.assertEqual(report["merge"], {"head": final_head, "confirmed_ms": 8500, "elapsed_ms": 7500})
+            original_launch, restart = report["launches"]
+            self.assertEqual((original_launch["startup_ms"], original_launch["implementation_ms"]), (100, 3900))
+            self.assertEqual(original_launch["review"][0]["finished_ms"], 5200)
+            self.assertEqual(original_launch["review"][1]["finished_ms"], 8050)
+            self.assertEqual([a["head"] for a in original_launch["ci"]], [first_head, first_head])
+            self.assertEqual([a["outcome"] for a in original_launch["ci"]], ["incomplete", "failed"])
+            self.assertEqual(restart["review"][0]["head"], final_head)
 
     def test_launch_withholds_task_on_visible_hook_review_or_failure(self):
         for trust, dialog in ((False, self.HOOK_REVIEW), (True, self.HOOK_REVIEW),
@@ -2066,15 +2961,52 @@ class CodexSendTests(DispatchTestCase):
                 self.assertEqual(operations, ["esc", "send"] if already_open else ["f2", "esc", "send"])
                 self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], True)
 
-    def test_startup_notice_requires_opt_in_and_exact_single_page(self):
+    def test_send_dismisses_two_recognized_startup_pages(self):
+        first = self.BYPASS_NOTICE.replace("1 of 1", "1 of 2")
+        wrapped = self.UNSTABLE_FEATURES_NOTICE.replace("Config/config.toml.", "Config/\n  config.toml.")
+        for pages in ((first, self.UNSTABLE_FEATURES_NOTICE),
+                      (wrapped.replace("2 of 2", "1 of 2"), first.replace("1 of 2", "2 of 2"))):
+            with self.subTest(first=pages[0]), tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "run.json"
+                receipt.write_text(json.dumps({**DispatchReceiptTests.RECEIPT, "trust_hooks": True}),
+                                   encoding="utf-8")
+                terminal = {**DispatchReceiptTests.TERMINAL, **self.IDLE}
+                frames = iter([self.TWO_WARNINGS, pages[0], pages[0], pages[1]])
+                operations = []
+
+                def respond(command, *args):
+                    if command == "get":
+                        return {**terminal, **self.WORKING} if operations[-1:] == ["send"] else terminal
+                    if command == "read":
+                        return self.screen(next(frames) if "esc" not in operations else self.READY)
+                    if command == "keys":
+                        operations.append(args[-1])
+                    else:
+                        self.assertEqual(command, "send")
+                        operations.append("send")
+                    return {}
+
+                with patch("dispatch.hc_json", side_effect=respond), patch("dispatch.time.sleep"), \
+                        redirect_stdout(StringIO()):
+                    try:
+                        send(SimpleNamespace(address="t7", message="a task", run=receipt))
+                    except SystemExit as error:
+                        self.fail(str(error))
+                self.assertEqual(operations, ["f2", "right", "esc", "send"])
+                self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], True)
+
+    def test_startup_notice_requires_opt_in_and_recognized_pages(self):
         terminal = {**DispatchReceiptTests.TERMINAL, **self.IDLE}
         failure = "• Hook failed\n  └ SessionStart hook exited with code 1"
+        first = self.screen(self.BYPASS_NOTICE.replace("1 of 1", "1 of 2"))
+        unknown = self.screen(self.UNSTABLE_FEATURES_NOTICE.replace(
+            "Under-development features are incomplete and may behave unpredictably.", "Review hooks first."))
         for label, opt_in, shown, responses, keys, reason in (
             ("no opt-in", False, self.SINGLE_WARNING, [], [], "F2"),
             ("open without opt-in", False, self.BYPASS_NOTICE, [], [], "F2"),
             ("open after startup", True, self.BYPASS_NOTICE, [{**terminal, "turn": 2}], [], "F2"),
             ("unrelated open page", True, self.BYPASS_NOTICE.replace("Startup", "Runtime"), [], [], "F2"),
-            ("multiple footer", True, self.SINGLE_WARNING.replace("1 warning", "2 warnings"), [], [], "F2"),
+            ("invalid footer count", True, self.SINGLE_WARNING.replace("1 warning", "0 warnings"), [], [], "F2"),
             ("wrong owner", True, self.SINGLE_WARNING,
              [{**terminal, "created_ms": 51}], [], "terminal identity changed"),
             ("busy", True, self.SINGLE_WARNING, [{**terminal, **self.WORKING}], [], "F2"),
@@ -2084,8 +3016,14 @@ class CodexSendTests(DispatchTestCase):
             ("extra body", True, self.SINGLE_WARNING,
              [terminal, {}, self.screen(self.BYPASS_NOTICE.replace("\n\n  k", "\n  Extra warning\n\n  k"))],
              ["f2"], "F2"),
-            ("multiple pages", True, self.SINGLE_WARNING,
+            ("page count mismatch", True, self.SINGLE_WARNING,
              [terminal, {}, self.screen(self.BYPASS_NOTICE.replace("1 of 1", "1 of 2"))], ["f2"], "F2"),
+            ("missing bypass notice", True, self.SINGLE_WARNING,
+             [terminal, {}, self.screen(self.UNSTABLE_FEATURES_NOTICE.replace("2 of 2", "1 of 1")),
+              terminal, {}, self.screen(self.SINGLE_WARNING)], ["f2"], "F2"),
+            ("unknown second page", True, self.TWO_WARNINGS,
+             [terminal, {}, first, terminal, {}, unknown, terminal, {}, self.screen(self.SINGLE_WARNING)],
+             ["f2", "right"], "F2"),
             ("wrong source", True, self.SINGLE_WARNING,
              [terminal, {}, self.screen(self.BYPASS_NOTICE.replace("Startup", "Runtime"))], ["f2"], "F2"),
             ("incomplete page", True, self.SINGLE_WARNING,
@@ -2640,6 +3578,24 @@ class CodexSendTests(DispatchTestCase):
             self.assertEqual([c.args[0] for c in hc.call_args_list].count("send"), 1)
             self.assertEqual(hc.call_count, 6)
             self.assertIn("warning: legacy receipt has no handoff metadata", stderr.getvalue())
+
+    def test_recovered_delivery_uses_the_original_first_send_acknowledgment(self):
+        working = {**DispatchReceiptTests.TERMINAL, **self.WORKING}
+        for first_send in (False, True, None):
+            with self.subTest(continuation=first_send), tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "run.json"
+                run = {**DispatchReceiptTests.RECEIPT, "sent": "unconfirmed", "send_acknowledged_ms": 1100}
+                if first_send is not None:
+                    run["sent_continuation"] = first_send
+                write_json(receipt, run)
+                with (
+                    patch("dispatch.hc_json", side_effect=[working, self.screen(self.READY)]),
+                    patch("dispatch.phase_timing.now_ms", side_effect=AssertionError("read the recorded time")),
+                ):
+                    with self.assertRaisesRegex(SystemExit, "use --continue"):
+                        send(SimpleNamespace(address="t7", message="task", run=receipt))
+                timing_data = phase_timing.read(receipt.with_name("timing.json"))
+                self.assertEqual(timing_data["launches"][0]["delivered_ms"], 1100 if first_send is False else None)
 
     def test_resend_keeps_the_original_phase_and_requires_a_clear_idle_composer(self):
         owner = DispatchReceiptTests.TERMINAL
@@ -3211,6 +4167,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from threading import Event
 
 assert sys.argv[1:] == ["app-server"], sys.argv
 home = Path(os.environ["CODEX_HOME"])
@@ -3550,6 +4507,343 @@ class QuotaTests(unittest.TestCase):
             out = json.loads(subprocess.check_output(command, cwd=root, env=env))
             self.assertEqual(out["claude"]["used"], 42)
             self.assertNotIn("five_hour_used", out["claude"])
+
+
+class ReservedQueueWaveTest(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory(prefix="dispatch reserved wave ")
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.repo = self.root / "repo"
+        self.repo.mkdir()
+        self.git("init", "-q")
+        self.backlog = self.repo / "backlog.md"
+        self.backlog.write_text(
+            "# Backlog\n\n## First group\n\n- [ ] [FEAT] First item\n"
+            "  with a continuation.\n\n## Second group\n\n- [ ] [FIX] Second item\n"
+            "\n## Third group\n\n- [ ] [DOCS] Third item\n", encoding="utf-8",
+        )
+        (self.repo / "tasks.md").write_text(
+            "# Existing sprint\n\n## Scope\nstatus: open\n\nKeep this content.\n", encoding="utf-8",
+        )
+        self.git("add", "backlog.md", "tasks.md")
+        self.git("commit", "-qm", "base")
+        self.git("update-ref", "refs/remotes/origin/HEAD", "HEAD")
+
+    def git(self, *args):
+        command = ["git", "-c", "core.hooksPath=no-hooks", "-c", "commit.gpgsign=false",
+                   "-c", "user.name=Test", "-c", "user.email=test@example.invalid"]
+        return subprocess.check_output([*command, *args], cwd=self.repo, encoding="utf-8").strip()
+
+    def queue(self, op, **data):
+        request = {"contract": 1, "repo": str(self.repo), **data}
+        return subprocess.run([sys.executable, "-I", str(QUEUE_BACKEND), op], input=json.dumps(request),
+                              capture_output=True, encoding="utf-8", check=False,
+                              env={**os.environ, "AGENT_QUEUE_BACKEND": "backlog"})
+
+    def result(self, op, **data):
+        result = self.queue(op, **data)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
+    def prepare(self):
+        snapshot = self.result("prepare-wave")
+        snapshot["by_title"] = {candidate["title"]: candidate for candidate in snapshot["candidates"]}
+        return snapshot
+
+    def reserve(self, *titles):
+        snapshot = self.prepare()
+        return self.result("reserve-wave", base=snapshot["base"], units=[snapshot["by_title"][t] for t in titles])
+
+    def test_reserve_wave_accepts_utf8_with_or_without_bom(self):
+        snapshot = self.prepare()
+        for encoding, title in (("utf-8", "First group"), ("utf-8-sig", "Second group")):
+            with self.subTest(encoding=encoding):
+                unit = snapshot["by_title"][title]
+                request = json.dumps({"base": snapshot["base"], "units": [unit]}).encode(encoding)
+                result = subprocess.run(
+                    [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "reserve-wave", str(self.repo)],
+                    input=request, capture_output=True, check=False,
+                    env={**os.environ, "AGENT_QUEUE_BACKEND": "backlog"},
+                )
+                self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8"))
+                [reservation] = json.loads(result.stdout)["reservations"]
+                self.assertEqual(reservation["candidate"]["ref"], unit["ref"])
+
+    def receipt(self, name, ref):
+        path = self.root / name / "run.json"
+        path.parent.mkdir()
+        write_json(path, {"address": name, "cli": "codex", "sent": False, "cwd": str(self.repo),
+                          "handoff": {"unit": ref, "request": "Run both independent queue items",
+                                      "git_limits": "pr-only" if name == "first" else "no-push",
+                                      "work_kind": "queue"}})
+        return path
+
+    def test_concurrent_reservations_reject_overlap_without_reserving_the_other_unit(self):
+        snapshot = self.prepare()
+        first, second, third = (snapshot["by_title"][f"{name} group"] for name in ("First", "Second", "Third"))
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            pending = [pool.submit(self.queue, "reserve-wave", base=snapshot["base"], units=[first, other])
+                       for other in (second, third)]
+            results = [future.result() for future in pending]
+        self.assertEqual(sorted(r.returncode for r in results), [0, 1])
+        winner = json.loads(next(r.stdout for r in results if r.returncode == 0))
+        self.assertEqual(len(winner["reservations"]), 2)
+        rejected = next(r for r in results if r.returncode)
+        self.assertIn(first["ref"], rejected.stderr)
+        remaining = self.prepare()["by_title"]
+        self.assertNotIn("First group", remaining)
+        self.assertEqual(len({"Second group", "Third group"}.intersection(remaining)), 1)
+        claims = self.result("list", full_scan=True)["claimed"]
+        for reservation in winner["reservations"]:
+            self.assertTrue(any(reservation["reservation"] in claim["by"] for claim in claims))
+        self.assertFalse((self.repo / ".worktrees").exists())
+
+    def test_changed_or_duplicate_selections_fail_before_reservation(self):
+        snapshot = self.prepare()
+        candidate = snapshot["by_title"]["First group"]
+        result = self.queue("reserve-wave", base=snapshot["base"], units=[candidate, candidate])
+        self.assertIn("overlapping queue units", result.stderr)
+        changed = dict(candidate, items=["First item with different scope"])
+        result = self.queue("reserve-wave", base=snapshot["base"], units=[changed])
+        self.assertIn("selection changed", result.stderr)
+        self.backlog.write_text(self.backlog.read_text(encoding="utf-8").replace(
+            "First item\n", "First item *(blocked by: second)*\n"), encoding="utf-8")
+        self.git("commit", "-qam", "Block an item")
+        self.git("update-ref", "refs/remotes/origin/HEAD", "HEAD")
+        result = self.queue("reserve-wave", base=snapshot["base"], units=[candidate])
+        self.assertIn("origin/HEAD changed", result.stderr)
+        self.assertNotIn("First group", self.prepare()["by_title"])
+
+    def test_claim_replaces_reservation_and_release_preserves_active_worktree(self):
+        wave = self.reserve("First group", "Second group")
+        first, second = wave["reservations"]
+        ref = first["candidate"]["ref"]
+        receipt = self.receipt("first", ref)
+        delivery = {"reservation": first["reservation"], "ref": ref, "delivery": str(receipt)}
+        claim = {**delivery, "base": wave["base"]}
+        self.assertIn("assigned to another delivery", self.queue("claim-reservation", **claim).stderr)
+        self.result("bind-wave", assignments=[delivery])
+        self.assertIn("does not match", self.queue("claim-reservation", **dict(claim, ref="#99")).stderr)
+        original_backlog = self.backlog.read_text(encoding="utf-8")
+        self.backlog.write_text(original_backlog.replace("# Backlog\n", "# Backlog\n\nIntro.\n"), encoding="utf-8")
+        self.git("commit", "-qam", "Shift queue lines after binding")
+        self.git("update-ref", "refs/remotes/origin/HEAD", "HEAD")
+        active = self.result("claim-reservation", **claim)
+        path = Path(active["worktree"])
+        original = (path / "tasks.md").read_text(encoding="utf-8")
+        self.assertIn("status: open", original)
+        self.assertIn("# First group\nstatus: active\n\n## Covers\n- [ ] [FEAT] First item\n", original)
+        self.assertEqual(self.git("-C", str(path), "rev-parse", "HEAD"), wave["base"])
+        self.assertEqual(active["covers"], ["- [ ] [FEAT] First item"])
+        self.assertEqual(self.result("release-reservation", reservation=first["reservation"]), {"released": False})
+        self.assertEqual(self.result("release-reservation", reservation=second["reservation"]), {"released": True})
+        self.assertEqual((path / "tasks.md").read_text(encoding="utf-8"), original)
+        listed = self.prepare()
+        self.assertEqual(listed["claimed"][0]["by"], str(path))
+        self.assertIn("Second group", listed["by_title"])
+        self.assertNotIn("First group", listed["by_title"])
+        self.assertFalse(list((self.repo / ".git/agent-queue").glob("reservation-[0-9a-f]*.lock")))
+
+    def test_reserved_sprint_preserves_other_sections(self):
+        wave = self.reserve("Existing sprint")
+        [unit] = wave["reservations"]
+        ref = unit["candidate"]["ref"]
+        delivery = {"reservation": unit["reservation"], "ref": ref, "delivery": str(self.receipt("first", ref))}
+        self.result("bind-wave", assignments=[delivery])
+        claimed = self.result("claim-reservation", **delivery, base=wave["base"])
+        self.assertEqual((Path(claimed["worktree"]) / "tasks.md").read_text(encoding="utf-8"),
+                         "# Existing sprint\n\n## Scope\nstatus: active\n\nKeep this content.\n")
+
+    def test_claim_rejects_a_file_item_blocked_after_binding(self):
+        wave = self.reserve("First group")
+        [unit] = wave["reservations"]
+        ref = unit["candidate"]["ref"]
+        delivery = {"reservation": unit["reservation"], "ref": ref, "delivery": str(self.receipt("first", ref))}
+        self.result("bind-wave", assignments=[delivery])
+        self.backlog.write_text(self.backlog.read_text(encoding="utf-8").replace(
+            "First item\n", "First item *(blocked by: second)*\n"), encoding="utf-8")
+        self.git("commit", "-qam", "Block queued item after binding")
+        self.git("update-ref", "refs/remotes/origin/HEAD", "HEAD")
+        result = self.queue("claim-reservation", **delivery, base=wave["base"])
+        self.assertIn("no longer eligible on origin/HEAD", result.stderr)
+        self.assertFalse(Path(unit["worktree"]).exists())
+
+    def test_file_fast_path_preserves_order_with_pending_reservations(self):
+        with self.backlog.open("a", encoding="utf-8") as stream:
+            stream.write("\n### Later nested group\n\n- [ ] [FEAT] Nested item\n")
+        self.git("commit", "-qam", "Add a nested priority item")
+        self.git("update-ref", "refs/remotes/origin/HEAD", "HEAD")
+        self.reserve("Existing sprint")
+        fast = self.result("list")
+        self.assertEqual(fast["candidates"][0]["title"], "First group")
+        self.assertTrue(any("full-scan" in warning for warning in fast["warnings"]))
+        full = self.result("list", full_scan=True)
+        self.assertEqual(full["candidates"][0]["title"], "Later nested group")
+
+    def test_interrupted_claim_resumes_only_its_own_worktree(self):
+        sys.path.insert(0, str(QUEUE_BACKEND.parent))
+        import queue_backend
+
+        wave = self.reserve("First group")
+        [unit] = wave["reservations"]
+        ref = unit["candidate"]["ref"]
+        delivery = {"reservation": unit["reservation"], "ref": ref, "delivery": str(self.receipt("first", ref))}
+        self.result("bind-wave", assignments=[delivery])
+        request = {"contract": 1, "repo": str(self.repo), **delivery, "base": wave["base"]}
+        worktree = Path(unit["worktree"])
+        replace = os.replace
+
+        def fail_tasks(source, destination):
+            if Path(destination) == worktree / "tasks.md":
+                raise OSError("injected publication failure")
+            return replace(source, destination)
+
+        with patch.object(queue_backend.os, "replace", side_effect=fail_tasks), self.assertRaisesRegex(
+            OSError, "injected publication failure",
+        ):
+            queue_backend.handle("claim-reservation", request, {"AGENT_QUEUE_BACKEND": "backlog"})
+        self.assertIn(f"locked dispatch reservation {unit['reservation']}", self.git("worktree", "list", "--porcelain"))
+        kept = self.result("release-reservation", reservation=unit["reservation"])
+        self.assertFalse(kept["released"])
+        self.assertTrue(worktree.is_dir())
+        active = self.result("claim-reservation", **delivery, base=wave["base"])
+        self.assertEqual(Path(active["worktree"]), worktree)
+        self.assertNotIn("locked dispatch reservation", self.git("worktree", "list", "--porcelain"))
+        self.assertIn("- [ ] [FEAT] First item", (worktree / "tasks.md").read_text(encoding="utf-8"))
+
+    def test_release_retires_published_reservation_after_ledger_failure(self):
+        sys.path.insert(0, str(QUEUE_BACKEND.parent))
+        import queue_backend
+
+        wave = self.reserve("First group")
+        [unit] = wave["reservations"]
+        token = unit["reservation"]
+        ref = unit["candidate"]["ref"]
+        delivery = {"reservation": token, "ref": ref, "delivery": str(self.receipt("first", ref))}
+        self.result("bind-wave", assignments=[delivery])
+        request = {"contract": 1, "repo": str(self.repo), **delivery, "base": wave["base"]}
+        write_state = queue_backend._write_queue_json
+
+        def fail_retire(path, data):
+            if token not in data["units"]:
+                raise OSError("injected retirement failure")
+            write_state(path, data)
+
+        with patch.object(queue_backend, "_write_queue_json", side_effect=fail_retire), self.assertRaisesRegex(
+            OSError, "injected retirement failure",
+        ):
+            queue_backend.handle("claim-reservation", request, {"AGENT_QUEUE_BACKEND": "backlog"})
+        self.assertNotIn("locked dispatch reservation", self.git("worktree", "list", "--porcelain"))
+        self.assertEqual(self.result("release-reservation", reservation=token), {"released": True})
+        self.assertIn("- [ ] [FEAT] First item", (Path(unit["worktree"]) / "tasks.md").read_text(encoding="utf-8"))
+        self.assertNotIn("First group", self.prepare()["by_title"])
+
+    def test_independent_claims_can_prepare_worktrees_concurrently(self):
+        sys.path.insert(0, str(QUEUE_BACKEND.parent))
+        import queue_backend
+
+        wave = self.reserve("First group", "Second group")
+        assignments = []
+        for unit in wave["reservations"]:
+            ref = unit["candidate"]["ref"]
+            assignments.append({"reservation": unit["reservation"], "ref": ref,
+                                "delivery": str(self.receipt(unit["branch"].split("/")[-1], ref))})
+        self.result("bind-wave", assignments=assignments)
+        first_entered, second_entered = Event(), Event()
+        original = queue_backend._materialize_claim
+
+        def create(repo, unit, *args):
+            if unit["candidate"]["title"] == "First group":
+                first_entered.set()
+                self.assertTrue(second_entered.wait(3), "second worktree waited for the first")
+            else:
+                self.assertTrue(first_entered.wait(3))
+                second_entered.set()
+            return original(repo, unit, *args)
+
+        def claim(assignment):
+            request = {"contract": 1, "repo": str(self.repo), "base": wave["base"], **assignment}
+            return queue_backend.handle("claim-reservation", request, {"AGENT_QUEUE_BACKEND": "backlog"})
+
+        with patch.object(queue_backend, "_materialize_claim", side_effect=create), ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(claim, assignments))
+        self.assertEqual([code for code, _ in outcomes], [0, 0])
+        self.assertTrue(all((Path(unit["worktree"]) / "tasks.md").is_file() for _, unit in outcomes))
+
+    def test_withheld_receipt_is_reusable_and_unreadable_receipt_has_an_outcome(self):
+        path = self.receipt("first", "#1")
+        metadata = {"ref": "#1", "reservation": "test-reservation"}
+        run = json.loads(path.read_text(encoding="utf-8"))
+        run["handoff"]["queue_reservation"] = metadata
+        write_json(path, run)
+        failed = subprocess.CompletedProcess([], 1, "", "send failed")
+        with patch("dispatch.subprocess.run", return_value=failed):
+            result = deliver_reserved(path, metadata, "first")
+            self.assertEqual(result["delivery"], "withheld")
+            self.assertIn("$task-next --tree #1", result["prompt"])
+            self.assertNotIn("queue_reservation", json.loads(path.read_text(encoding="utf-8"))["handoff"])
+            path.write_text("{", encoding="utf-8")
+            result = deliver_reserved(path, metadata, "first")
+            self.assertEqual(result["delivery"], "unconfirmed")
+            self.assertIn("cannot read dispatch receipt", result["diagnostics"])
+
+    def test_send_wave_delivers_second_prompt_during_first_child_intake(self):
+        wave = self.reserve("First group", "Second group")
+        first, second = wave["reservations"]
+        receipts = [self.receipt(name, unit["candidate"]["ref"]) for name, unit in zip(
+            ("first", "second"), wave["reservations"], strict=True,
+        )]
+        request = {"deliveries": [{"reservation": unit["reservation"], "run": str(receipt)}
+                                  for unit, receipt in zip(wave["reservations"], receipts, strict=True)]}
+        first_started, second_started = Event(), Event()
+        real_run = subprocess.run
+        prompts = {}
+
+        def run_child(args, **kwargs):
+            if args[5] != "send":
+                return real_run(args, **kwargs)
+            _, _, receipt, _, address, message = args[5:]
+            handoff = json.loads(Path(receipt).read_text(encoding="utf-8"))["handoff"]
+            prompts[address] = first_prompt("codex", message, handoff)
+            if address == "first":
+                first_started.set()
+                self.assertTrue(second_started.wait(3), "second submission waited for the first child")
+            else:
+                self.assertTrue(first_started.wait(3))
+                second_started.set()
+            return subprocess.CompletedProcess(args, 0, json.dumps({"address": address}), "")
+
+        with (
+            patch("dispatch.read_wave_request", return_value=request),
+            patch("dispatch.subprocess.run", side_effect=run_child),
+            patch.dict(os.environ, {"AGENT_QUEUE_BACKEND": "backlog"}),
+            redirect_stdout(StringIO()) as output,
+        ):
+            send_wave(SimpleNamespace(repo=self.repo))
+        self.assertFalse((self.repo / ".worktrees").exists(), "delivery does not wait for a worktree")
+        self.assertEqual([result["delivery"] for result in json.loads(output.getvalue())["deliveries"]],
+                         ["submitted", "submitted"])
+        self.assertIn(first["reservation"], prompts["first"])
+        self.assertIn(second["reservation"], prompts["second"])
+        self.assertIn('"Git limits": "pr-only"', prompts["first"])
+        self.assertIn('"Git limits": "no-push"', prompts["second"])
+
+    def test_mismatched_receipt_prevents_every_delivery(self):
+        wave = self.reserve("First group", "Second group")
+        first, second = wave["reservations"]
+        receipts = [self.receipt("first", first["candidate"]["ref"]), self.receipt("second", "#99")]
+        request = {"deliveries": [{"reservation": unit["reservation"], "run": str(receipt)}
+                                  for unit, receipt in zip(wave["reservations"], receipts, strict=True)]}
+        with (
+            patch("dispatch.read_wave_request", return_value=request),
+            patch("dispatch.deliver_reserved") as deliver,
+            patch.dict(os.environ, {"AGENT_QUEUE_BACKEND": "backlog"}),
+            self.assertRaisesRegex(SystemExit, "receipt is for another unit"),
+        ):
+            send_wave(SimpleNamespace(repo=self.repo))
+        deliver.assert_not_called()
+        self.assertEqual(self.result("release-reservation", reservation=second["reservation"]), {"released": True})
 
 
 if __name__ == "__main__":

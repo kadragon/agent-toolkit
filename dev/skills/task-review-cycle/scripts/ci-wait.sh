@@ -144,6 +144,20 @@ if [ -z "$WATCH_SHA" ]; then
   WATCH_SHA=$(git rev-parse --verify -q HEAD 2>/dev/null || true)
 fi
 
+CI_OUTCOME=incomplete
+if [ -n "${DISPATCH_TIMING_RUN:-}" ] && [ -n "$WATCH_SHA" ]; then
+  TIMING_PY=$(command -v python3 || command -v python || true)
+  if [ -z "$TIMING_PY" ]; then
+    echo "WARN: dispatch CI timing unavailable without Python" >&2
+  else
+    TIMING=("$TIMING_PY" -I "$SCRIPT_DIR/../../dispatch/scripts/dispatch.py" timing "$DISPATCH_TIMING_RUN")
+    CI_ATTEMPT=$("${TIMING[@]}" start ci "$WATCH_SHA") || CI_ATTEMPT=""
+    if [ -n "$CI_ATTEMPT" ]; then
+      trap '"${TIMING[@]}" finish ci "$CI_ATTEMPT" "$CI_OUTCOME" || true' EXIT
+    fi
+  fi
+fi
+
 fail_verification() {
   jq -n --arg reason "$1" --arg expected "$EXPECTED_HEAD" --arg actual "$STATUS_SHA" \
     '{passed: false, reason: $reason, expected_head: $expected, head_sha: ($actual | select(length > 0) // null)}'
@@ -174,10 +188,18 @@ while true; do
   case "$STATUS" in
     success)
       clear_strikes
+      CI_OUTCOME=passed-unverified
+      if [ -n "$WATCH_SHA" ] && [ "$STATUS_SHA" = "$WATCH_SHA" ]; then
+        CI_OUTCOME=passed
+      fi
       jq -n '{passed: true}'
       exit 0
       ;;
     failure)
+      CI_OUTCOME=failed-unverified
+      if [ -n "$WATCH_SHA" ] && [ "$STATUS_SHA" = "$WATCH_SHA" ]; then
+        CI_OUTCOME=failed
+      fi
       STRIKES=$(read_strikes)
       STRIKES=$(( STRIKES + 1 ))
       [ -n "$STRIKE_FILE" ] && printf '%s\n' "$STRIKES" > "$STRIKE_FILE"
@@ -202,6 +224,7 @@ while true; do
           fail_verification ci-config-unverified
         fi
         clear_strikes  # a pass is a pass: no-CI must reset the counter like `success` does
+        CI_OUTCOME=no-checks
         jq -n '{passed: true, reason: "no CI checks found"}'
         exit 0
       fi

@@ -6,23 +6,34 @@
   dispatch.py launch --cli claude|codex --model M --effort E --cwd PATH
                      --work-kind queue|new|standalone --request REQUEST --unit UNIT
                      [--git-limits LIMITS] [--git-grant-recorded | --no-git-writes]
-                     [--review-transfer-approval APPROVAL]
+                     [--review-transfer-approval APPROVAL] [--no-standing-review-approval]
+                     [--relaunch-from PREVIOUS_RUN]
                      [--name N] [--title TEXT] [--parent T] [--task TASK] [--trust-hooks] [--keep-connectors]
                      [--dry-run] [MESSAGE]
       Start a background child with hc run --bg. Prints launch and receipt details as JSON.
       --title becomes the hc label title=TEXT and, without --name, the source of the name.
       Codex takes --task or a later send with --run. Claude takes MESSAGE.
       --trust-hooks bypasses persisted hook trust for this Codex launch only.
+      Queue and new work without --git-limits carry the dispatch default through merge. Task cycles
+      and task-review launches carry the standing review transfer approval unless
+      --review-transfer-approval or --no-standing-review-approval replaces it.
       A Codex family (luna, terra, sol, any case) resolves to its newest listed slug in
       $CODEX_HOME/models_cache.json; a full slug passes through. fable and astra are refused.
   dispatch.py send [--run RECEIPT] [--continue | --resend] ADDRESS MESSAGE
       Send to a clear Codex composer. A receipt allows startup, phase reuse, or recovery.
+  dispatch.py peek RECEIPT [--since-last]
+      Print the filtered transcript tail. Every successful peek updates the receipt cursor.
   dispatch.py report-review RESULT
       Read a Codex pre-merge report from stdin and atomically write ready or blocked.
+  dispatch.py timing RUN [delivered | start PHASE SHA [--tree] | finish PHASE ATTEMPT OUTCOME
+                         | bind-review ATTEMPT HEAD | merged [HEAD]]
+      Read timing or record a review/CI attempt or an independently confirmed merge.
   dispatch.py collect RECEIPT [--stall-minutes N] [--close [--force]]
       Read the result, status and any stop reason. Close an owned child.
       A Codex child whose hooks fail, or whose launch-time kadragon plugin version directory
       was removed, reports stop_reason hooks_broken; any plugin version change warns on stderr.
+  dispatch.py prepare-codex --repo PATH --cwd PATH [--parent ADDRESS]
+      Prepare the shared marketplace and report the native hooks awaiting review.
   dispatch.py pin --repo PATH --commit SHA --codex PATH
       Create an isolated Codex wave. Launch idle children with launch --wave WAVE.
   dispatch.py release WAVE
@@ -31,19 +42,27 @@
       Print one brief line per child and another only when its displayed state changes.
 """
 import argparse
+import errno
+import hashlib
 import json
 import os
 import re
+import secrets
+import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
-from contextlib import contextmanager, nullcontext, suppress
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack, contextmanager, nullcontext, suppress
 from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import phase_timing  # noqa: E402
 import pinned_wave  # noqa: E402
+import shared_codex  # noqa: E402
 
 CLAUDE_SETTINGS = {
     "promptSuggestionEnabled": False,
@@ -55,6 +74,8 @@ HOOK_BLOCKER = re.compile(
     r"^(?:[•└⚠]\ufe0f?\s*)?(?:(?:\d+\s+)?hooks? needs? review|"
     r"hook (?:failed|stopped)|blocked by hook|(?:plugin contents changed;\s*)?hook approval required)\b",
     re.IGNORECASE)
+RUNTIME_HOOK_BLOCKER = re.compile(
+    r"^(?:[•└⚠]\ufe0f?\s*)?(?:hook (?:failed|stopped)|blocked by hook)\b", re.IGNORECASE)
 # Codex can show this cause on its own or as a detail of a hook failure.
 PLUGIN_HOOK_FAILURE = re.compile(
     r"^(?:[•└⚠]\ufe0f?[ \t]*|(?:•[ \t]*)?hook failed\b[^\n]*?"
@@ -63,10 +84,17 @@ PLUGIN_HOOK_FAILURE = re.compile(
     re.IGNORECASE | re.MULTILINE)
 # A hook failure event, not a prompt or command output that quotes the phrase.
 CODEX_HOOK_FAILED = re.compile(r"^• Hook failed\b[^\n]*\n[ \t]*└", re.MULTILINE)
+CODEX_MISSING_HOOK = re.compile(r"failed to spawn.*?\bos error 2\b", re.DOTALL)
 WARNING_FOOTER = re.compile(r"⚠\ufe0f?\s*(\d+)\s+warnings?\s*·\s*f2 to view\b", re.IGNORECASE)
 HOOK_BYPASS_NOTICE = ("`--dangerously-bypass-hook-trust` is enabled. "
                       "Enabled hooks may run without review for this invocation.")
+UNSTABLE_FEATURES_NOTICE = re.compile(
+    r"Under-development features enabled: [a-z0-9_]+(?:, [a-z0-9_]+)*\. "
+    r"Under-development features are incomplete and may behave unpredictably\. "
+    r"To suppress this warning, set `suppress_unstable_features_warning = true` in "
+    r"(?:(?:[A-Za-z]:|~)?[/\\](?:[^`]*[/\\])? *)?config\.toml\.")
 WARNING_VIEW_TITLE = re.compile(r"Warnings · \d+ of \d+ · .+")
+STARTUP_WARNING_TITLE = re.compile(r"Warnings · ([1-9][0-9]*) of ([1-9][0-9]*) · Startup")
 WARNING_VIEW_FOOTER = re.compile(
     r"k keep & next · esc dismiss & close(?: · \S+ copy)?(?: · \S+ warning)?", re.IGNORECASE)
 PASTED_CONTENT = re.compile(r"\[Pasted Content \d+ chars\](?: #\d+)?")
@@ -77,6 +105,8 @@ CODEX_STATUS_LINE = re.compile(
 )
 CODEX_SHORTCUT_LINE = re.compile(r"^ {2,}(?:← for agents · )?\? for shortcuts\b", re.IGNORECASE)
 CODEX_OUTPUT_MARKERS = ("•", "■", "─ Worked for")
+CODEX_PROGRESS = re.compile(r"^\s*(?:[•◦] )?.+ \(\d[\d hms]* • esc to interrupt\)(?:\s.*)?$")
+CLAUDE_PROGRESS = re.compile(r"^[✢✳✶✻✽] .+… \(\d[\d hms]*(?: · [^)]*)?\)$")
 USAGE_NOTICE = re.compile(
     r"(?:you(?:'ve|’ve| have)? (?:hit|reached) (?:your|the) (?:chatgpt )?(?:usage )?limit\b|"
     r"(?:(?:individual )?quota|usage limit|rate limit) (?:reached|exceeded)\b)", re.IGNORECASE)
@@ -85,22 +115,41 @@ POLICY_ERROR = re.compile(r"API Error:.*\busage policy\b", re.IGNORECASE)
 STOP_USAGE = "Usage limit reached"
 STOP_FILTER = "Stopped by a safety or usage-policy filter"
 STOP_HOOKS = "hooks_broken"
-PLUGIN_MARKETPLACE = "kadragon"
+PLUGIN_MARKETPLACE = shared_codex.MARKET
 STALL_MINUTES = 30
 SCREEN_POLL_SECONDS = 0.25
 POST_SEND_SETTLE_SECONDS = 2
 CLOSE_WAIT_SECONDS = 10
 LAUNCH_LOOKUP_SECONDS = 30
+WARMUP_SETTLE_SECONDS = 2
+MARKETPLACE_UPGRADE_SECONDS = 180
 DRAFT_CLEARS = 5
 DRAFT_CLEAR_SETTLE_SECONDS = 1
 LOST_SETTLE_SECONDS = 2
 RESULT_STATES = {"done", "ready", "blocked", "merged", "working"}
 RESULT_LIMIT = 8192
+REVIEW_SOURCES = ("claude", "agy", "codex")
+TIMING_DATA_ERRORS = (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError)
+PR_REFERENCE = re.compile(r"\b(?:PR|pull request)\s*[#-]?\d+\b|/pulls?/\d+\b", re.IGNORECASE | re.ASCII)
+NO_WORK_PREFIX = re.compile(
+    r"^\s*(?:no (?:eligible )?(?:work|changes)\b|작업 없음|처리할 (?:작업|이슈)(?:이|가)? 없)",
+    re.IGNORECASE,
+)
 WAIT_DEFAULT = ("ready", "blocked", "merged", "idle", "stop")
 WAIT_OUTCOMES = (*WAIT_DEFAULT, "done")
 WAIT_POLL_SECONDS = 2
 WAIT_TIMEOUT_SECONDS = 1800
 TASK_COMMANDS = {"claude": ("/dev:task-next", "/dev:task-new"), "codex": ("$task-next", "$task-new")}
+REVIEW_COMMANDS = {"/dev:task-review", "$task-review"}
+DEFAULT_GIT_LIMITS = ("dispatch-default: through merge (commit, feature-push, pr-write, and base-merge "
+                      "after the review cycle passes); the user stated no Git limits")
+STANDING_REVIEW_TRANSFER = (
+    "Standing user approval (2026-11-28): invoking task-review, directly or through a task-next or "
+    "task-new cycle, authorizes sending this repository's change diff, relevant source, Sprint Contract "
+    "and root REVIEW.md to the required independent reviewers: Anthropic Claude CLI, OpenAI Codex CLI "
+    "and Google Antigravity. An explicit user prohibition in the original request and the repository's "
+    "data-sharing policy override it."
+)
 BANNED_MODELS = ("fable", "astra")
 CODEX_FAMILIES = ("luna", "terra", "sol")
 CODEX_SLUG = re.compile(r"gpt-(\d+(?:\.\d+)*)-([a-z]+)")
@@ -133,7 +182,9 @@ def child_argv(cli, model, effort, message, keep_connectors, result=None, *, tru
             raise SystemExit("codex takes no first message at launch; use dispatch.py send")
         # Herdr requires foreground Codex so commands execute inside its terminal.
         argv = ["codex", "--no-daemon", "--no-alt-screen", "--approve-for-me", "-m", model,
-                "-c", f"model_reasoning_effort={effort}"]
+                "-c", f"model_reasoning_effort={effort}",
+                "-c", 'shell_environment_policy.set.PYTHONUTF8="1"',
+                "-c", 'shell_environment_policy.set.PYTHONIOENCODING="utf-8"']
         if trust_hooks:
             argv.append("--dangerously-bypass-hook-trust")
         return argv
@@ -142,7 +193,13 @@ def child_argv(cli, model, effort, message, keep_connectors, result=None, *, tru
     settings = dict(CLAUDE_SETTINGS)
     if keep_connectors:
         del settings["disableClaudeAiConnectors"]
-    report = ["--append-system-prompt", report_instruction(result)] if result else []
+    report = []
+    if result:
+        acknowledge = shlex.join([sys.executable, "-I", str(Path(__file__).resolve()), "timing",
+                                  str(result.with_name("run.json")), "delivered"])
+        report = ["--append-system-prompt", f"On receipt of the task, before starting work, run `{acknowledge}`. "
+                  "If the acknowledgment fails, report unavailable startup timing and continue the task. "
+                  + report_instruction(result)]
     return ["claude", "--model", model, "--effort", effort,
             "--settings", json.dumps(settings, separators=(",", ":")), *report, message]
 
@@ -170,7 +227,8 @@ def installed_plugin_versions():
     """Return {plugin: newest installed version} from the Codex plugin cache."""
     versions = {}
     try:
-        plugins = sorted(entry for entry in plugin_cache().iterdir() if entry.is_dir())
+        plugins = sorted(entry for entry in plugin_cache().iterdir()
+                         if entry.name in pinned_wave.PLUGINS and entry.is_dir())
     except OSError:
         return versions
     for plugin in plugins:
@@ -194,6 +252,46 @@ def plugin_drift(run):
     removed = [plugin for plugin, version in sorted(started.items())
                if not (plugin_cache() / plugin / version).is_dir()]
     return changed, removed
+
+
+@contextmanager
+def lock_shared_cache(home):
+    try:
+        home.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except OSError as error:
+        raise SystemExit(f"cannot initialize the shared Codex cache lock: {error}") from None
+    with lock_run(home / "dispatch-shared-cache.json", wait=LAUNCH_LOOKUP_SECONDS, label="shared Codex cache"):
+        yield
+
+
+def shared_cache_children(label):
+    try:
+        terminals = hc_json("ls", "--label", label, timeout=LAUNCH_LOOKUP_SECONDS)["terminals"]
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        raise SystemExit(f"cannot check the shared Codex cache for live waves: {error}") from None
+    return [terminal for terminal in terminals if terminal.get("state") == "live"]
+
+
+def require_shared_cache_available(children, *, parent=None, preparing=False):
+    others = [terminal["address"] for terminal in children
+              if preparing or parent is None or terminal.get("parent") != parent]
+    if others:
+        raise SystemExit("shared-cache Codex startup withheld: a live wave uses this cache "
+                         f"({', '.join(others)}); wait for it to finish or use a pinned wave"
+                         + ("; use --parent to associate siblings with a home session" if not preparing and parent is None else ""))
+
+
+def verify_shared_cache_versions(home, installed):
+    try:
+        prepared = json.loads((home / "dispatch-prepared-cache.json").read_text(encoding="utf-8"))
+        repo = Path(prepared["repo"])
+        expected = shared_codex.remote_versions(repo, prepared["versions"])
+    except (OSError, ValueError, KeyError, TypeError, pinned_wave.PinError, subprocess.SubprocessError) as error:
+        raise SystemExit("shared-cache Codex startup withheld: cannot verify marketplace versions for the live wave; "
+                         f"prepare the cache between waves or use a pinned wave ({error})") from None
+    if installed != prepared["versions"] or any(installed.get(name) != version for name, version in expected.items()):
+        raise SystemExit(f"shared-cache Codex startup withheld: marketplace versions changed ({expected}); "
+                         "wait for the live wave to finish or use a pinned wave")
 
 
 def resolve_codex_model(model):
@@ -251,8 +349,12 @@ def report_instruction(result, *, require_review_sources=False):
 
 
 def write_json(path, data):
+    write_atomic(path, json.dumps(data, ensure_ascii=False))
+
+
+def write_atomic(path, content):
     temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    temporary.write_text(content, encoding="utf-8")
     temporary.replace(path)
 
 
@@ -267,21 +369,89 @@ def load_run(path):
 
 
 @contextmanager
-def lock_run(path):
-    with path.with_suffix(".lock").open("a+b") as lock:
-        lock.seek(0)
-        try:
-            if os.name == "nt":
-                import msvcrt
+def lock_run(path, *, wait=0, label="dispatch receipt"):
+    try:
+        lock = path.with_suffix(".lock").open("a+b")
+    except OSError as error:
+        raise SystemExit(f"cannot open {label} lock for {path}: {error}") from None
+    with lock:
+        deadline = time.monotonic() + wait if wait else None
+        while True:
+            lock.seek(0)
+            try:
+                if os.name == "nt":
+                    import msvcrt
 
-                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
 
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as error:
-            raise SystemExit(f"cannot lock dispatch receipt {path}: {error}") from None
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as error:
+                remaining = deadline - time.monotonic() if deadline is not None else 0
+                if remaining <= 0 or error.errno not in {errno.EACCES, errno.EAGAIN}:
+                    raise SystemExit(f"cannot lock {label} {path}: {error}") from None
+                time.sleep(min(SCREEN_POLL_SECONDS, remaining))
         yield
+
+
+def timing_path(receipt):
+    return receipt.with_name("timing.json")
+
+
+def record_timing(receipt, update, *args, at=None):
+    path = timing_path(receipt)
+    with lock_run(path, wait=10, label="dispatch timing"):
+        data = phase_timing.read(path)
+        before = serialize_result(data)
+        value = update(data, *args, phase_timing.now_ms() if at is None else at)
+        after = serialize_result(data)
+        if before != after:
+            write_atomic(path, after)
+        return value
+
+
+def mark_timing(receipt, field, *, at=None):
+    try:
+        record_timing(receipt, phase_timing.mark, field, at=at)
+    except (*TIMING_DATA_ERRORS, SystemExit) as error:
+        print(f"dispatch timing unavailable: {error}", file=sys.stderr)
+
+
+def timing_report(receipt, result):
+    try:
+        return phase_timing.report(phase_timing.read(timing_path(receipt)), result)
+    except TIMING_DATA_ERRORS as error:
+        return {"final_head": None, "launches": [], "merge": None, "error": str(error)}
+
+
+def timing(args):
+    receipt = Path(args.run).resolve()
+    try:
+        if args.event == "delivered":
+            if not timing_path(receipt).is_file():
+                raise ValueError("no timing record for this launch")
+            record_timing(receipt, phase_timing.mark, "delivered_ms")
+            return
+        run = load_run(receipt)
+        if args.event == "start":
+            print(record_timing(receipt, phase_timing.start, args.phase, args.sha, args.tree))
+        elif args.event == "finish":
+            record_timing(receipt, phase_timing.finish, args.phase, args.attempt, args.outcome)
+        elif args.event == "merged":
+            record_timing(receipt, phase_timing.merged, args.head)
+        elif args.event == "bind-review":
+            if not phase_timing.HEAD.fullmatch(args.head):
+                raise ValueError("expected a full head SHA")
+            tree = subprocess.check_output(["git", "rev-parse", "--verify", f"{args.head}^{{tree}}"],
+                                           encoding="utf-8", stderr=subprocess.DEVNULL).strip()
+            record_timing(receipt, phase_timing.bind_review, args.attempt, args.head, tree)
+        else:
+            result, _ = current_result(receipt, run)
+            print(json.dumps(timing_report(receipt, result), ensure_ascii=False))
+    except (*TIMING_DATA_ERRORS, subprocess.CalledProcessError) as error:
+        raise SystemExit(f"dispatch timing unavailable: {error}") from None
 
 
 def verify_terminal(run, terminal):
@@ -324,23 +494,41 @@ def validate_result(result):
         raise ValueError("invalid status, phase, or summary")
 
 
-def gate_required_reviews(result):
-    status = result["status"]
-    if status not in {"ready", "merged"} and not (status == "done" and result.get("pr")):
-        return result
+def missing_reviews(result):
     sources = result.get("review_sources")
     if not isinstance(sources, dict):
         sources = {}
-    missing = []
-    for reviewer in ("claude", "agy", "codex"):
+    missing = {}
+    for reviewer in REVIEW_SOURCES:
         outcome = sources.get(reviewer)
         if outcome == "complete":
             continue
         reason = " ".join(outcome.split())[:160] if isinstance(outcome, str) else ""
-        missing.append(f"{reviewer}: {reason or 'no completed result'}")
-    if missing:
-        return {**result, "status": "blocked", "phase": "review-sources", "summary": "\n".join(missing)}
-    return result
+        missing[reviewer] = reason or "no completed result"
+    return missing
+
+
+def gate_required_reviews(result):
+    status = result["status"]
+    if status not in {"ready", "merged", "done"}:
+        return result
+    if status == "done" and not result.get("pr"):
+        if NO_WORK_PREFIX.match(result["summary"]):
+            return result
+        if not (result.get("head") or PR_REFERENCE.search(result["summary"])
+                or PR_REFERENCE.search(json.dumps(result.get("evidence"), ensure_ascii=False))):
+            return result
+    missing = missing_reviews(result)
+    if not missing:
+        return result
+    reasons = [f"{reviewer}: {reason}" for reviewer, reason in missing.items()]
+    if status == "ready" or (result.get("pr") and "review" in result):
+        return {**result, "status": "blocked", "phase": "review-sources", "summary": "\n".join(reasons)}
+    return {**result, "review_warning": " | ".join(reasons)}
+
+
+def serialize_result(result):
+    return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
 
 
 def review_record(result):
@@ -374,10 +562,8 @@ def gate_review_result(result, *, require_review_sources):
     if require_review_sources:
         result = gate_required_reviews(result)
     status = result["status"]
-    if (status in {"done", "merged"} and not require_review_sources
-            and "review_sources" not in result and "review" not in result):
-        return result
-    if status == "ready" or (result.get("pr") and status in {"done", "merged"}):
+    # Legacy completions remain collectable with any required-source warnings.
+    if status == "ready" or (status in {"done", "merged"} and result.get("pr") and "review" in result):
         if reason := review_problem(result, require_review_sources=require_review_sources):
             return {**result, "status": "blocked", "phase": "review-state", "summary": reason}
     return result
@@ -398,10 +584,27 @@ def report_review(args):
         receipt = path.with_name("run.json")
         # Preserve the three-source gate for callers that do not have a dispatch receipt.
         required = load_run(receipt).get("require_review_sources", False) if receipt.exists() else True
-        result = gate_review_result(result, require_review_sources=required)
-        if len(json.dumps(result, ensure_ascii=False).encode("utf-8")) > RESULT_LIMIT:
+        gated = gate_review_result(result, require_review_sources=required)
+        serialized = serialize_result(gated)
+        if gated is not result and len(serialized.encode("utf-8")) > RESULT_LIMIT:
+            phase = gated["phase"]
+            names = ", ".join(missing_reviews(result)) if phase == "review-sources" else "Independent review"
+            gated["summary"] = f"{names}: see review record"
+            serialized = serialize_result(gated)
+            if len(serialized.encode("utf-8")) > RESULT_LIMIT:
+                with tempfile.NamedTemporaryFile(
+                    dir=path.parent, prefix="review-details-", suffix=".json", mode="w", encoding="utf-8", delete=False,
+                ) as details:
+                    details.write(serialized)
+                details_path = Path(details.name)
+                serialized = serialize_result({
+                    "status": "blocked", "phase": phase,
+                    "summary": f"{names}: see {details_path.name} for review details",
+                    "evidence": str(details_path.resolve()),
+                })
+        if len(serialized.encode("utf-8")) > RESULT_LIMIT:
             raise ValueError("result exceeds 8 KiB")
-        write_json(path, result)
+        write_atomic(path, serialized)
     except (OSError, ValueError) as error:
         raise SystemExit(f"cannot write dispatch result {path}: {error}") from None
 
@@ -423,6 +626,13 @@ def read_result(path):
         return None, None
     except (OSError, ValueError) as error:
         raise SystemExit(f"cannot read dispatch result {result_path}: {error}") from None
+
+
+def current_result(path, run):
+    result, written = read_result(path)
+    if written == run.get("previous_result"):
+        return None, None
+    return result, written
 
 
 def hc_json(*args, timeout=None):
@@ -502,8 +712,16 @@ def first_prompt(cli, message, handoff):
               "Git limits": handoff["git_limits"]}
     if "additional_git_limits" in handoff:
         fields["Additional Git limits (verbatim)"] = handoff["additional_git_limits"]
+    review_command = message.split(maxsplit=1)[0] in REVIEW_COMMANDS
+    if (handoff.get("review_transfer_standing") or (review_command and "review_transfer_approval" not in handoff
+                                                    and not handoff.get("no_standing_review_approval"))):
+        fields["Review transfer approval (standing)"] = STANDING_REVIEW_TRANSFER
     if "review_transfer_approval" in handoff:
         fields["Review transfer approval (verbatim)"] = handoff["review_transfer_approval"]
+    if reservation := handoff.get("queue_reservation"):
+        if message.splitlines()[0].split() != [commands[0], "--tree", reservation["ref"]]:
+            raise SystemExit("first task must match the reserved worktree unit")
+        fields["Queue reservation"] = reservation
     prompt = (f"{message}\n\nHandoff metadata (JSON):\n"
               "Task-cycle mode and flags come exclusively from the invocation above.\n"
               "<dispatch-handoff>\n"
@@ -525,6 +743,9 @@ def first_prompt(cli, message, handoff):
             "(including Worktree cycle). After implementation, follow cycle.md → Version bump, Cleanup, "
             "and Validation evidence, then Step 4 and cycle.md → Hand off into task-review-cycle → Caller gate."
         )
+    if reservation:
+        prompt += ("\n\nUse task-next's references/tree.md → Reserved dispatch intake. Claim it with the installed "
+                   "queue_backend.py before creating or selecting a worktree. Stop on a claim mismatch.")
     extra_lines = handoff.get("extra_lines")
     if extra_lines:
         if cli == "codex":
@@ -577,9 +798,13 @@ def launch_handoff(args, cwd):
         handoff["git_limits"] = "implementation-only"
         if not no_authority:
             handoff["additional_git_limits"] = args.git_limits
+    elif handoff["work_kind"] in {"queue", "new"} and args.git_limits is None:
+        if grant_recorded:
+            raise SystemExit("--git-grant-recorded needs the verbatim grant in --git-limits")
+        handoff["git_limits"] = DEFAULT_GIT_LIMITS
     elif handoff["work_kind"] in {"queue", "new"} and (no_authority or not (standard_limits or grant_recorded)):
-        raise SystemExit("--git-limits must carry a verified user grant; "
-                         "use --git-grant-recorded with a verbatim free-form grant, or "
+        raise SystemExit("--git-limits must carry a verified user grant; omit it for the dispatch default "
+                         "through merge, use --git-grant-recorded with a verbatim free-form grant, or "
                          "use --no-git-writes for implementation-only work")
     elif not limits:
         raise SystemExit("--git-limits must not be blank")
@@ -588,6 +813,10 @@ def launch_handoff(args, cwd):
         if not approval.strip():
             raise SystemExit("--review-transfer-approval must not be blank")
         handoff["review_transfer_approval"] = approval
+    elif getattr(args, "no_standing_review_approval", False):
+        handoff["no_standing_review_approval"] = True
+    elif handoff["work_kind"] in {"queue", "new"}:
+        handoff["review_transfer_standing"] = True
     extra_lines = configured_handoff_lines(Path.cwd(), cwd)
     if extra_lines:
         handoff["extra_lines"] = extra_lines
@@ -659,6 +888,119 @@ def launch_quota(args, model):
 
 
 PIN_ERRORS = (pinned_wave.PinError, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError)
+
+
+def close_codex_warmup(run):
+    address = run["address"]
+    # Retry a transient read, and close only when Herdr still confirms ownership.
+    try:
+        terminal = hc_json("get", address, timeout=CLOSE_WAIT_SECONDS)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        terminal = hc_json("get", address, timeout=CLOSE_WAIT_SECONDS)
+    verify_terminal(run, terminal)
+    if terminal["state"] != "finished":
+        hc_json("kill", address, timeout=CLOSE_WAIT_SECONDS)
+        wait_for_terminal_exit(run)
+    hc_json("rm", address, timeout=CLOSE_WAIT_SECONDS)
+
+
+def warmup_codex(binary, cwd, parent, label):
+    name = f"dispatch-warmup-{secrets.token_hex(4)}"
+    started = time.time_ns() // 1_000_000 - 1000
+    try:
+        reply = hc_json("run", "--bg", "--no-notify", "--name", name, "--cwd", str(cwd),
+                        "--label", label, *(["--parent", parent] if parent else ["--no-parent"]),
+                        binary, "--no-daemon", "--no-alt-screen", timeout=LAUNCH_LOOKUP_SECONDS)
+        address = reply["address"]
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        raise ValueError(f"warm-up launch could not be confirmed; check {name} in Herdr: {error}") from None
+
+    run = {"address": address, "name": name, "parent": parent, "launched_ms": started}
+    startup_error = None
+    try:
+        terminal = hc_json("get", address, timeout=LAUNCH_LOOKUP_SECONDS)
+        verify_terminal(run, terminal)
+        deadline = time.monotonic() + LAUNCH_LOOKUP_SECONDS
+        settled_after = None
+        while (remaining := deadline - time.monotonic()) > 0:
+            screen = hc_json("read", "--lines", "0", address, timeout=remaining)
+            if screen["complete"] and screen["how"] == "screen":
+                content = screen["text"]
+                failure = next((line for line in codex_hook_rows(content.splitlines())
+                                if RUNTIME_HOOK_BLOCKER.match(line)), None)
+                if failure:
+                    raise ValueError(f"warm-up startup hook failed: {failure}")
+                if codex_screen(content) in {"ready", "warning", "hooks"}:
+                    now = time.monotonic()
+                    if settled_after is None:
+                        settled_after = now + WARMUP_SETTLE_SECONDS
+                    if now >= settled_after:
+                        return
+                else:
+                    settled_after = None
+            else:
+                settled_after = None
+            terminal = hc_json("get", address, timeout=max(0.01, deadline - time.monotonic()))
+            verify_terminal(run, terminal)
+            if terminal["state"] == "finished":
+                raise ValueError("warm-up exited before the startup screen")
+            time.sleep(min(SCREEN_POLL_SECONDS, max(0, deadline - time.monotonic())))
+        raise ValueError("timed out waiting for Codex startup")
+    except (OSError, ValueError, KeyError, SystemExit, subprocess.SubprocessError) as error:
+        startup_error = error
+        raise
+    finally:
+        try:
+            close_codex_warmup(run)
+        except (OSError, ValueError, KeyError, SystemExit, subprocess.SubprocessError) as error:
+            detail = f"could not close warm-up {address} ({name}): {error}; inspect it in Herdr"
+            raise ValueError(f"{startup_error}; {detail}" if startup_error else detail) from None
+
+
+def prepare_codex(args):
+    home = codex_home().resolve()
+    label = shared_codex.cache_label(home)
+    parent = args.parent or os.environ.get("HC_TERMINAL_ID") or None
+    try:
+        cwd = Path(args.cwd).expanduser().resolve(strict=True)
+        repo = Path(args.repo).expanduser().resolve(strict=True)
+        binary = shutil.which("codex")
+        if binary is None:
+            raise ValueError("Codex CLI executable not found")
+        with lock_shared_cache(home):
+            require_shared_cache_available(shared_cache_children(label), preparing=True)
+            before = installed_plugin_versions()
+            expected = shared_codex.remote_versions(repo, before)
+            baseline_path = home / "dispatch-trusted-hooks.json"
+            baseline = json.loads(baseline_path.read_text(encoding="utf-8")) if baseline_path.exists() else {}
+            try:
+                _, old_hooks = shared_codex.inventory(binary, home, cwd, before)
+            except (OSError, ValueError, KeyError):
+                if installed_plugin_versions() == before:
+                    raise
+                # The inventory process can race Codex's own startup refresh.
+                old_hooks = {}
+            baseline.update({name: info for name, info in old_hooks.items() if info["trusted"]})
+            write_json(baseline_path, baseline)
+            current = installed_plugin_versions()
+            if any(current.get(name) != version for name, version in expected.items()):
+                shared_codex.command([binary, "plugin", "marketplace", "upgrade", shared_codex.MARKET],
+                                     cwd=cwd, timeout=MARKETPLACE_UPGRADE_SECONDS)
+            warmup_codex(binary, cwd, parent, label)
+            installed = installed_plugin_versions()
+            if any(installed.get(name) != version for name, version in expected.items()):
+                raise ValueError(f"installed versions after warm-up {installed} differ from expected {expected}")
+            pending, snapshot = shared_codex.inventory(binary, home, cwd, installed, require_guard="guard" in expected)
+            if installed_plugin_versions() != installed:
+                raise ValueError("the installed plugins changed during final hook discovery; prepare the wave again")
+            diffs = shared_codex.trusted_diff(pending, snapshot, baseline)
+            baseline.update({name: info for name, info in snapshot.items() if info["trusted"]})
+            write_json(baseline_path, baseline)
+            write_json(home / "dispatch-prepared-cache.json", {"repo": str(repo), "versions": installed})
+    except (OSError, ValueError, KeyError, TypeError, pinned_wave.PinError, subprocess.SubprocessError) as error:
+        raise SystemExit(f"cannot prepare shared-cache Codex: {error}") from None
+    print(json.dumps({"before": before, "expected": expected, "installed": installed, "upgraded": before != installed,
+                      "pending_hooks": pending, "hook_content_diffs": diffs}, ensure_ascii=False))
 
 
 def pin(args):
@@ -734,6 +1076,17 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
     home = args.parent or os.environ.get("HC_TERMINAL_ID") or None
     result_path = None
     child = None
+    previous = getattr(args, "relaunch_from", None)
+    if previous:
+        previous = Path(previous).expanduser().resolve()
+        load_run(previous)
+        try:
+            history = phase_timing.read(timing_path(previous))
+        except TIMING_DATA_ERRORS as error:
+            print(f"warning: cannot carry dispatch timing from {previous}: {error}", file=sys.stderr)
+            history = phase_timing.empty_history()
+    else:
+        history = phase_timing.empty_history()
     if wave:
         codex_args = child_argv(args.cli, model, args.effort, message, args.keep_connectors)
         child = [wave["binary"], *codex_args[1:]]
@@ -759,6 +1112,8 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
         child = child_argv(args.cli, model, args.effort, message, args.keep_connectors, result_path,
                            trust_hooks=trust_hooks)
     labels = {"title": title} if title else {}
+    shared_home = codex_home().resolve() if args.cli == "codex" and not wave else None
+    shared_label = shared_codex.cache_label(shared_home) if shared_home is not None else None
     if wave:
         labels[pinned_wave.WAVE_LABEL] = wave["market"]
         params = {"argv": child, "cwd": str(cwd.resolve()), "name": name, "parent": home,
@@ -768,7 +1123,7 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
         argv = ["hc", "connect"]
     else:
         argv = ["hc", "run", "--bg", "--json", "--no-notify", "--outlive-parent",
-                "--name", name, "--cwd", str(cwd), *(["--label", f"title={title}"] if title else []),
+                "--name", name, "--cwd", str(cwd), *(["--label", f"title={title}"] if title else []), *(["--label", shared_label] if shared_label else []),
                 *(["--parent", home] if home else ["--no-parent"]), *child]
     if args.dry_run:
         preview = {"name": name, **resolved, **quota, "argv": argv}
@@ -787,14 +1142,40 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
             write_json(wave_path, wave)
         except OSError as error:
             raise SystemExit(f"pinned launch withheld; could not register child: {error}") from None
-    versions = installed_plugin_versions() if args.cli == "codex" and not wave else {}
-    launched_ms = time.time_ns() // 1_000_000 - 1000  # slack for clock rounding between processes
+    versions = {}
+    started_ms = phase_timing.now_ms()
+    try:
+        phase_timing.new_launch(history, started_ms)
+    except TIMING_DATA_ERRORS as error:
+        print(f"warning: cannot carry dispatch timing from {previous}: {error}", file=sys.stderr)
+        history = phase_timing.new_launch(phase_timing.empty_history(), started_ms)
+
+    def save_launch_timing():
+        try:
+            write_json(timing_path(receipt), history)
+        except OSError as error:
+            print(f"dispatch timing unavailable: {error}", file=sys.stderr)
+
+    if args.cli == "claude":
+        save_launch_timing()
+    launched_ms = started_ms - 1000  # slack for clock rounding between processes
     try:
         if wave:
             reply = hc_rpc("terminal.run", params, LAUNCH_LOOKUP_SECONDS)
         else:
-            stdout = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", check=True,
-                                    timeout=LAUNCH_LOOKUP_SECONDS).stdout
+            with lock_shared_cache(shared_home) if shared_home is not None else nullcontext():
+                if shared_home is not None:
+                    children = shared_cache_children(shared_label)
+                    require_shared_cache_available(children, parent=home)
+                    versions = installed_plugin_versions()
+                    if children:
+                        verify_shared_cache_versions(shared_home, versions)
+                stdout = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", check=True,
+                                        timeout=LAUNCH_LOOKUP_SECONDS).stdout
+    except SystemExit:
+        with suppress(OSError):
+            result_path.parent.rmdir()
+        raise
     except (OSError, ValueError, AttributeError, subprocess.SubprocessError) as error:
         raise SystemExit(f"hc run failed ({error}); a child may be running, so do not retry the launch. "
                          f"Find terminal {name!r} with hc ls"
@@ -830,19 +1211,22 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
         terminal, lookup_error = {}, error
     run = {"name": name, "address": address, "parent": home,
            "created_ms": terminal.get("created_ms"), "cli": args.cli, **resolved,
-           "effort": args.effort, "sent": args.cli == "claude", "screen_reads": 0, **quota}
+           "effort": args.effort, "sent": args.cli == "claude", "screen_reads": 0,
+           "cwd": str(cwd.resolve()), **quota}
     if trust_hooks:
         run["trust_hooks"] = True
     if lookup_error is not None:
         run["launched_ms"] = launched_ms
     if wave:
-        run.update(wave=str(wave_path), wave_trusted_at_start=pinned_startup, cwd=str(cwd.resolve()))
+        run.update(wave=str(wave_path), wave_trusted_at_start=pinned_startup)
     elif versions:
         run["plugin_versions"] = versions
     if title:
         run["title"] = title
     if args.cli == "codex" and handoff["work_kind"] != "standalone":
         run["require_review_sources"] = True
+    if args.cli != "claude":
+        save_launch_timing()
     try:
         write_json(receipt, {**run, "handoff": handoff} if args.cli == "codex" else run)
     except OSError as error:
@@ -987,6 +1371,138 @@ def print_screen_tail(address, text, run):
             print(f"  {trimmed!r}", file=sys.stderr)
 
 
+def transcript_end(lines, cli):
+    if cli == "codex":
+        footer = footer_boundary(lines, -1)
+        for index in reversed(range(len(lines))):
+            row = lines[index]
+            if row.lstrip().startswith(CODEX_OUTPUT_MARKERS) or row.startswith("  ›"):
+                break
+            if row.startswith("›"):
+                placeholder = row[1:].strip() == "Ask Codex to do anything"
+                if (footer_boundary(lines, index, placeholder=placeholder) is not None
+                        or (placeholder and index == len(lines) - 1)):
+                    return index
+                break
+        return footer if footer is not None else len(lines)
+    elif cli == "claude":
+        rules = [index for index, row in enumerate(lines) if re.fullmatch(r"─{10,}", row)]
+        if len(rules) >= 2:
+            top, bottom = rules[-2:]
+            if top + 1 < bottom and lines[top + 1].startswith("❯"):
+                start = top
+                if start and re.fullmatch(r"\s+\S+ \w+ · /effort", lines[start - 1]):
+                    start -= 1
+                if start >= 2 and lines[start - 1].startswith("Context ") and lines[start - 2].startswith("["):
+                    start -= 2
+                    if start and lines[start - 1].strip() in {"[-]", "[+]"}:
+                        start -= 1
+                elif (start and (start == 1 or not lines[start - 2])
+                      and re.match(r"^\s*(?:~|…|[A-Za-z]:)?[/\\]\S.* [·│].* \d+%", lines[start - 1])):
+                    start -= 1
+                return start
+    return len(lines)
+
+
+def prompt_block_end(lines, start, cli):
+    end = start + 1
+    while end < len(lines) and (not lines[end] or lines[end].startswith("  ")):
+        row = lines[end].lstrip()
+        if row.startswith("⎿" if cli == "claude" else "└") or HOOK_BLOCKER.match(row):
+            break
+        if cli == "codex" and not lines[end - 1] and row.startswith(CODEX_OUTPUT_MARKERS):
+            break
+        end += 1
+    return end
+
+
+def filtered_transcript(text, cli):
+    lines = [line.rstrip() for line in text.rstrip().splitlines()]
+    lines = lines[:transcript_end(lines, cli)]
+    filtered = []
+    index = 0
+    first = next((i for i, row in enumerate(lines) if row), len(lines))
+    if first < len(lines) and lines[first].startswith("  "):
+        end = prompt_block_end(lines, first, cli)
+        if any(line.strip() in {"<dispatch-handoff>", "</dispatch-handoff>"}
+               or line.strip().startswith("Write progress at phase boundaries and the final report as UTF-8 JSON to ")
+               for line in lines[first:end]):
+            index = end
+    progress = CODEX_PROGRESS if cli == "codex" else CLAUDE_PROGRESS
+    while index < len(lines):
+        row = lines[index]
+        if progress.fullmatch(row):
+            index += 1
+            continue
+        if cli == "codex" and not filtered and re.match(r"^\s*[╭│]?\s*>_ OpenAI Codex \(v", row):
+            index += 1
+            while index < len(lines) and lines[index].lstrip().startswith(("│", "╰")):
+                index += 1
+            if index < len(lines) and lines[index].startswith("     "):
+                index += 1
+            continue
+        if cli == "codex" and not filtered and row.startswith("  Tip:"):
+            index += 1
+            while index < len(lines) and lines[index].startswith("  "):
+                index += 1
+            continue
+        if cli == "claude" and not filtered and re.match(r"^\s*▐▛███▛█\s+Claude Code v", row):
+            index += 1
+            while index < len(lines) and lines[index].lstrip().startswith(("▝▜", "▝▝")):
+                index += 1
+            continue
+        if row.startswith("›" if cli == "codex" else "❯"):
+            end = prompt_block_end(lines, index, cli)
+            block = lines[index:end]
+            if (any(line.strip() == "<dispatch-handoff>" for line in block)
+                    and any(line.strip() == "Handoff metadata (JSON):" for line in block)):
+                index = end
+                continue
+        if row or (filtered and filtered[-1]):
+            filtered.append(row)
+        index += 1
+    if filtered and not filtered[-1]:
+        filtered.pop()
+    return filtered
+
+
+def transcript_offset(previous, current):
+    for size in range(min(len(previous), len(current)), 0, -1):
+        prefix = current[:size]
+        if previous[-size:] == prefix or previous[-size - 1:-1] == prefix:
+            return size
+    for index, (before, after) in enumerate(zip(previous, current)):
+        if before != after:
+            return index
+    return min(len(previous), len(current))
+
+
+def peek(args):
+    path = Path(args.run).resolve()
+    run = load_run(path)
+    address = run["address"]
+    previous = run.get("peek_cursor", [])
+    try:
+        verify_terminal(run, hc_json("get", address, timeout=LAUNCH_LOOKUP_SECONDS))
+        snapshot = hc_json("read", "--lines", "120", address, timeout=LAUNCH_LOOKUP_SECONDS)
+        terminal = hc_json("get", address, timeout=LAUNCH_LOOKUP_SECONDS)
+        verify_terminal(run, terminal)
+        lines = filtered_transcript(snapshot["text"], run["cli"])
+        row_fingerprints = [hashlib.sha256(row.encode("utf-8")).hexdigest() for row in lines]
+        start = transcript_offset(previous, row_fingerprints) if args.since_last else 0
+        with lock_run(path):
+            saved = load_run(path)
+            verify_terminal(saved, terminal)
+            if saved.get("closed_reason") != run.get("closed_reason") or saved.get("peek_cursor", []) != previous:
+                raise SystemExit(f"{address}: receipt changed during peek; try again")
+            saved["peek_cursor"] = row_fingerprints
+            write_json(path, saved)
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        raise SystemExit(f"{address}: could not peek at the terminal ({error})") from None
+    if new_lines := lines[start:]:
+        print("\n".join(new_lines).lstrip("\n"))
+
+
 def startup_composer(text, *, draft=False):
     """Herdr may count initial Codex startup as turn 1 before any prompt."""
     prompts = [line.strip() for line in text.splitlines() if line.lstrip().startswith("›")]
@@ -995,15 +1511,24 @@ def startup_composer(text, *, draft=False):
             and not any(line.lstrip().startswith(("•", "■")) for line in text.splitlines()))
 
 
-def is_hook_bypass_notice(text):
+def startup_warning_page(text):
     rows = [line.strip() for line in text.splitlines() if line.strip()]
-    title = "Warnings · 1 of 1 · Startup"
-    if rows.count(title) != 1:
-        return False
-    body = rows[rows.index(title) + 1:]
+    titles = [index for index, row in enumerate(rows) if WARNING_VIEW_TITLE.fullmatch(row)]
+    if len(titles) != 1:
+        return None
+    index = titles[0]
+    title = STARTUP_WARNING_TITLE.fullmatch(rows[index])
+    if not title:
+        return None
+    body = rows[index + 1:]
     if body and WARNING_VIEW_FOOTER.fullmatch(body[-1]):
         body.pop()
-    return " ".join(body) == HOOK_BYPASS_NOTICE
+    notice = " ".join(body)
+    is_bypass = notice == HOOK_BYPASS_NOTICE
+    if is_bypass or UNSTABLE_FEATURES_NOTICE.fullmatch(notice):
+        page, count = map(int, title.groups())
+        return page, count, is_bypass
+    return None
 
 
 def send(args):
@@ -1100,6 +1625,9 @@ def send_task(args, run_path):
             if not started and (not result or written == run.get("previous_result")):
                 raise SystemExit("previous delivery is unconfirmed; inspect the child's composer before resuming")
             run["sent"] = True
+            acknowledged = run.get("send_acknowledged_ms")
+            if run.get("sent_continuation") is False and type(acknowledged) is int:
+                mark_timing(run_path, "delivered_ms", at=acknowledged)
             write_json(run_path, run)
         if not resend and run["sent"] != continuation:
             raise SystemExit("use --continue only after the first task is confirmed")
@@ -1110,8 +1638,11 @@ def send_task(args, run_path):
     clears = 0
     last_clear = None
     warning_turn = None
+    warning_count = None
+    warning_page = 0
+    saw_bypass_notice = False
     warning_withheld = f"{address}: task withheld; inspect the Codex warning with F2"
-    dismissed_bypass_notice = False
+    dismissed_startup_warnings = False
     try:
         deadline = time.monotonic() + 30
         while True:
@@ -1125,27 +1656,41 @@ def send_task(args, run_path):
                 raise SystemExit(f"{address}: task withheld; inspect the Codex hook status with /hooks")
             if screen in {"warning", "warning-view"}:
                 if (not run or run.get("wave") or run.get("trust_hooks") is not True or run["sent"] is not False
-                        or dismissed_bypass_notice):
+                        or dismissed_startup_warnings):
                     raise SystemExit(warning_withheld)
                 if screen == "warning-view":
-                    if not is_hook_bypass_notice(text):
+                    position = startup_warning_page(text)
+                    if position is None:
                         raise SystemExit(warning_withheld)
-                    terminal = hc_json("get", address)
-                    verify_terminal(run, terminal)
-                    # Herdr can report working while the local warning viewer owns the input.
-                    turn = terminal["turn"]
-                    if (terminal["state"] != "live" or turn not in (0, 1)
-                            or (warning_turn is not None and turn != warning_turn)):
+                    page, count, is_bypass = position
+                    if (page > count or page not in (warning_page, warning_page + 1)
+                            or (warning_count is not None and count != warning_count)):
                         raise SystemExit(warning_withheld)
-                    hc_json("keys", address, "esc")
-                    warning_turn = None
-                    dismissed_bypass_notice = True
-                    time.sleep(SCREEN_POLL_SECONDS)
-                    continue
-                footer = "\n".join(text.rstrip().splitlines()[-2:])
-                if WARNING_FOOTER.findall(footer) != ["1"]:
-                    raise SystemExit(warning_withheld)
-                if warning_turn is None:
+                    if page > warning_page:
+                        saw_bypass_notice = saw_bypass_notice or is_bypass
+                        if page == count and not saw_bypass_notice:
+                            raise SystemExit(warning_withheld)
+                        terminal = hc_json("get", address)
+                        verify_terminal(run, terminal)
+                        # Herdr can report working while the local warning viewer owns the input.
+                        turn = terminal["turn"]
+                        if (terminal["state"] != "live" or turn not in (0, 1)
+                                or (warning_turn is not None and turn != warning_turn)):
+                            raise SystemExit(warning_withheld)
+                        if page == count:
+                            hc_json("keys", address, "esc")
+                            warning_turn = None
+                            dismissed_startup_warnings = True
+                            time.sleep(SCREEN_POLL_SECONDS)
+                            continue
+                        # Codex dismisses visited pages on Esc. Check all pages before closing.
+                        hc_json("keys", address, "right")
+                        warning_turn, warning_count, warning_page = turn, count, page
+                elif warning_turn is None:
+                    footer = "\n".join(text.rstrip().splitlines()[-2:])
+                    counts = WARNING_FOOTER.findall(footer)
+                    if len(counts) != 1 or not (count := int(counts[0])):
+                        raise SystemExit(warning_withheld)
                     terminal = hc_json("get", address)
                     verify_terminal(run, terminal)
                     turn = terminal["turn"]
@@ -1153,7 +1698,7 @@ def send_task(args, run_path):
                             or not (turn == 0 or (turn == 1 and startup_composer(text)))):
                         raise SystemExit(warning_withheld)
                     hc_json("keys", address, "f2")
-                    warning_turn = turn
+                    warning_turn, warning_count = turn, count
             if warning_turn is not None:
                 if time.monotonic() >= deadline:
                     raise SystemExit(warning_withheld)
@@ -1183,7 +1728,7 @@ def send_task(args, run_path):
                 terminal = hc_json("get", address)
                 if run:
                     verify_terminal(run, terminal)
-                if dismissed_bypass_notice and terminal["state"] != "live":
+                if dismissed_startup_warnings and terminal["state"] != "live":
                     raise SystemExit(f"{address}: task withheld; Codex exited after closing the warning")
                 status = (terminal.get("status") or {}).get("state")
                 if resend:
@@ -1252,6 +1797,7 @@ def send_task(args, run_path):
             run["sent_turn"] = sent_turn
             run["sent_continuation"] = continuation
             run["send_acknowledged"] = False
+            run.pop("send_acknowledged_ms", None)
             write_json(run_path, run)
         else:
             print("warning: no dispatch receipt. Use --run to carry handoff metadata", file=sys.stderr)
@@ -1343,16 +1889,19 @@ def send_task(args, run_path):
                     verify_delivery_turn(run, terminal)
                 if run and run["send_acknowledged"]:
                     run["send_acknowledged"] = False
+                    run.pop("send_acknowledged_ms", None)
                     write_json(run_path, run)
                 print("warning: the submission left no trace; sending it once more", file=sys.stderr)
             send_error = None
             try:
-                hc_json("send", *guard, "--", address, message)
+                reply = hc_json("send", *guard, "--", address, message)
             except (OSError, subprocess.CalledProcessError, ValueError, KeyError) as error:
                 send_error = error
             else:
                 if run:
                     run["send_acknowledged"] = True
+                    if not continuation and isinstance(reply, dict) and reply.get("started") is True:
+                        run["send_acknowledged_ms"] = phase_timing.now_ms()
                     write_json(run_path, run)
             submitted, saw_trace = confirmed(send_error is not None)
             if not submitted and (attempt or saw_trace or not lost()):
@@ -1363,6 +1912,8 @@ def send_task(args, run_path):
                 if run:
                     run["sent"] = True
                     run["screen_reads"] += screen_reads
+                    if not continuation:
+                        mark_timing(run_path, "delivered_ms", at=run.get("send_acknowledged_ms"))
                     write_json(run_path, run)
                 print(json.dumps({"address": address, "submitted": True, "screen_reads": screen_reads}))
                 return
@@ -1397,17 +1948,32 @@ def brief_report(report):
     status = result.get("status")
     if not status or (status == "done" and report["status"] == "working"):
         status = "finished" if report["state"] == "finished" else report["status"]
-    line = " · ".join((report["address"], *(field(value) or "-" for value in (
-        status, result.get("phase"), result.get("summary"), result.get("pr"), watch_stop_reason(report),
-    ))))
+    fields = (status, result.get("phase"), result.get("summary"), result.get("pr"), watch_stop_reason(report))
+    if warning := result.get("review_warning"):
+        fields += (warning,)
+    measurements = report.get("timing", {})
+    launches = measurements.get("launches", [])
+    if launches:
+        latest = launches[-1]
+        head = measurements["final_head"]
+
+        def last_duration(phase):
+            return next((entry["elapsed_ms"] for launch in reversed(launches)
+                         for entry in reversed(launch[phase]) if not head or entry["head"] == head), None)
+
+        durations = {"startup": latest["startup_ms"], "implementation": latest["implementation_ms"],
+                     "review": last_duration("review"), "ci": last_duration("ci"), "restart": latest["restart_ms"]}
+        summary = " ".join(f"{name}={value}ms" if value is not None else f"{name}=?"
+                           for name, value in durations.items())
+        fields += (summary,)
     review_status = review_record(result).get("status")
     if review_status == "passed" and review_problem(result):
         review_status = "missing"
-    elif result.get("phase") in {"review-state", "review-sources"} and review_status != "pending":
+    elif (result.get("phase") in {"review-state", "review-sources"} or warning) and review_status != "pending":
         review_status = "missing"
     if review_status in ("passed", "missing", "pending"):
-        line += f" · review={review_status}"
-    return line
+        fields += (f"review={review_status}",)
+    return " · ".join((report["address"], *(field(value) or "-" for value in fields)))
 
 
 def reached_outcome(report, outcomes):
@@ -1437,17 +2003,22 @@ def wait(args):
     pending = list(dict.fromkeys(Path(receipt).resolve() for receipt in args.runs))
     deadline = time.monotonic() + args.timeout
     previous = {}
+    progress = sys.stderr if args.first else sys.stdout
     try:
         while pending:
             next_pending = []
             working = None
             for path in pending:
                 report = collect_result(path, False, False, args.stall_minutes, warn_drift=False, deadline=deadline)
+                outcome = reached_outcome(report, args.until)
                 line = brief_report(report)
+                if args.first and outcome:
+                    print(f"{path} · {line}", flush=True)
+                    return
                 if previous.get(path) != line:
-                    print(line, flush=True)
+                    print(line, file=progress, flush=True)
                     previous[path] = line
-                if not reached_outcome(report, args.until):
+                if not outcome:
                     next_pending.append(path)
                     if working is None and report["state"] == "live" and report["status"] == "working":
                         working = report["address"]
@@ -1612,30 +2183,48 @@ def repeated_review_categories(result):
     return sorted(set(earlier["categories"]).intersection(later["categories"]))
 
 
+def recent_missing_codex_hook(address):
+    try:
+        snapshot = hc_json("read", "--lines", "0", address, timeout=2)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+    if snapshot.get("how") != "screen":
+        return False
+    lines = (snapshot.get("text") or "").splitlines()
+    composer = next((index for index in reversed(range(len(lines))) if lines[index].startswith("›")), None)
+    if composer is None or lines[composer][1:].strip() not in {"", "Ask Codex to do anything"}:
+        return False
+    for index in reversed(range(composer)):
+        if lines[index].startswith("›"):
+            break
+        if lines[index].startswith(CODEX_OUTPUT_MARKERS):
+            event = "\n".join(lines[index:composer])
+            return bool(CODEX_HOOK_FAILED.match(event) and CODEX_MISSING_HOOK.search(event))
+    return False
+
+
 def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadline=None):
     run = load_run(path)
     try:
-        result, written = read_result(path)
+        result, written = current_result(path, run)
     except SystemExit as error:
         if not force:
             raise
         print(error, file=sys.stderr)
-        result, written = None, None
-    if written == run.get("previous_result"):
         result, written = None, None
     if result:
         result = gate_review_result(result, require_review_sources=run.get("require_review_sources", False))
     timeout = remaining_wait(deadline) if deadline is not None else None
     if deadline is not None and run.get("closed_reason"):
         return {"address": run["address"], "status": None, "state": "finished", "result": result,
-                "stop_reason": None}
+                "stop_reason": None, "timing": timing_report(path, result)}
     try:
         confirm_launch_identity(path, run, locked=close, timeout=timeout)
         terminal = hc_json("get", run["address"], **({"timeout": remaining_wait(deadline)} if timeout else {}))
     except subprocess.CalledProcessError as error:
         if deadline is not None and herdr_error_kind(error) == "not_found":
             return {"address": run["address"], "status": None, "state": "finished", "result": result,
-                    "stop_reason": "Herdr terminal no longer exists"}
+                    "stop_reason": "Herdr terminal no longer exists", "timing": timing_report(path, result)}
         raise
     verify_terminal(run, terminal)
     status = (terminal.get("status") or {}).get("state")
@@ -1643,6 +2232,7 @@ def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadli
     closed = {}
     reason, reads = None, 0
     changed, removed = [], []
+    cache_drift = None
     if run["cli"] == "codex" and not finished:
         if run.get("wave"):
             try:
@@ -1653,25 +2243,49 @@ def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadli
                 changed = removed = [f"pinned wave unverifiable: {error}"]
         else:
             changed, removed = plugin_drift(run)
+            if removed:
+                cache_drift = STOP_HOOKS
+            elif changed:
+                cache_drift = "plugin_drift"
     if changed and warn_drift:
         print(f"{run['address']}: Codex plugin changed since launch ({', '.join(changed)}); "
               "stop the child before its next Git write", file=sys.stderr)
     if close:
-        final = bool(result) and result["status"] in {"done", "merged"} and status == "done"
-        if not (force or finished or final):
+        if force:
+            closed_reason = "forced"
+        elif finished:
+            closed_reason = "finished"
+        else:
+            result_status = result["status"] if result else None
+            final = result_status in {"done", "merged"} and status == "done"
+            closed_reason = "final_result" if final else None
+            if status in {"idle", "done"} and result_status in {"done", "merged", "ready"} and run["cli"] == "codex":
+                if cache_drift:
+                    closed_reason = cache_drift
+                elif not final:
+                    reads = 1
+                    if recent_missing_codex_hook(run["address"]):
+                        current = hc_json("get", run["address"])
+                        verify_terminal(run, current)
+                        if current["state"] == "finished":
+                            finished, closed_reason = True, "finished"
+                        elif ((current.get("status") or {}).get("state") in {"idle", "done"}
+                              and current.get("status_ms") == terminal.get("status_ms")):
+                            closed_reason = STOP_HOOKS
+        if not closed_reason:
             raise SystemExit("terminal has no final result or is still running; left intact")
         if not finished:
             hc_json("kill", run["address"])
             wait_for_terminal_exit(run)
         hc_json("rm", run["address"])
-        closed_reason = "forced" if force else ("finished" if finished else "final_result")
         closed = {"closed_reason": closed_reason}
+        mark_timing(path, "closed_ms")
         write_json(path, {**run, **closed})
     else:
         reason, reads = child_stop_reason(terminal, run, result, written, stall_minutes, (changed, removed),
                                           deadline=deadline)
     return {"address": run["address"], "status": status, "state": terminal["state"],
-                      "result": result, "stop_reason": reason,
+                      "result": result, "stop_reason": reason, "timing": timing_report(path, result),
                       "scope_decision_categories": repeated_review_categories(result), "closed": close,
                       "screen_reads": run["screen_reads"], "collect_screen_reads": reads,
                       **({"plugin_drift": changed} if changed else {}), **closed}
@@ -1761,6 +2375,11 @@ def pick_entry(repo, candidate, rev):
 
 def pick(args):
     repo = Path(args.repo).expanduser().resolve()
+    if getattr(args, "reservable", False):
+        print(json.dumps(queue_op("prepare-wave", {"contract": 1, "repo": str(repo)}), ensure_ascii=False))
+        return
+    sweep = QUEUE_BACKEND.with_name("worktree_sweep.py")
+    subprocess.run([sys.executable, "-I", "-X", "utf8", str(sweep), str(repo)], check=False)
     request = {"contract": 1, "repo": str(repo)}
     if not (repo / "backlog.md").exists() and not args.tree:
         if queue_op("describe", request)["backend"] == "backlog":
@@ -1781,6 +2400,107 @@ def pick(args):
     print(json.dumps(entries, ensure_ascii=False))
 
 
+def wave_request(repo, data=None):
+    return {**(data or {}), "contract": 1, "repo": str(Path(repo).expanduser().resolve())}
+
+
+def read_wave_request():
+    try:
+        data = json.loads(sys.stdin.buffer.read().decode("utf-8-sig"))
+        if not isinstance(data, dict):
+            raise ValueError("expected a JSON object")
+        return data
+    except ValueError as error:
+        raise SystemExit(f"invalid wave request: {error}") from None
+
+
+def reserve_wave(args):
+    req = wave_request(args.repo, read_wave_request())
+    print(json.dumps(queue_op("reserve-wave", req), ensure_ascii=False))
+
+
+def release_reservation(args):
+    result = queue_op("release-reservation", wave_request(args.repo, {"reservation": args.reservation}))
+    print(json.dumps(result, ensure_ascii=False))
+
+
+def deliver_reserved(path, unit, address):
+    command = TASK_COMMANDS["codex"][0]
+    prompt = (f"{command} --tree {unit['ref']}\n"
+              "Dispatch mode: parallel-worktree\n"
+              f"Assigned unit: {unit['ref']} only. --tree was added for isolation only.")
+    outcome = {"address": address, "prompt": prompt}
+    args = [sys.executable, "-I", "-X", "utf8", __file__, "send", "--run", str(path), "--", address, prompt]
+    try:
+        result = subprocess.run(args, capture_output=True, encoding="utf-8", check=False)
+        if not result.returncode:
+            return {**outcome, **json.loads(result.stdout), "delivery": "submitted", "diagnostics": result.stderr.strip()}
+        error = result.stderr.strip() or f"send exited {result.returncode}"
+    except (OSError, ValueError) as exc:
+        error = str(exc)
+    try:
+        with lock_run(path):
+            run = load_run(path)
+            sent = run["sent"]
+            if sent is False and run.get("handoff", {}).get("queue_reservation") == unit:
+                del run["handoff"]["queue_reservation"]
+                write_json(path, run)
+    except (SystemExit, OSError, KeyError) as exc:
+        return {**outcome, "delivery": "unconfirmed", "diagnostics": f"{error}; receipt check: {exc}"}
+    delivery = "submitted" if sent is True else "unconfirmed" if sent == "unconfirmed" else "withheld"
+    return {**outcome, "delivery": delivery, "diagnostics": error}
+
+
+def send_wave(args):
+    req = wave_request(args.repo, read_wave_request())
+    deliveries = req.get("deliveries")
+    if not isinstance(deliveries, list) or not 1 <= len(deliveries) <= 4:
+        raise SystemExit("deliveries must contain one to four reservation and run pairs")
+    paths = {}
+    for delivery in deliveries:
+        if not isinstance(delivery, dict) or not isinstance(delivery.get("run"), str):
+            raise SystemExit("each delivery needs a reservation ID and a run.json path")
+        path = Path(delivery["run"]).expanduser().resolve()
+        if path.name != "run.json" or not path.is_file() or path in paths:
+            raise SystemExit(f"missing or repeated launch receipt: {path}")
+        paths[path] = delivery.get("reservation")
+    with ExitStack() as locks:
+        runs = {}
+        addresses = set()
+        for path in sorted(paths):
+            locks.enter_context(lock_run(path))
+            run = load_run(path)
+            handoff = run.get("handoff", {})
+            if (
+                run.get("cli") != "codex" or run.get("sent") is not False or run.get("cwd") != req["repo"]
+                or handoff.get("work_kind") != "queue" or run["address"] in addresses
+            ):
+                raise SystemExit(f"expected a distinct idle Codex queue receipt for {req['repo']}: {path}")
+            addresses.add(run["address"])
+            runs[path] = run
+        assignments = [{"reservation": token, "delivery": str(path),
+                        "ref": runs[path]["handoff"]["unit"].strip().removeprefix("issue ")}
+                       for path, token in paths.items()]
+        bound = queue_op("bind-wave", wave_request(args.repo, {"assignments": assignments}))
+        units = {}
+        for unit in bound["reservations"]:
+            path = Path(unit["delivery"])
+            metadata = {"ref": unit["candidate"]["ref"], "base": unit["base"],
+                        "reservation": unit["reservation"], "delivery": unit["delivery"],
+                        "worktree": unit["worktree"], "branch": unit["branch"]}
+            runs[path]["handoff"]["queue_reservation"] = metadata
+            write_json(path, runs[path])
+            units[path] = metadata
+    with ThreadPoolExecutor(max_workers=len(units)) as pool:
+        futures = {path: pool.submit(deliver_reserved, path, unit, runs[path]["address"])
+                   for path, unit in units.items()}
+        outcomes = [{"run": str(path), "reservation": paths[path], **future.result()}
+                    for path, future in futures.items()]
+    print(json.dumps({"deliveries": outcomes}, ensure_ascii=False))
+    if any(outcome["delivery"] != "submitted" for outcome in outcomes):
+        raise SystemExit("one or more deliveries were not confirmed; inspect the per-receipt outcomes")
+
+
 def main(argv):
     parser = argparse.ArgumentParser(prog="dispatch.py")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1788,7 +2508,18 @@ def main(argv):
     pick_parser.add_argument("repo")
     pick_parser.add_argument("--tree", action="store_true")
     pick_parser.add_argument("--full-scan", action="store_true")
+    pick_parser.add_argument("--reservable", action="store_true", help="return exact candidates at a pinned base")
     pick_parser.set_defaults(func=pick)
+    reserve_parser = sub.add_parser("reserve-wave", help="reserve the selected pinned queue units together")
+    reserve_parser.add_argument("repo")
+    reserve_parser.set_defaults(func=reserve_wave)
+    deliver_parser = sub.add_parser("send-wave", help="send reserved queue units to idle Codex children concurrently")
+    deliver_parser.add_argument("repo")
+    deliver_parser.set_defaults(func=send_wave)
+    cancel_parser = sub.add_parser("release-reservation", help="release an unconsumed queue reservation")
+    cancel_parser.add_argument("repo")
+    cancel_parser.add_argument("reservation")
+    cancel_parser.set_defaults(func=release_reservation)
     launch_parser = sub.add_parser("launch")
     launch_parser.add_argument("--cli", choices=["claude", "codex"], required=True)
     launch_parser.add_argument("--model", required=True)
@@ -1803,6 +2534,9 @@ def main(argv):
                           help="confirm that free-form --git-limits records the verified user grant")
     git_mode.add_argument("--no-git-writes", action="store_true", help="hand off implementation-only work")
     launch_parser.add_argument("--review-transfer-approval", help="verbatim user grant for reviewer data transfer")
+    launch_parser.add_argument("--no-standing-review-approval", action="store_true",
+                               help="omit the standing review transfer approval (the user restricted reviewer transfers)")
+    launch_parser.add_argument("--relaunch-from", help="previous dispatch receipt to carry timing across a relaunch")
     launch_parser.add_argument("--name")
     launch_parser.add_argument("--title", help="short task title; hc label title=TEXT, and the name source without --name")
     launch_parser.add_argument("--parent")
@@ -1814,6 +2548,11 @@ def main(argv):
     launch_parser.add_argument("--dry-run", action="store_true")
     launch_parser.add_argument("message", nargs="?")
     launch_parser.set_defaults(func=launch)
+    prepare_parser = sub.add_parser("prepare-codex", help="prepare the shared Codex plugin cache")
+    prepare_parser.add_argument("--repo", required=True, help="agent-toolkit checkout")
+    prepare_parser.add_argument("--cwd", required=True, help="target directory for hook discovery and warm-up")
+    prepare_parser.add_argument("--parent", help="Herdr address of the home session")
+    prepare_parser.set_defaults(func=prepare_codex)
     pin_parser = sub.add_parser("pin", help="create a verified private Codex wave from an agent-toolkit commit")
     pin_parser.add_argument("--repo", required=True)
     pin_parser.add_argument("--commit", required=True)
@@ -1830,9 +2569,30 @@ def main(argv):
     delivery.add_argument("--continue", dest="continuation", action="store_true")
     delivery.add_argument("--resend", action="store_true", help="retry an unconfirmed delivery to a clear idle composer")
     send_parser.set_defaults(func=send)
+    peek_parser = sub.add_parser("peek", help="print the filtered child transcript")
+    peek_parser.add_argument("run")
+    peek_parser.add_argument("--since-last", action="store_true", help="print only rows new since the preceding peek")
+    peek_parser.set_defaults(func=peek)
     report_parser = sub.add_parser("report-review", help="write a gated pre-merge review result")
     report_parser.add_argument("result")
     report_parser.set_defaults(func=report_review)
+    timing_parser = sub.add_parser("timing", help="inspect or record dispatch phase timings")
+    timing_parser.add_argument("run")
+    timing_parser.set_defaults(func=timing)
+    events = timing_parser.add_subparsers(dest="event")
+    events.add_parser("delivered")
+    start_parser = events.add_parser("start")
+    start_parser.add_argument("phase", choices=phase_timing.PHASES)
+    start_parser.add_argument("sha")
+    start_parser.add_argument("--tree", action="store_true")
+    finish_parser = events.add_parser("finish")
+    finish_parser.add_argument("phase", choices=phase_timing.PHASES)
+    finish_parser.add_argument("attempt")
+    finish_parser.add_argument("outcome", choices=phase_timing.OUTCOMES)
+    bind_parser = events.add_parser("bind-review")
+    bind_parser.add_argument("attempt")
+    bind_parser.add_argument("head")
+    events.add_parser("merged").add_argument("head", nargs="?")
     collect_parser = sub.add_parser("collect")
     collect_parser.add_argument("run")
     collect_parser.add_argument("--stall-minutes", type=int, default=STALL_MINUTES)
@@ -1842,6 +2602,7 @@ def main(argv):
     collect_parser.set_defaults(func=collect)
     wait_parser = sub.add_parser("wait", help="watch receipts until each reaches a selected outcome")
     wait_parser.add_argument("runs", nargs="+")
+    wait_parser.add_argument("--first", action="store_true", help="return after printing the first selected outcome")
     wait_parser.add_argument("--until", default=",".join(WAIT_DEFAULT),
                              help=f"comma-separated outcomes (default: {','.join(WAIT_DEFAULT)})")
     wait_parser.add_argument("--timeout", type=int, default=WAIT_TIMEOUT_SECONDS, metavar="SECONDS")
