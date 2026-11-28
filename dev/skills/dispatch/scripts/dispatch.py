@@ -508,16 +508,24 @@ def missing_reviews(result):
     return missing
 
 
+def reviewable_completion(result):
+    status = result["status"]
+    if status == "merged":
+        return True
+    if status != "done":
+        return False
+    if result.get("pr"):
+        return True
+    if NO_WORK_PREFIX.match(result["summary"]):
+        return False
+    return bool(result.get("head") or PR_REFERENCE.search(result["summary"])
+                or PR_REFERENCE.search(json.dumps(result.get("evidence"), ensure_ascii=False)))
+
+
 def gate_required_reviews(result):
     status = result["status"]
-    if status not in {"ready", "merged", "done"}:
+    if status != "ready" and not reviewable_completion(result):
         return result
-    if status == "done" and not result.get("pr"):
-        if NO_WORK_PREFIX.match(result["summary"]):
-            return result
-        if not (result.get("head") or PR_REFERENCE.search(result["summary"])
-                or PR_REFERENCE.search(json.dumps(result.get("evidence"), ensure_ascii=False))):
-            return result
     missing = missing_reviews(result)
     if not missing:
         return result
@@ -562,7 +570,7 @@ def gate_review_result(result, *, require_review_sources):
     if require_review_sources:
         result = gate_required_reviews(result)
     status = result["status"]
-    if status != "ready" and not (status in {"done", "merged"} and result.get("pr")):
+    if status != "ready" and not reviewable_completion(result):
         return result
     reason = review_problem(result, require_review_sources=require_review_sources)
     if not reason:

@@ -969,6 +969,7 @@ class DispatchReceiptTests(DispatchTestCase):
                     if warning:
                         self.assertIn("review_warning", report["result"])
                         self.assertIn("codex: no completed result", report["result"]["review_warning"])
+                        self.assertIn("Independent review is missing", report["result"]["review_warning"])
                     else:
                         self.assertNotIn("review_warning", report["result"])
 
@@ -1005,13 +1006,18 @@ class DispatchReceiptTests(DispatchTestCase):
             ({"review": review}, {**complete, "agy": "still running"}, "agy: still running"),
             ({"review": review}, complete, None),
         )
-        for status in ("done", "merged"):
+        for status, pr in (("done", "example-pr"), ("merged", "example-pr"), ("done", None), ("merged", None)):
             for fields, sources, warning in cases:
-                with self.subTest(status=status, review=fields, sources=sources), tempfile.TemporaryDirectory() as tmp:
+                with (
+                    self.subTest(status=status, pr=pr, review=fields, sources=sources),
+                    tempfile.TemporaryDirectory() as tmp,
+                ):
                     receipt = Path(tmp) / "run.json"
                     write_json(receipt, {**self.RECEIPT, "require_review_sources": True})
                     result = {"status": status, "phase": "complete", "summary": "PR work completed",
-                              "pr": "example-pr", "head": head, "review_sources": sources, **fields}
+                              "head": head, "review_sources": sources, **fields}
+                    if pr is not None:
+                        result["pr"] = pr
                     result_path = receipt.with_name("result.json")
                     write_json(result_path, result)
                     with patch("dispatch.hc_json", return_value=terminal), redirect_stdout(StringIO()) as full:
