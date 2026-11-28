@@ -764,18 +764,27 @@ def pre_merge_stop(cli, message, handoff):
             and any(line.startswith("Dispatch mode: parallel-worktree") for line in body))
 
 
-def resumes_pre_merge_stop(path, run, cwd, cli, message):
+def pre_merge_resume(path, run, cwd):
+    reservation = (run.get("handoff") or {}).get("queue_reservation") or {}
+    if run.get("cwd") != str(cwd) or not (run.get("pre_merge_stop") is True or reservation):
+        return None
+    worktree = reservation.get("worktree")
+    with suppress(SystemExit):
+        result, _ = current_result(path, run)
+        worktree = (result or {}).get("worktree") or worktree
+    return {"worktree": worktree if isinstance(worktree, str) else None}
+
+
+def resumes_pre_merge_stop(resume, cwd, cli, message):
     invocation = (message or "").splitlines()
     command = invocation[0].split() if invocation else []
-    if (run.get("pre_merge_stop") is not True or run.get("cwd") != str(cwd)
-            or len(command) != 3 or command[:2] != [TASK_COMMANDS[cli][0], "--resume"]):
+    if resume is None or len(command) != 3 or command[:2] != [TASK_COMMANDS[cli][0], "--resume"]:
         return False
-    try:
-        result, _ = current_result(path, run)
-    except SystemExit:
+    slug = command[2]
+    if slug in {".", ".."} or Path(slug).name != slug:
         return False
-    worktree = (result or {}).get("worktree")
-    return isinstance(worktree, str) and Path(worktree) == cwd / ".worktrees" / command[2]
+    worktree = resume["worktree"]
+    return worktree is None or Path(worktree).resolve() == (cwd / ".worktrees" / slug).resolve()
 
 
 def first_prompt(cli, message, handoff):
@@ -1174,13 +1183,11 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
     result_path = None
     child = None
     previous = getattr(args, "relaunch_from", None)
-    resumes_pre_merge = False
+    resume = None
     if previous:
         previous = Path(previous).expanduser().resolve()
         previous_run = load_run(previous)
-        resumes_pre_merge = resumes_pre_merge_stop(
-            previous, previous_run, cwd.resolve(), args.cli, args.message or args.task,
-        )
+        resume = pre_merge_resume(previous, previous_run, cwd.resolve())
         try:
             history = phase_timing.read(timing_path(previous))
         except TIMING_DATA_ERRORS as error:
@@ -1336,8 +1343,13 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
     run["review_policy"] = "three-source" if three_source else "head-bound"
     if three_source:
         run["require_review_sources"] = True
-    if resumes_pre_merge or (args.cli == "claude" and pre_merge_stop("claude", args.message, handoff)):
-        run["pre_merge_stop"] = True
+    if args.cli == "claude":
+        if pre_merge_stop("claude", args.message, handoff) or resumes_pre_merge_stop(
+            resume, cwd.resolve(), "claude", args.message,
+        ):
+            run["pre_merge_stop"] = True
+    elif resume is not None:
+        run["pre_merge_resume"] = resume
     if args.cli != "claude":
         save_launch_timing()
     try:
@@ -1948,7 +1960,10 @@ def send_task(args, run_path):
             run["sent_continuation"] = continuation
             run["send_acknowledged"] = False
             run.pop("send_acknowledged_ms", None)
-            if not continuation and pre_merge_stop("codex", args.message, run.get("handoff", {})):
+            if not continuation and (
+                pre_merge_stop("codex", args.message, run.get("handoff", {}))
+                or resumes_pre_merge_stop(run.get("pre_merge_resume"), Path(run.get("cwd", ".")), "codex", args.message)
+            ):
                 run["pre_merge_stop"] = True
             write_json(run_path, run)
         else:

@@ -40,6 +40,7 @@ from dispatch import (
     main,
     peek,
     pick,
+    pre_merge_resume,
     pre_merge_stop,
     prepare_codex,
     release,
@@ -211,8 +212,13 @@ class DispatchReceiptTests(DispatchTestCase):
                 "status": "working", "phase": "review", "summary": "Review in progress",
                 "worktree": str(cwd / ".worktrees" / "unit"),
             })
-            self.assertTrue(resumes_pre_merge_stop(receipt, run, cwd, "claude", "/dev:task-next --resume unit"))
-            self.assertFalse(resumes_pre_merge_stop(receipt, run, cwd, "claude", "/dev:task-next --resume another"))
+            resume = pre_merge_resume(receipt, run, cwd)
+            self.assertTrue(resumes_pre_merge_stop(resume, cwd, "claude", "/dev:task-next --resume unit"))
+            self.assertFalse(resumes_pre_merge_stop(resume, cwd, "claude", "/dev:task-next --resume another"))
+            receipt.with_name("result.json").unlink()
+            resume = pre_merge_resume(receipt, run, cwd)
+            self.assertTrue(resumes_pre_merge_stop(resume, cwd, "claude", "/dev:task-next --resume unit"))
+            self.assertFalse(resumes_pre_merge_stop(resume, cwd, "claude", "/dev:task-next --resume ../another"))
 
     def launch_args(self, cwd, **overrides):
         args = dict(cwd=str(cwd), name="repo", parent="t6", cli="codex", model="gpt-6.1-terra",
@@ -3373,6 +3379,31 @@ class CodexSendTests(DispatchTestCase):
                 phase_timing.finish(started, "review", saved_attempt, "complete", 4000)
             self.assertNotEqual(saved_attempt, current_attempt)
             self.assertIsNone(started["launches"][0]["review"][0]["finished_ms"])
+
+    def test_idle_codex_relaunch_carries_pre_merge_stop_until_first_send(self):
+        terminal = DispatchReceiptTests.TERMINAL
+        sent = False
+
+        def respond(command, *args):
+            nonlocal sent
+            if command == "get":
+                return {**terminal, **(self.WORKING if sent else self.IDLE)}
+            if command == "read":
+                return self.screen(self.READY)
+            self.assertEqual(command, "send")
+            sent = True
+            return {"started": True}
+
+        with tempfile.TemporaryDirectory() as directory:
+            first = Path(directory) / "previous.json"
+            write_json(first, {**terminal, "cwd": directory, "pre_merge_stop": True})
+            self.launch_codex(directory, respond, relaunch_from=first, task=None)
+            receipt = Path(directory) / "run.json"
+            first.unlink()
+            args = SimpleNamespace(address="t7", message="$task-next --resume unit", run=receipt)
+            with patch("dispatch.hc_json", side_effect=respond), patch("dispatch.time.sleep"), redirect_stdout(StringIO()):
+                send(args)
+            self.assertTrue(json.loads(receipt.read_text(encoding="utf-8"))["pre_merge_stop"])
 
     def test_phase_timing_survives_retry_relaunch_and_repeated_collection(self):
         terminal = DispatchReceiptTests.TERMINAL
