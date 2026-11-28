@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Exercise recovery using real staged, committed, and isolated Git state."""
 import json
-import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -174,9 +174,12 @@ class RecoveryTest(unittest.TestCase):
         floor = floor.split("**Floor**", 1)[1].split("```bash\n", 1)[1].split("```", 1)[0]
         floor = floor.replace("<absolute parent directory of the loaded SKILL.md>", str(skill_dir.resolve()))
         floor = floor.replace("<from authorization route: --no-hub or empty>", "--no-hub")
-        env = {**os.environ, "DISPATCH_RUN": str(receipt) if receipt is not None else ""}
+        receipt_path = shlex.quote(str(receipt) if receipt is not None else "")
+        floor = floor.replace(
+            '"<assigned absolute run.json path, or empty for a non-dispatched run>"', receipt_path,
+        )
         result = subprocess.run(["bash", "-c", floor + '\nprintf "%s" "$FLOOR_HIT"'],
-                                cwd=cwd or self.repo, capture_output=True, text=True, env=env)
+                                cwd=cwd or self.repo, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout
 

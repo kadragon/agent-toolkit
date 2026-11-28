@@ -397,6 +397,7 @@ class DispatchReceiptTests(DispatchTestCase):
         base = {"request": "Review it", "unit": "PR review", "git_limits": "pr-only", "work_kind": "standalone"}
         for handoff, message, standing in (
             (base, "$task-review --pr 12", True),
+            (base, "Use $task-review to review this branch and merge it once CI is green.", True),
             (base, "Review the pending changes", False),
             ({**base, "no_standing_review_approval": True}, "$task-review --pr 12", False),
             ({**base, "review_transfer_approval": self.REVIEW_APPROVAL}, "$task-review --pr 12", False),
@@ -3627,6 +3628,7 @@ class CodexSendTests(DispatchTestCase):
     def test_standalone_review_uses_three_sources_when_hub_is_available(self):
         for message, policy in (
             ("$task-review --auto", "three-source"),
+            ("Use $task-review to review this branch and merge it once CI is green.", "three-source"),
             ("$task-review --lite", "three-source"),
             ("$task-review --no-hub", "head-bound"),
             ("Review the pending changes", "head-bound"),

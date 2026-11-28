@@ -593,9 +593,16 @@ def requires_review_sources(run):
     return run.get("require_review_sources", False)
 
 
-def standalone_hub_review(message, handoff):
+def review_invocation(message):
     invocation = (message or "").lstrip().splitlines()
-    command = invocation[0].split() if invocation else []
+    words = invocation[0].split() if invocation else []
+    if words[:4] == ["Use", "$task-review", "to", "review"]:
+        return words[1:]
+    return words
+
+
+def standalone_hub_review(message, handoff):
+    command = review_invocation(message)
     return (handoff.get("work_kind") == "standalone"
             and command[:1] == ["$task-review"] and "--no-hub" not in command[1:])
 
@@ -848,7 +855,7 @@ def first_prompt(cli, message, handoff):
               "Git limits": handoff["git_limits"]}
     if "additional_git_limits" in handoff:
         fields["Additional Git limits (verbatim)"] = handoff["additional_git_limits"]
-    review_command = message.split(maxsplit=1)[0] in REVIEW_COMMANDS
+    review_command = review_invocation(message)[0] in REVIEW_COMMANDS
     if (handoff.get("review_transfer_standing") or (review_command and "review_transfer_approval" not in handoff
                                                     and not handoff.get("no_standing_review_approval"))):
         fields["Review transfer approval (standing)"] = STANDING_REVIEW_TRANSFER
