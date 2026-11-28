@@ -72,8 +72,8 @@ thin `IMPORTANT` / `do not remove` verdict either way, trace the symbol before a
   Approved → apply it, then delete the comment. `--auto`, declined, or a fix that needs work
   outside this branch's purpose → route the unapplied finding through
   `consolidation-guide.md` → *Recording out-of-scope and non-blocking findings*;
-  `--auto` never renames or restructures code for a comment. Then delete a `must-kill` comment,
-  but keep a `suppression`: removing it before its cause is fixed fails the required checks.
+  `--auto` never renames or restructures code for a comment. Keep the source comment until
+  its cause is fixed.
 - `constraint` → without `--auto`, offer the encoding and wait. Approved → encode, then delete.
   Declined or `--auto` → keep the comment and route the unapplied finding through the same
   follow-up rules.

@@ -276,7 +276,7 @@ late results and unapplied advisory comment findings.
 | Finding | Disposition |
 | --- | --- |
 | P3, a nit, or an unapplied `comments` finding | At most a PR comment. The `comments` source uses a placeholder severity. |
-| P2 introduced or worsened by this branch | Fix in this PR if in scope and approved. Otherwise leave a PR comment. |
+| P2 introduced or worsened by this branch | Fix in this PR with explicit approval for the in-scope fix. Otherwise leave a PR comment. `--auto` applies to the blocking gate. |
 | Verified pre-existing defect above P3 | File only if it occurs on an everyday path or has reproduction evidence from real use. Otherwise leave a PR comment. |
 | P0/P1 introduced or worsened by this branch | Apply the blocking gate. Preserve the existing queue route when scope, the review window, or withdrawal of a failed fix under *Fix rounds and re-review* defers the finding. |
 | Other advisory findings | At most a PR comment. |
@@ -291,8 +291,10 @@ or leave a PR comment if the impact is unclear.
 On hub, authorize `pr-write` before posting non-sensitive comment-only findings on the PR.
 Include the finding ID, priority, file:line and concrete failure. On resume or late reclaim,
 post only IDs that have not already been commented on. Without a PR or comment authority,
-keep them in the cycle report. Keep comment-only findings out of `create`, file-queue edits,
-and pending drafts for both backends.
+include those findings in the final cycle report and record their dispositions. For sensitive
+findings, use the existing authorized disclosure route where applicable and report only a
+withheld count otherwise. Keep comment-only findings out of `create`, file-queue edits, and
+pending drafts for both backends.
 
 When any findings qualify for filing, use `queue_backend.py` (bundled with `dev:task-next`) →
 *Filing findings* in `../../task-next/references/queue-backend-contract.md`. Read `rejected`
