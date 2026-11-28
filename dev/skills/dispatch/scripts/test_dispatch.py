@@ -45,6 +45,7 @@ from dispatch import (
     prepare_codex,
     release,
     report_instruction,
+    report_review,
     requires_review_sources,
     resolve_codex_model,
     resumes_pre_merge_stop,
@@ -848,6 +849,43 @@ class DispatchReceiptTests(DispatchTestCase):
                 with self.assertRaisesRegex(SystemExit, "Claude may have received its launch prompt"):
                     launch(args)
                 self.assertEqual(run.call_args.args[0][-1], "/dev:task-next" + self.BLOCK)
+
+    def test_claude_report_uses_review_policy_before_launch_returns(self):
+        head = "a" * 40
+        result = {
+            "status": "ready", "phase": "review", "summary": "CI passed", "head": head, "ci": "success",
+            "review": {"head": head, "status": "passed", "sources": ["claude"]},
+        }
+        owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd())}
+        for previous_fields, policy, status in (
+            (None, "head-bound", "ready"),
+            ({"review_policy": "three-source"}, "three-source", "blocked"),
+            ({"require_review_sources": True}, "three-source", "blocked"),
+        ):
+            with self.subTest(previous=previous_fields), tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "run.json"
+                report = receipt.with_name("result.json")
+                previous = receipt.with_name("previous.json")
+                if previous_fields is not None:
+                    write_json(previous, {**self.RECEIPT, "cli": "codex", **previous_fields})
+
+                def start_child(*_args, **_kwargs):
+                    with patch("sys.stdin", TextIOWrapper(BytesIO(json.dumps(result).encode("utf-8")))):
+                        report_review(SimpleNamespace(result=report))
+                    return SimpleNamespace(stdout=json.dumps(self.TERMINAL))
+
+                with (
+                    patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, self.TERMINAL]),
+                    patch("dispatch.warn_linked_worktree"),
+                    patch("dispatch.subprocess.run", side_effect=start_child) as spawn,
+                    patch("dispatch.tempfile.mkdtemp", return_value=directory),
+                    redirect_stdout(StringIO()),
+                ):
+                    launch(self.launch_args(directory, cli="claude", task=None, message="/dev:task-next",
+                                            relaunch_from=previous if previous_fields is not None else None))
+                self.assertEqual(json.loads(receipt.read_text(encoding="utf-8"))["review_policy"], policy)
+                self.assertEqual(json.loads(report.read_text(encoding="utf-8"))["status"], status)
+                self.assertEqual("include review_sources" in spawn.call_args.args[0][-2], policy == "three-source")
 
     def test_collect_reads_result_without_screen_and_only_closes_final_owned_child(self):
         done = {**self.TERMINAL, "status": {"state": "done"}}
@@ -3382,6 +3420,37 @@ class CodexSendTests(DispatchTestCase):
                 phase_timing.finish(started, "review", saved_attempt, "complete", 4000)
             self.assertNotEqual(saved_attempt, current_attempt)
             self.assertIsNone(started["launches"][0]["review"][0]["finished_ms"])
+
+    def test_standalone_pr_review_sets_policy_before_codex_receives_task(self):
+        terminal = DispatchReceiptTests.TERMINAL
+        message = "$task-review --pr 12"
+        for at_launch in (True, False):
+            with self.subTest(at_launch=at_launch), tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "run.json"
+                sent = False
+
+                def respond(command, *args, timeout=None):
+                    nonlocal sent
+                    if command == "get":
+                        return {**terminal, **(self.WORKING if sent else self.IDLE)}
+                    if command == "read":
+                        return self.screen(self.READY)
+                    self.assertEqual(command, "send")
+                    sent = True
+                    saved = json.loads(receipt.read_text(encoding="utf-8"))
+                    self.assertEqual(saved["review_policy"], "three-source")
+                    self.assertTrue(saved["require_review_sources"])
+                    self.assertIn("include review_sources", " ".join(args))
+                    return {"started": True}
+
+                self.launch_codex(directory, respond, work_kind="standalone", task=message if at_launch else None)
+                if not at_launch:
+                    saved = json.loads(receipt.read_text(encoding="utf-8"))
+                    self.assertEqual(saved["review_policy"], "head-bound")
+                    args = SimpleNamespace(address="t7", message=message, run=receipt)
+                    with patch("dispatch.hc_json", side_effect=respond), redirect_stdout(StringIO()):
+                        send(args)
+                self.assertTrue(sent)
 
     def test_idle_codex_relaunch_carries_pre_merge_stop_until_first_send(self):
         terminal = DispatchReceiptTests.TERMINAL
