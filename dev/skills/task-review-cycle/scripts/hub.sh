@@ -226,9 +226,8 @@ case "$SUBCOMMAND" in
     PR_NUMBER="${1:?Usage: hub.sh ci-status <pr_number>}"
     if [ "$HUB_TYPE" = "github" ]; then
       # One snapshot for both the head and its checks: two requests could pair a new head SHA
-      # with the previous commit's failure. The query is `gh pr checks`'s own (it cannot be
-      # pinned, and `gh pr view` omits the run event), so buckets and the rerun dedup —
-      # latest run per name/workflow/event — mirror it.
+      # with the previous commit's failure. Extend the `gh pr checks` query with app and run
+      # IDs to keep different providers separate and order reruns before they start.
       VIEW=$(gh api graphql --paginate -F number="$PR_NUMBER" \
         -f owner="${OWNER_REPO%%/*}" -f name="${OWNER_REPO#*/}" -f query='
         query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
@@ -239,22 +238,23 @@ case "$SUBCOMMAND" in
                 nodes {
                   __typename
                   ... on StatusContext { context state createdAt }
-                  ... on CheckRun { name status conclusion startedAt
-                    checkSuite { workflowRun { event workflow { name } } } }
+                  ... on CheckRun { name status conclusion startedAt databaseId
+                    checkSuite { app { id } workflowRun { event workflow { name } } } }
                 } } } } } } } } }' 2>/dev/null) || VIEW=""
       # Collect the streamed pages with jq for gh versions without --slurp.
       SNAPSHOT=$(jq -sc '[.[] | .data.repository.pullRequest.commits.nodes[0].commit] as $c
         | {oids: ([$c[].oid] | unique),
            buckets: [[$c[].statusCheckRollup.contexts.nodes[]?]
              | group_by(if .__typename == "CheckRun"
-                 then [.name, .checkSuite.workflowRun.workflow.name, .checkSuite.workflowRun.event]
+                 then [.name, .checkSuite.app.id, .checkSuite.workflowRun.workflow.name, .checkSuite.workflowRun.event]
                  else [.context] end)[]
-             | max_by(.startedAt // .createdAt // "")
+             | max_by(if .__typename == "CheckRun" then [.databaseId // 0, .startedAt // ""]
+                      else .createdAt // "" end)
              | (if .__typename == "CheckRun" then (if .status == "COMPLETED" then .conclusion else "PENDING" end)
                 else .state end) as $s
              | if $s == "SUCCESS" or $s == "SKIPPED" or $s == "NEUTRAL" then "pass"
                elif $s == "FAILURE" or $s == "ERROR" or $s == "TIMED_OUT" or $s == "ACTION_REQUIRED"
-                 or $s == "STARTUP_FAILURE" or $s == "CANCELLED" then "fail"
+                 or $s == "STARTUP_FAILURE" or $s == "CANCELLED" or $s == "STALE" then "fail"
                else "pending" end]}' <<<"$VIEW" 2>/dev/null) || SNAPSHOT='{"oids": [], "buckets": []}'
       HEAD_SHA=$(jq -r 'if (.oids | length) == 1 then .oids[0] // empty else empty end' <<<"$SNAPSHOT")
       BUCKETS=$(jq -c '.buckets' <<<"$SNAPSHOT")

@@ -549,6 +549,26 @@ def main() -> int:
                              run_ctx("SUCCESS", started="2026-01-01T00:05:00Z", event="push")])
         check("a later push run does not hide the pull_request run's failure",
               status.get("status") == "failure" and status.get("checks") == 2, f"got {status}")
+        queued = dict(run_ctx(None, status="QUEUED", started=None), databaseId=2)
+        completed = dict(run_ctx("SUCCESS"), databaseId=1)
+        for runs in ([queued, completed], [completed, queued]):
+            status = hub_status(runs)
+            check("a newer queued rerun keeps the check pending regardless of listing order",
+                  status.get("status") == "pending" and status.get("checks") == 1, f"got {status}")
+        status = hub_status([dict(queued, databaseId=1), dict(completed, databaseId=2)])
+        check("an older queued run does not hide the newer completed check",
+              status.get("status") == "success" and status.get("checks") == 1, f"got {status}")
+        app_checks = [
+            dict(run_ctx("FAILURE"), checkSuite={"app": {"id": "app-1"}}),
+            dict(run_ctx("SUCCESS", started="2026-01-01T00:05:00Z"),
+                 checkSuite={"app": {"id": "app-2"}}),
+        ]
+        status = hub_status(app_checks)
+        check("same-named checks from distinct GitHub apps count independently",
+              status.get("status") == "failure" and status.get("checks") == 2, f"got {status}")
+        status = hub_status([run_ctx("STALE")])
+        check("a completed stale check is a failure",
+              status.get("status") == "failure" and status.get("checks") == 1, f"got {status}")
         status = hub_status(None, pages=[page([run_ctx("SUCCESS")]),
                                          page([run_ctx("FAILURE", name="lint")])])
         check("older gh reports the head and includes a failure on a later page",
