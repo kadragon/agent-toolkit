@@ -106,6 +106,24 @@ def fail(case, detail):
     sys.exit(1)
 
 
+def case_auto_detect_preserves_paths(tmp):
+    case = "auto-detected paths are staged literally"
+    repo = make_repo(tmp)
+    path = repo / "docs" / "Release Notes.md"
+    path.parent.mkdir()
+    path.write_text("original\n")
+    git(repo, "add", "--", str(path))
+    git(repo, "commit", "-qm", "[TEST] add release notes")
+    path.write_text("updated\n")
+    proc = subprocess.run(
+        ["bash", str(SCRIPT), "--message", "[TEST] update release notes", "--no-push"],
+        cwd=repo, capture_output=True, text=True, check=False,
+    )
+    if proc.returncode != 0 or name_status(repo) != ["M\tdocs/Release Notes.md"]:
+        fail(case, f"exit {proc.returncode}, stderr: {proc.stderr!r}, commit: {name_status(repo)!r}")
+    print(f"OK: {case}")
+
+
 def case_staged_deletion(tmp):
     """The reported bug: deletion already staged, path still in the --files list."""
     repo = make_repo(tmp)
@@ -686,6 +704,7 @@ def main():
     try:
         case_remote_boundaries(tmp)
         case_implementation_only_blocks_before_commit(tmp)
+        case_auto_detect_preserves_paths(tmp)
         case_staged_deletion(tmp)
         case_explicit_paths_preserve_unrelated_staged_changes(tmp)
         case_explicit_paths_allow_merge_commit(tmp)

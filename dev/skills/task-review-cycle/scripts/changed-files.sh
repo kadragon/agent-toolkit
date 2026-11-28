@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 # Detect files to stage: tracked changes against HEAD + untracked new files.
 #
-# Usage: changed-files.sh
-# Output: One file path per line to stdout.
+# Usage: changed-files.sh [--null]
+# Output: One displayed path per line, or raw NUL-terminated paths with --null.
 
 set -euo pipefail
+
+if [ "${1:-}" = "--null" ]; then
+  git diff --relative --name-only -z HEAD 2>/dev/null \
+    || git diff --cached --relative --name-only -z
+  git ls-files -z --others --exclude-standard
+  exit 0
+fi
 
 # git diff --name-only HEAD fails on first commit (no HEAD yet); fall back to --cached.
 tracked=$(git diff --name-only HEAD 2>/dev/null \

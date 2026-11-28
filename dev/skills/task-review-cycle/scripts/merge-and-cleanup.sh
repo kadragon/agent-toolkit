@@ -188,8 +188,7 @@ if [ "$MERGE_OK" = "true" ]; then
       if [ -n "$BASE_STATUS" ]; then
         BASE_NOTE=" (base '${BASE_BRANCH}' not fast-forwarded: checkout has uncommitted changes)"
         echo "NOTE: base '${BASE_BRANCH}' not fast-forwarded: checkout has uncommitted changes" >&2
-      else
-        git fetch origin "$BASE_BRANCH" >/dev/null 2>&1 || true
+      elif git fetch origin "$BASE_BRANCH" >/dev/null 2>&1; then
         git merge --ff-only FETCH_HEAD >/dev/null 2>&1 || true
       fi
     fi
