@@ -127,10 +127,10 @@ the final evidence in the merge commit message before retiring the archive.
 
 Use the receipt beside the assigned `result.json`. Start one measurement before each
 independent review round, including a re-review or a focused confirmation. Use the
-committed candidate's full Git SHA. Keep the printed attempt number in
+committed candidate's full Git SHA. Keep the printed attempt ID in
 the review checkpoint and finish that attempt when consolidating its verdict. Use
-`incomplete` if the attempt produced no verdict. Reuse the number when reclaiming the
-same attempt. A new reviewer launch gets a new number.
+`incomplete` if the attempt produced no verdict. Reuse the ID when reclaiming the
+same attempt. A new reviewer launch gets a new ID.
 
 ```bash
 DISPATCH="<absolute path to dev/skills/dispatch/scripts/dispatch.py>"
@@ -138,7 +138,15 @@ RESULT="<assigned result.json path>"
 DISPATCH_TIMING_RUN="${RESULT%/*}/run.json"
 HEAD_SHA=$(git rev-parse --verify HEAD) || exit 1
 ATTEMPT=$(python3 -I "$DISPATCH" timing "$DISPATCH_TIMING_RUN" start review "$HEAD_SHA")
-# At verdict consolidation, using the recorded attempt number:
+```
+
+After consolidating the verdict, recover the recorded ID and close its measurement.
+
+```bash
+DISPATCH="<absolute path to dev/skills/dispatch/scripts/dispatch.py>"
+RESULT="<assigned result.json path>"
+DISPATCH_TIMING_RUN="${RESULT%/*}/run.json"
+ATTEMPT="<from the review checkpoint>"
 python3 -I "$DISPATCH" timing "$DISPATCH_TIMING_RUN" finish review "$ATTEMPT" complete
 ```
 

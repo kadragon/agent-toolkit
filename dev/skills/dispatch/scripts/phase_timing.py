@@ -1,14 +1,13 @@
-"""Bounded, payload-free wall-clock measurements for a dispatch receipt."""
-
 import json
 import re
 import time
+import uuid
 
 MAX_LAUNCHES = 8
-MAX_ATTEMPTS = 16  # per phase, per launch
+MAX_ATTEMPTS = 16
 HEAD = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 PHASES = ("review", "ci")
-OUTCOMES = ("complete", "passed", "failed", "passed-unverified", "failed-unverified", "incomplete")
+OUTCOMES = ("complete", "passed", "failed", "passed-unverified", "failed-unverified", "no-checks", "incomplete")
 
 
 def now_ms():
@@ -20,8 +19,7 @@ def elapsed(start, end):
 
 
 def empty_history():
-    return {"launches": [], "dropped_launches": 0, "first_launched_ms": None,
-            "last_attempt": dict.fromkeys(PHASES, 0), "merge": None}
+    return {"launches": [], "dropped_launches": 0, "first_launched_ms": None, "merge": None}
 
 
 def read(path):
@@ -36,10 +34,7 @@ def read(path):
         raise ValueError("invalid timing history length")
     if type(data["dropped_launches"]) is not int:
         raise ValueError("invalid dropped-launch count")
-    for phase in PHASES:
-        if type(data["last_attempt"][phase]) is not int:
-            raise ValueError("invalid timing attempt counter")
-    report(data, None)  # Check the stored measurements before another launch adopts them.
+    report(data, None)
     return data
 
 
@@ -61,6 +56,9 @@ def new_launch(data, at):
 
 def mark(data, field, at):
     launch = data["launches"][-1]
+    review_started = launch["first_review_ms"]
+    if field == "delivered_ms" and review_started is not None and at > review_started:
+        return
     if launch[field] is None:
         launch[field] = at
 
@@ -74,8 +72,7 @@ def start(data, phase, sha, is_tree, at):
     if phase == "review":
         mark(data, "first_review_ms", at)
     attempts = launch[phase]
-    attempt = data["last_attempt"][phase] + 1
-    data["last_attempt"][phase] = attempt
+    attempt = uuid.uuid4().hex
     record = {"attempt": attempt, "head": None if is_tree else sha, "started_ms": at,
               "finished_ms": None, "outcome": None}
     if is_tree:
@@ -89,24 +86,20 @@ def start(data, phase, sha, is_tree, at):
 
 def find_attempt(data, phase, attempt_id):
     attempt = next((entry for launch in reversed(data["launches"])
-                    for entry in launch[phase] if entry["attempt"] == attempt_id), None)
+                    for entry in launch[phase] if str(entry["attempt"]) == str(attempt_id)), None)
     if attempt is None:
-        if 0 < attempt_id <= data["last_attempt"][phase]:
-            return None  # Evicted while running.
-        raise ValueError(f"unknown {phase} attempt {attempt_id}")
+        raise ValueError(f"unknown {phase} attempt")
     return attempt
 
 
 def finish(data, phase, attempt_id, outcome, at):
     attempt = find_attempt(data, phase, attempt_id)
-    if attempt is not None and attempt["finished_ms"] is None:
+    if attempt["finished_ms"] is None:
         attempt.update(finished_ms=at, outcome=outcome)
 
 
 def bind_review(data, attempt_id, head, tree, _at):
     attempt = find_attempt(data, "review", attempt_id)
-    if attempt is None:
-        return
     if attempt.get("tree") != tree or attempt["head"] not in (None, head):
         raise ValueError("commit does not match the recorded review tree or head")
     attempt["head"] = head

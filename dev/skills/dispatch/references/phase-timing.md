@@ -3,12 +3,14 @@
 Read `collect` → `timing` or run `dispatch.py timing <receipt>` to read the record without Herdr.
 Absolute timestamps are Unix milliseconds. Each duration measures an observed interval:
 
-- Startup runs from the launch call to confirmation. Codex confirms through `send`. Claude
-  confirms through the first observed child report.
+- Startup runs from the launch call to confirmation. Codex confirms through `send`, including
+  recovery of its original acknowledgment when available. Claude confirms before starting work
+  with the `timing ... delivered` command supplied at launch.
 - Implementation runs from confirmed delivery to the first review launch.
 - Review and CI attempts can overlap. Each carries the candidate SHA, start, finish, and outcome.
   A review of staged changes gets its head when the reviewed tree is committed. CI outcomes
-  with an unverified head use the `-unverified` suffix.
+  with an unverified head use the `-unverified` suffix. A completed wait without configured
+  checks reports `no-checks`.
 - Restart runs from confirmed close to the replacement launch. Replacement startup is separate.
 - Merge runs from the original launch to confirmation. The merge record carries the verified
   feature head when available. The current child report supplies the final head while

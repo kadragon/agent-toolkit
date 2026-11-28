@@ -398,6 +398,13 @@ def main() -> int:
         recorded = json.loads(receipt.with_name("timing.json").read_text(encoding="utf-8"))
         check("a CI outcome without a verified head is still reported as observed",
               result.get("passed") is True and recorded["launches"][0]["ci"][-1]["outcome"] == "passed-unverified")
+        (timed / "scripts" / "hub.sh").write_text(
+            "echo '" + json.dumps({"status": "none", "head_sha": head}) + "'\n", encoding="utf-8")
+        result = run(timed, expected_head=head, CI_WAIT_NO_CHECKS_GRACE_SECS=0, DISPATCH_TIMING_RUN=receipt)
+        recorded = json.loads(receipt.with_name("timing.json").read_text(encoding="utf-8"))
+        check("a successful wait without CI records the explicit no-checks outcome",
+              result.get("reason") == "no CI checks found"
+              and recorded["launches"][0]["ci"][-1]["outcome"] == "no-checks")
 
         stale_green = sha_repo("stale_success", "success", "previous", "failure")
         result = run(stale_green, CI_WAIT_POLL_INTERVAL=1)

@@ -22,7 +22,7 @@
       Print the filtered transcript tail. Every successful peek updates the receipt cursor.
   dispatch.py report-review RESULT
       Read a Codex pre-merge report from stdin and atomically write ready or blocked.
-  dispatch.py timing RUN [start PHASE SHA [--tree] | finish PHASE ATTEMPT OUTCOME
+  dispatch.py timing RUN [delivered | start PHASE SHA [--tree] | finish PHASE ATTEMPT OUTCOME
                          | bind-review ATTEMPT HEAD | merged [HEAD]]
       Read timing or record a review/CI attempt or an independently confirmed merge.
   dispatch.py collect RECEIPT [--stall-minutes N] [--close [--force]]
@@ -41,6 +41,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -166,7 +167,13 @@ def child_argv(cli, model, effort, message, keep_connectors, result=None, *, tru
     settings = dict(CLAUDE_SETTINGS)
     if keep_connectors:
         del settings["disableClaudeAiConnectors"]
-    report = ["--append-system-prompt", report_instruction(result)] if result else []
+    report = []
+    if result:
+        acknowledge = shlex.join([sys.executable, "-I", str(Path(__file__).resolve()), "timing",
+                                  str(result.with_name("run.json")), "delivered"])
+        report = ["--append-system-prompt", f"On receipt of the task, before starting work, run `{acknowledge}`. "
+                  "If the acknowledgment fails, report unavailable startup timing and continue the task. "
+                  + report_instruction(result)]
     return ["claude", "--model", model, "--effort", effort,
             "--settings", json.dumps(settings, separators=(",", ":")), *report, message]
 
@@ -335,8 +342,13 @@ def timing_report(receipt, result):
 
 def timing(args):
     receipt = Path(args.run).resolve()
-    run = load_run(receipt)
     try:
+        if args.event == "delivered":
+            if not timing_path(receipt).is_file():
+                raise ValueError("no timing record for this launch")
+            record_timing(receipt, phase_timing.mark, "delivered_ms")
+            return
+        run = load_run(receipt)
         if args.event == "start":
             print(record_timing(receipt, phase_timing.start, args.phase, args.sha, args.tree))
         elif args.event == "finish":
@@ -492,8 +504,6 @@ def current_result(path, run):
     result, written = read_result(path)
     if written == run.get("previous_result"):
         return None, None
-    if result is not None and run.get("cli") == "claude":
-        mark_timing(path, "delivered_ms", at=written // 1_000_000)
     return result, written
 
 
@@ -872,7 +882,20 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
             raise SystemExit(f"pinned launch withheld; could not register child: {error}") from None
     versions = installed_plugin_versions() if args.cli == "codex" and not wave else {}
     started_ms = phase_timing.now_ms()
-    phase_timing.new_launch(history, started_ms)
+    try:
+        phase_timing.new_launch(history, started_ms)
+    except TIMING_DATA_ERRORS as error:
+        print(f"warning: cannot carry dispatch timing from {previous}: {error}", file=sys.stderr)
+        history = phase_timing.new_launch(phase_timing.empty_history(), started_ms)
+
+    def save_launch_timing():
+        try:
+            write_json(timing_path(receipt), history)
+        except OSError as error:
+            print(f"dispatch timing unavailable: {error}", file=sys.stderr)
+
+    if args.cli == "claude":
+        save_launch_timing()
     launched_ms = started_ms - 1000  # slack for clock rounding between processes
     try:
         if wave:
@@ -928,10 +951,8 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
         run["title"] = title
     if args.cli == "codex" and handoff["work_kind"] != "standalone":
         run["require_review_sources"] = True
-    try:
-        write_json(timing_path(receipt), history)
-    except OSError as error:
-        print(f"dispatch timing unavailable: {error}", file=sys.stderr)
+    if args.cli != "claude":
+        save_launch_timing()
     try:
         write_json(receipt, {**run, "handoff": handoff} if args.cli == "codex" else run)
     except OSError as error:
@@ -1330,8 +1351,9 @@ def send_task(args, run_path):
             if not started and (not result or written == run.get("previous_result")):
                 raise SystemExit("previous delivery is unconfirmed; inspect the child's composer before resuming")
             run["sent"] = True
-            if not run.get("sent_continuation"):
-                mark_timing(run_path, "delivered_ms")
+            acknowledged = run.get("send_acknowledged_ms")
+            if run.get("sent_continuation") is False and type(acknowledged) is int:
+                mark_timing(run_path, "delivered_ms", at=acknowledged)
             write_json(run_path, run)
         if not resend and run["sent"] != continuation:
             raise SystemExit("use --continue only after the first task is confirmed")
@@ -1501,6 +1523,7 @@ def send_task(args, run_path):
             run["sent_turn"] = sent_turn
             run["sent_continuation"] = continuation
             run["send_acknowledged"] = False
+            run.pop("send_acknowledged_ms", None)
             write_json(run_path, run)
         else:
             print("warning: no dispatch receipt. Use --run to carry handoff metadata", file=sys.stderr)
@@ -1592,16 +1615,19 @@ def send_task(args, run_path):
                     verify_delivery_turn(run, terminal)
                 if run and run["send_acknowledged"]:
                     run["send_acknowledged"] = False
+                    run.pop("send_acknowledged_ms", None)
                     write_json(run_path, run)
                 print("warning: the submission left no trace; sending it once more", file=sys.stderr)
             send_error = None
             try:
-                hc_json("send", *guard, "--", address, message)
+                reply = hc_json("send", *guard, "--", address, message)
             except (OSError, subprocess.CalledProcessError, ValueError, KeyError) as error:
                 send_error = error
             else:
                 if run:
                     run["send_acknowledged"] = True
+                    if not continuation and isinstance(reply, dict) and reply.get("started") is True:
+                        run["send_acknowledged_ms"] = phase_timing.now_ms()
                     write_json(run_path, run)
             submitted, saw_trace = confirmed(send_error is not None)
             if not submitted and (attempt or saw_trace or not lost()):
@@ -1613,7 +1639,7 @@ def send_task(args, run_path):
                     run["sent"] = True
                     run["screen_reads"] += screen_reads
                     if not continuation:
-                        mark_timing(run_path, "delivered_ms")
+                        mark_timing(run_path, "delivered_ms", at=run.get("send_acknowledged_ms"))
                     write_json(run_path, run)
                 print(json.dumps({"address": address, "submitted": True, "screen_reads": screen_reads}))
                 return
@@ -2151,16 +2177,17 @@ def main(argv):
     timing_parser.add_argument("run")
     timing_parser.set_defaults(func=timing)
     events = timing_parser.add_subparsers(dest="event")
+    events.add_parser("delivered")
     start_parser = events.add_parser("start")
     start_parser.add_argument("phase", choices=phase_timing.PHASES)
     start_parser.add_argument("sha")
     start_parser.add_argument("--tree", action="store_true")
     finish_parser = events.add_parser("finish")
     finish_parser.add_argument("phase", choices=phase_timing.PHASES)
-    finish_parser.add_argument("attempt", type=int)
+    finish_parser.add_argument("attempt")
     finish_parser.add_argument("outcome", choices=phase_timing.OUTCOMES)
     bind_parser = events.add_parser("bind-review")
-    bind_parser.add_argument("attempt", type=int)
+    bind_parser.add_argument("attempt")
     bind_parser.add_argument("head")
     events.add_parser("merged").add_argument("head", nargs="?")
     collect_parser = sub.add_parser("collect")

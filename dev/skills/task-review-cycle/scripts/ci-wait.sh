@@ -144,7 +144,6 @@ if [ -z "$WATCH_SHA" ]; then
   WATCH_SHA=$(git rev-parse --verify -q HEAD 2>/dev/null || true)
 fi
 
-# One measurement per invocation, regardless of the number of status polls.
 CI_OUTCOME=incomplete
 if [ -n "${DISPATCH_TIMING_RUN:-}" ] && [ -n "$WATCH_SHA" ]; then
   TIMING_PY=$(command -v python3 || command -v python || true)
@@ -225,6 +224,7 @@ while true; do
           fail_verification ci-config-unverified
         fi
         clear_strikes  # a pass is a pass: no-CI must reset the counter like `success` does
+        CI_OUTCOME=no-checks
         jq -n '{passed: true, reason: "no CI checks found"}'
         exit 0
       fi
