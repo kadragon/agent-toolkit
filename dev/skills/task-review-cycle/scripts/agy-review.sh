@@ -53,7 +53,9 @@ This is a static review. Use only git commands and file reads. Do NOT run tests,
 
 ## What to flag
 
-Flag issues introduced or worsened by this change. Also report real bugs in code the diff touches or reads if you verify the same bug exists at the base and the diff did not worsen it. Each finding must be:
+Flag issues introduced or worsened by this change. Also report real bugs in code the diff touches or reads if you verify the same bug exists at the base and the diff did not worsen it. For a verified pre-existing bug, name the everyday path with its failing condition or cite reproduction evidence from real use if available. With neither, treat the bug as a PR comment only.
+
+Each finding must be:
 - A concrete bug, security vulnerability, or performance regression with a clear reproduction scenario
 - Discrete and actionable (one issue per finding, not vague observations)
 - Something the author would fix if made aware of it
@@ -64,9 +66,9 @@ Prefer no finding over a weak finding. Do not pad the review with style nits, pr
 
 Tag each finding:
 - [P0] Blocking — data loss, security hole, crash in production
-- [P1] Urgent — incorrect behavior under normal conditions
-- [P2] Normal — edge case bugs, performance issues, maintainability risks
-- [P3] Low — minor improvements worth noting
+- [P1] Urgent — incorrect behavior under normal conditions that must be fixed before merge
+- [P2] Normal — actionable non-blocking defects. If introduced here, fix in the PR or leave a PR comment without filing an issue.
+- [P3] Low — at most a PR comment, including nits. Never file an issue.
 - [pre_existing] Advisory — a verified bug already present at the base and not worsened by the change
 
 ## Comment format
