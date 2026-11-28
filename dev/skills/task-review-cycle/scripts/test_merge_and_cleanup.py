@@ -498,7 +498,7 @@ def case_dispatch_records_only_confirmed_merge(tmp):
     repo, scripts = make_repo(tmp), make_script_dir(tmp)
     dispatch = scripts / "../../dispatch/scripts"
     dispatch.mkdir(parents=True)
-    for name in ("dispatch.py", "phase_timing.py", "pinned_wave.py", "codex_app_server.py"):
+    for name in ("dispatch.py", "phase_timing.py", "pinned_wave.py", "codex_app_server.py", "shared_codex.py"):
         shutil.copy(SCRIPT.parent / "../../dispatch/scripts" / name, dispatch)
     receipt = scripts / "run.json"
     receipt.write_text('{"address": "t7"}', encoding="utf-8")

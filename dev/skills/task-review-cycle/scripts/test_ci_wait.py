@@ -378,7 +378,7 @@ def main() -> int:
 
         dispatch = tmp / "dispatch/scripts"
         dispatch.mkdir(parents=True)
-        for name in ("dispatch.py", "phase_timing.py", "pinned_wave.py", "codex_app_server.py"):
+        for name in ("dispatch.py", "phase_timing.py", "pinned_wave.py", "codex_app_server.py", "shared_codex.py"):
             shutil.copy(SCRIPT.parent / "../../dispatch/scripts" / name, dispatch)
         receipt = tmp / "run.json"
         receipt.write_text('{"address": "t7"}', encoding="utf-8")
