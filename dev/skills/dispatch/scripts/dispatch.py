@@ -89,15 +89,17 @@ CODEX_MISSING_HOOK = re.compile(r"failed to spawn.*?\bos error 2\b", re.DOTALL)
 WARNING_FOOTER = re.compile(r"⚠\ufe0f?\s*(\d+)\s+warnings?\s*·\s*f2 to view\b", re.IGNORECASE)
 HOOK_BYPASS_NOTICE = ("`--dangerously-bypass-hook-trust` is enabled. "
                       "Enabled hooks may run without review for this invocation.")
-UNSTABLE_FEATURES_NOTICE = re.compile(
+UNSTABLE_FEATURES_PREFIX = re.compile(
     r"Under-development features enabled: [a-z0-9_]+(?:, [a-z0-9_]+)*\. "
     r"Under-development features are incomplete and may behave unpredictably\. "
-    r"To suppress this warning, set `suppress_unstable_features_warning = true` in "
-    r"(?:(?:[A-Za-z]:|~)?[/\\](?:[^`]*[/\\])? *)?config\.toml\.")
+    r"To suppress this warning, set `suppress_unstable_features_warning = true` in ")
+UNSTABLE_FEATURES_PATH = re.compile(r"(?:(?:[A-Za-z]:|~)?[/\\](?:[^`]*[/\\])? *)?config\.toml\.")
 WARNING_VIEW_TITLE = re.compile(r"Warnings · \d+ of \d+ · .+")
 STARTUP_WARNING_TITLE = re.compile(r"Warnings · ([1-9][0-9]*) of ([1-9][0-9]*) · Startup")
 WARNING_VIEW_FOOTER = re.compile(
-    r"k keep & next · esc dismiss & close(?: · \S+ copy)?(?: · \S+ warning)?", re.IGNORECASE)
+    r"^k\skeep\s&\snext\s·\sesc\sdismiss\s&\sclose(?:\s·\s\S+\scopy)?(?:\s·\s\S+\swarning)?\Z",
+    re.IGNORECASE | re.MULTILINE,
+)
 PASTED_CONTENT = re.compile(r"\[Pasted Content \d+ chars\](?: #\d+)?")
 HERDR_MESSAGE = re.compile(r'^<hc\s+from="[^"]+"(?:\s+[\w-]+="[^"]*")*>\s*(.*?)\s*</hc>$', re.DOTALL)
 CODEX_STATUS_LINE = re.compile(
@@ -1645,14 +1647,39 @@ def startup_warning_page(text):
     title = STARTUP_WARNING_TITLE.fullmatch(rows[index])
     if not title:
         return None
-    body = rows[index + 1:]
-    if body and WARNING_VIEW_FOOTER.fullmatch(body[-1]):
-        body.pop()
-    notice = " ".join(body)
-    if notice == HOOK_BYPASS_NOTICE or UNSTABLE_FEATURES_NOTICE.fullmatch(notice):
-        page, count = map(int, title.groups())
-        return page, count, notice
-    return None
+    body = "\n".join(rows[index + 1:])
+    if footer := WARNING_VIEW_FOOTER.search(body):
+        body = body[:footer.start()].rstrip("\n")
+    notice = body.replace("\n", " ")
+    if notice != HOOK_BYPASS_NOTICE:
+        prefix = UNSTABLE_FEATURES_PREFIX.match(notice)
+        if not prefix:
+            return None
+        config_path = body[prefix.end():]
+        if not UNSTABLE_FEATURES_PATH.fullmatch(config_path.replace("\n", "")):
+            return None
+        notice = prefix[0] + config_path
+    page, count = map(int, title.groups())
+    return page, count, notice
+
+
+def reconcile_startup_warning_page(current, previous):
+    if current is None or current[:2] != previous[:2]:
+        return None
+    if current == previous:
+        return previous
+    layout = r"([^ \n])([ \n]*)"
+    current_layout = re.findall(layout, current[2])
+    previous_layout = re.findall(layout, previous[2])
+    if len(current_layout) != len(previous_layout):
+        return None
+    # A Codex display row break can split a path component or replace a space.
+    notice = []
+    for (char, gap), (old_char, old_gap) in zip(current_layout, previous_layout):
+        if char != old_char or (gap != old_gap and {gap, old_gap} not in ({"\n", ""}, {"\n", " "})):
+            return None
+        notice.append(char + (gap if old_gap == "\n" else old_gap))
+    return current[0], current[1], "".join(notice)
 
 
 def send(args):
@@ -1801,9 +1828,11 @@ def send_task(args, run_path):
                 raise SystemExit(f"{address}: task withheld; inspect the Codex hook status with /hooks")
             position = startup_warning_page(text) if screen == "warning-view" else None
             if closing_warning is not None and screen != "waiting":
-                if position == closing_warning and time.monotonic() < closing_warning_until:
-                    time.sleep(SCREEN_POLL_SECONDS)
-                    continue
+                if time.monotonic() < closing_warning_until:
+                    closing_warning = reconcile_startup_warning_page(position, closing_warning)
+                    if closing_warning is not None:
+                        time.sleep(SCREEN_POLL_SECONDS)
+                        continue
                 closing_warning = None
             if screen in {"warning", "warning-view"}:
                 if (not run or run.get("wave") or run.get("trust_hooks") is not True or run["sent"] is not False
@@ -1910,9 +1939,12 @@ def send_task(args, run_path):
                 if not initial and not continuation:
                     if run and terminal["turn"] == 1:
                         screen_reads += 1
-                        snapshot = hc_json("read", "--lines", "0", address)
-                        initial = (snapshot["complete"] and snapshot["how"] == "screen"
-                                   and startup_composer(snapshot["text"]))
+                        snapshot, startup_text = read_codex_screen(address, with_text=True)
+                        if snapshot == "hooks":
+                            raise SystemExit(f"{address}: task withheld; inspect the Codex hook status with /hooks")
+                        if snapshot in {"warning", "warning-view"}:
+                            raise SystemExit(warning_withheld)
+                        initial = snapshot == "ready" and startup_composer(startup_text)
                     if not initial:
                         raise SystemExit(f"{address}: first task withheld; this child already started a turn")
                 if status == "idle" or (continuation and status == "done"):

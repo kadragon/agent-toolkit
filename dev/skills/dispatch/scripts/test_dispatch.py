@@ -3674,6 +3674,67 @@ class CodexSendTests(DispatchTestCase):
                 self.assertEqual(operations, ["esc", "send"] if closes else ["esc"])
                 self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], closes)
 
+    def test_send_handles_reflowed_startup_warning_after_escape(self):
+        terminal = {**DispatchReceiptTests.TERMINAL, **self.IDLE}
+        first = self.BYPASS_NOTICE.replace("1 of 1", "1 of 2")
+        last = self.UNSTABLE_FEATURES_NOTICE
+        split_controls = last.replace(" · esc dismiss", " ·\n  esc dismiss")
+        wrapped_path = last.replace("Config/config.toml.", "Config/\n  config.toml.")
+        hyphenated_path = last.replace("Codex Config", "codex-home")
+        spaced_path = last.replace("/tmp/Codex Config", "/tmp/ Codex Config")
+        for label, original, redraws, sends in (
+            ("split controls", last, [split_controls], True),
+            ("wrapped path", last, [wrapped_path], True),
+            ("wrapped path component", hyphenated_path, [hyphenated_path.replace("codex-home", "codex-\n  home")], True),
+            ("wrapped filename", last, [last.replace("config.toml.", "config.to\n  ml.")], True),
+            ("wrapped path with a space", spaced_path, [spaced_path.replace("/tmp/ ", "/tmp/\n  ")], True),
+            ("different path", last, [wrapped_path.replace("/tmp/", "/var/")], False),
+            ("different visible spacing", last, [spaced_path], False),
+            ("conflicting redraws", wrapped_path.replace("/tmp/Codex", "/tmp/\n  Codex"),
+             [last, spaced_path], False),
+            ("expired window", last, [wrapped_path] * 8, False),
+        ):
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "run.json"
+                receipt.write_text(json.dumps({**DispatchReceiptTests.RECEIPT, "trust_hooks": True}),
+                                   encoding="utf-8")
+                frames = iter([first, original, *redraws])
+                operations = []
+                now = 0
+                escaped_at = None
+
+                def sleep(seconds):
+                    nonlocal now
+                    now += seconds
+
+                def respond(command, *args):
+                    nonlocal escaped_at
+                    if command == "get":
+                        return {**terminal, **self.WORKING} if operations[-1:] == ["send"] else terminal
+                    if command == "read":
+                        return self.screen(next(frames, self.READY))
+                    if command == "keys" and args[-1] == "esc":
+                        escaped_at = now
+                    operations.append(args[-1] if command == "keys" else command)
+                    return {}
+
+                with patch("dispatch.hc_json", side_effect=respond), patch("dispatch.time.sleep", side_effect=sleep), \
+                        patch("dispatch.time.monotonic", side_effect=lambda: now), redirect_stdout(StringIO()):
+                    args = SimpleNamespace(address="t7", message="a task", run=receipt)
+                    if sends:
+                        try:
+                            send(args)
+                        except SystemExit as error:
+                            self.fail(str(error))
+                    else:
+                        with self.assertRaisesRegex(SystemExit, "task withheld.*F2"):
+                            send(args)
+                        expected_wait = {"expired window": 1, "conflicting redraws": 0.5}.get(label, 0.25)
+                        self.assertEqual(now - escaped_at, expected_wait)
+                expected = ["right", "esc", "send"] if sends else ["right", "esc"]
+                self.assertEqual(operations, expected)
+                self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], sends)
+
     def test_startup_notice_requires_opt_in_and_recognized_pages(self):
         terminal = {**DispatchReceiptTests.TERMINAL, **self.IDLE}
         failure = "• Hook failed\n  └ SessionStart hook exited with code 1"
@@ -4224,6 +4285,24 @@ class CodexSendTests(DispatchTestCase):
             self.assertTrue(json.loads(receipt.read_text(encoding="utf-8"))["sent"])
             with self.assertRaisesRegex(SystemExit, "only after the first task"):
                 send(args)
+
+    def test_owned_startup_turn_one_with_new_warning_is_refused(self):
+        banner = "  >_ OpenAI Codex (v0.171.0)\n\n"
+        startup = self.screen(banner + self.READY)
+        warning = self.screen(banner + self.SINGLE_WARNING)
+        idle = {**DispatchReceiptTests.TERMINAL, **self.IDLE, "turn": 1}
+        busy = {**idle, "turn": 2, "status": {"state": "working"}}
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            receipt.write_text(json.dumps(DispatchReceiptTests.RECEIPT), encoding="utf-8")
+            args = SimpleNamespace(address="t7", message="a task", run=receipt)
+            with patch("dispatch.hc_json", side_effect=[
+                startup, idle, warning, {"started": True}, startup, busy, startup,
+            ]) as hc, redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                with self.assertRaisesRegex(SystemExit, "task withheld.*F2"):
+                    send(args)
+            self.assertNotIn("send", [c.args[0] for c in hc.call_args_list])
+            self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], False)
 
     def test_owned_startup_turn_one_with_prior_prompt_is_refused(self):
         startup = self.screen(f"  >_ OpenAI Codex (v0.171.0)\n\n› Someone else's task\n\n{self.READY}")
