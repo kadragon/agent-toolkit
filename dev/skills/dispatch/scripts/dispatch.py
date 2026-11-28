@@ -377,7 +377,8 @@ def report_instruction(result, *, require_review_sources=False):
             "Use complete only for a completed independent result you consolidated, "
             "or give the reason the source is missing. "
             "Only a current-head agy quota-exhausted outcome waives its slot. Record it in "
-            "review_sources.agy, omit agy from review.sources, and require Claude, Codex and "
+            "review_sources.agy and set review.agy_quota_head to that invocation's head. "
+            "Omit agy from review.sources and require Claude, Codex and "
             "passing CI (ci: success) on that head. Record the skip in the PR verification. "
             "An incomplete required review blocks a merge and must report blocked with the reviewer and reason. "
             "Keep the review outcomes in any later PR completion report."
@@ -640,8 +641,10 @@ def review_problem(result, *, require_review_sources=False):
         return "Independent review sources are missing"
     if require_review_sources:
         if agy_quota_exhausted(result):
-            if not {"claude", "codex"}.issubset(sources):
-                return "Independent review record must list claude and codex after an agy quota skip"
+            if review.get("agy_quota_head") != head:
+                return "Agy quota skip head differs from result head"
+            if not {"claude", "codex"}.issubset(sources) or "agy" in sources:
+                return "Independent review record must list claude and codex without agy after a quota skip"
             if result.get("ci") != "success":
                 return "Passing CI is required after an agy quota skip"
         elif not {"claude", "agy", "codex"}.issubset(sources):

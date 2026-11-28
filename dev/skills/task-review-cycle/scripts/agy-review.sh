@@ -2,7 +2,7 @@
 # Launch Antigravity (agy) CLI code review against a base branch.
 #
 # Usage: agy-review.sh <base_branch>
-# Output: Antigravity's review text or a quota-exhausted JSON record to stdout.
+# Output: Antigravity's review text (exit 0) or a quota-exhausted JSON record (exit 75).
 
 set -euo pipefail
 
@@ -169,22 +169,47 @@ NO_COLOR=1 TERM=dumb agy -p "$REVIEW_PROMPT" \
   --add-dir "$REPO_ROOT" \
   --print-timeout 15m >"$AGY_OUT" 2>"$AGY_ERR" || AGY_EXIT=$?
 
-# Only an unsuccessful CLI request can supply the exception. Review text can mention
-# quota errors and a crash or timeout can leave an earlier retry diagnostic behind.
-HTTP_429='^[[:space:]]*429([[:space:]:]|$)|\bHTTP([[:space:]]+error)?[[:space:]:]+429\b|\b429[[:space:]]+Too Many Requests\b|\bAPI Error:[[:space:]]*429\b'
-QUOTA_STATUS='"?(status(Code)?|code)"?[[:space:]]*[:=][[:space:]]*"?429\b'
-QUOTA_MESSAGE='\b(quota|rate limit)[[:space:]]+(is[[:space:]]+)?(exhausted|exceeded|reached)\b|\b(exhausted|exceeded|reached)[[:space:]]+(your[[:space:]]+)?(quota|rate limit)\b'
-if [ "$AGY_EXIT" -gt 0 ] && [ "$AGY_EXIT" -lt 124 ] &&
-  grep -Eiq -e "$HTTP_429" -e "$QUOTA_STATUS" -e "$QUOTA_MESSAGE" "$AGY_ERR"; then
+# Keep the final stderr diagnostic plus its reset hints. An earlier retry can
+# report a 429 before the request terminates with a different error.
+TERMINAL_DIAGNOSTIC=""
+if [ "$AGY_EXIT" -gt 0 ] && [ "$AGY_EXIT" -lt 124 ]; then
+  TERMINAL_DIAGNOSTIC=$(awk '
+    !NF { next }
+    tolower($0) ~ /^[[:space:]]*((your[[:space:]]+)?(quota[[:space:]]+)?(will[[:space:]]+)?resets?[[:space:]]+(in|after|at)|retry[[:space:]]+(in|after)|retry-after:)/ {
+      diagnostic = diagnostic "\n" $0
+      next
+    }
+    { diagnostic = $0 }
+    END { print diagnostic }
+  ' "$AGY_ERR")
+fi
+
+is_quota_failure() {
+  local error="${1%%$'\n'*}"
+  case "$error" in
+    AGY_ERROR:\ *)
+      jq -e '(.error_code | tostring) == "429" and (.code_kind == "http" or .status == "RESOURCE_EXHAUSTED")' \
+        <<<"${error#AGY_ERROR: }" >/dev/null 2>&1
+      ;;
+    *)
+      local http='\bHTTP([[:space:]]+error)?[[:space:]:]+429\b|\b429[[:space:]]+Too Many Requests\b|\bAPI Error:[[:space:]]*429\b'
+      local status='\bAPI Error:.*\b(status(Code)?|error_code|code)"?[[:space:]]*[:=][[:space:]]*"?429\b'
+      local message='(^[[:space:]]*((API[[:space:]]+)?error:[[:space:]]*)?quota|\b(individual|model|api|request|usage|your)[[:space:]]+quota|\brate[[:space:]-]limit)[[:space:]]+((is|has been)[[:space:]]+)?(exhausted|exceeded|reached)\b|\b(exhausted|exceeded|reached)[[:space:]]+your[[:space:]]+(quota|rate limit)\b'
+      grep -Eiq -e "$http" -e "$status" -e "$message" <<<"$error"
+      ;;
+  esac
+}
+
+if is_quota_failure "$TERMINAL_DIAGNOSTIC"; then
   RESET_DURATION='(resets? (in|after)|retry (in|after))[[:space:]]*([0-9]+([.][0-9]+)?[[:space:]]*(hours?|minutes?|seconds?|hrs?|mins?|secs?|h|m|s)[[:space:]]*)+\b'
   RESET_TIME='resets? at[[:space:]]*[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+(Z|[+-][0-9]{2}:[0-9]{2})'
-  RESET=$(grep -Eio -e "$RESET_DURATION" -e "$RESET_TIME" -e 'retry-after:[[:space:]]*[0-9]+\b' "$AGY_ERR" \
+  RESET=$(grep -Eio -e "$RESET_DURATION" -e "$RESET_TIME" -e 'retry-after:[[:space:]]*[0-9]+\b' <<<"$TERMINAL_DIAGNOSTIC" \
     | sed -nE -e '1!d' -e 's/^[^0-9]*//' -e 's/[[:space:]]+$//' -e p || true)
   QUOTA_RESULT=$(jq -cn --arg reset "$RESET" '{agy_review:"quota-exhausted",reset:(if $reset == "" then null else $reset end)}')
   publish_result quota-exhausted "$RESET"
   cat "$AGY_ERR" >&2
   printf '%s\n' "$QUOTA_RESULT"
-  exit 0
+  exit 75
 fi
 
 if ! grep -q '[^[:space:]]' "$AGY_OUT"; then

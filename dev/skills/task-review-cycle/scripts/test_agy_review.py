@@ -244,7 +244,8 @@ def case_quota_exhaustion(tmp):
     print("\ncase: agy quota errors publish a skip, with the reset when supplied")
     for index, (stderr, reset) in enumerate((
         ("HTTP 429 Too Many Requests\nQuota resets in 2 hours.\n", "2 hours"),
-        ("API Error: rate limit exceeded. Your quota will reset after 1h15m38s.\n", "1h15m38s"),
+        ('AGY_ERROR: {"error_code":429,"code_kind":"http","status":"RESOURCE_EXHAUSTED",'
+         '"short_error":"Individual quota reached. Resets in 1h15m38s."}\n', "1h15m38s"),
         ('API Error: {"code": 429}\nRetry-After: 3600\n', "3600"),
         ("API Error: You have exhausted your quota on this model.\n", None),
     )):
@@ -252,7 +253,7 @@ def case_quota_exhaustion(tmp):
         sub.mkdir()
         proc, _, _, result_dir = run(sub, stdout="partial review", exit_code=1, stderr=stderr)
         m = meta(result_dir)
-        check("handled quota exits 0", proc.returncode == 0, proc.stderr)
+        check("quota exits 75 so plain review consumers cannot count it as a review", proc.returncode == 75, proc.stderr)
         expected = {"agy_review": "quota-exhausted", "reset": reset}
         check("stdout contains only the quota record", proc.stdout.strip().startswith("{")
               and json.loads(proc.stdout) == expected, proc.stdout)
@@ -268,6 +269,10 @@ def case_quota_diagnostics_are_not_review_text_or_hard_failures(tmp):
     for index, (stdout, stderr, code, status) in enumerate((
         ("[P1] Handle HTTP 429\n", "", 1, "failed"),
         ("", "Permission denied. See docs at line 429.\n", 1, "empty"),
+        ("", "Error: EDQUOT: disk quota exceeded, write temp/cache\n", 1, "empty"),
+        ("", "HTTP 429 during retry\nQuota resets in 2 hours.\nPermission denied.\n", 1, "empty"),
+        ("", 'AGY_ERROR: {"error_code":403,"status":"PERMISSION_DENIED",'
+         '"short_error":"Prior retry returned HTTP 429."}\n', 1, "empty"),
         ("", "HTTP 429\n", 139, "empty"),
         ("LGTM\n", "HTTP 429 during retry\n", 0, "ok"),
     )):

@@ -71,10 +71,14 @@ LOCAL_FLAG="<from authorization route: --no-hub or empty>"
 PREFLIGHT=$(bash "$SKILL_DIR/scripts/preflight.sh" "$LOCAL_FLAG")
 BASE_BRANCH=$(jq -r '.base_branch' <<<"$PREFLIGHT")
 AGY_AVAILABLE=$(jq -r '.agy_available' <<<"$PREFLIGHT")
+agy_status=0
 if [[ "$AGY_AVAILABLE" == "true" ]]; then
-  bash "$SKILL_DIR/scripts/agy-review.sh" "${BASE_BRANCH}" || echo '{"agy_review":"failed"}' >&2
+  bash "$SKILL_DIR/scripts/agy-review.sh" "${BASE_BRANCH}" || agy_status=$?
 else
   echo '{"agy_review":"unavailable"}' >&2   # not run — distinct from a run that returned no findings
+fi
+if [ "$agy_status" -ne 0 ] && [ "$agy_status" -ne 75 ]; then
+  echo '{"agy_review":"failed"}' >&2
 fi
 ```
 
@@ -104,8 +108,9 @@ fi
 
 `codex_status` 75 is the workspace lock held by another cycle: skipped, not failed.
 `unavailable` (either source) means preflight found no such CLI: the block never ran a review.
-`agy-review.sh` emits `{"agy_review":"quota-exhausted","reset":...}` on stdout and stores
-`status=quota-exhausted` in the invocation metadata for a confirmed quota or rate limit.
+`agy-review.sh` exits 75, emits `{"agy_review":"quota-exhausted","reset":...}` on stdout, and
+stores `status=quota-exhausted` in the invocation metadata when the final error is a quota or
+rate limit. Bind the skip to the head captured for that invocation or recovered from its metadata.
 A null reset means the CLI supplied no recognized reset value. This is a skipped review.
 Only this agy outcome can satisfy its slot on a three-source route with complete Claude and Codex
 reviews and green CI on the final head. A crash, malformed result, policy denial, missing CLI,

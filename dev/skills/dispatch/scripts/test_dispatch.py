@@ -1413,7 +1413,8 @@ class DispatchReceiptTests(DispatchTestCase):
         outcomes = {"claude": "complete", "agy": "quota-exhausted", "codex": "complete"}
         base = {
             "status": "working", "phase": "review", "summary": "CI passed", "ci": "success", "head": head,
-            "review_sources": outcomes, "review": {"head": head, "sources": ["claude", "codex"], "status": "passed"},
+            "review_sources": outcomes,
+            "review": {"head": head, "agy_quota_head": head, "sources": ["claude", "codex"], "status": "passed"},
         }
         cases = (
             ({}, ("working", "merge")),
@@ -1424,7 +1425,10 @@ class DispatchReceiptTests(DispatchTestCase):
             ({"review_sources": {**outcomes, "claude": "quota-exhausted"}}, ("blocked", "review-sources")),
             ({"review_sources": {**outcomes, "codex": "still running"}}, ("blocked", "review-sources")),
             ({"review": {**base["review"], "sources": ["codex"]}}, ("blocked", "review-state")),
+            ({"review": {**base["review"], "sources": ["claude", "codex", "agy"]}}, ("blocked", "review-state")),
             ({"review": {**base["review"], "head": "b" * 40}}, ("blocked", "review-state")),
+            ({"review": {**base["review"], "agy_quota_head": "b" * 40}}, ("blocked", "review-state")),
+            ({"review": {**base["review"], "agy_quota_head": None}}, ("blocked", "review-state")),
             ({"ci": "failure"}, ("blocked", "review-state")),
         )
         with tempfile.TemporaryDirectory() as directory:

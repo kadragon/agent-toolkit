@@ -202,9 +202,10 @@ a legacy report the same way, using archived evidence that identifies the review
 For a receipt with `review_policy: three-source` (legacy: `require_review_sources`), set `review_sources` to an object with the keys
 `claude`, `agy` and `codex`. Use `"complete"` only for a completed, consolidated independent
 result. Otherwise give the reason, such as `"approval denied"`, `"policy excluded"` or
-`"still running"`. For the agy quota exception, set `review_sources.agy` to `"quota-exhausted"`,
-list only `claude` and `codex` in `review.sources`, and report `ci: "success"` after final CI
-passes on the reviewed SHA. Use `review.status: "passed"` only after both reviews are consolidated.
+`"still running"`. For the agy quota exception, set `review_sources.agy` to `"quota-exhausted"`
+and `review.agy_quota_head` to the SHA captured for that agy invocation. It must match `head`.
+List only `claude` and `codex` in `review.sources`, and report `ci: "success"` after final CI
+passes on that SHA. Use `review.status: "passed"` only after both reviews are consolidated.
 
 ```bash
 DISPATCH="<absolute path to dev/skills/dispatch/scripts/dispatch.py>"
