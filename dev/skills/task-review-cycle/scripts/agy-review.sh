@@ -2,7 +2,7 @@
 # Launch Antigravity (agy) CLI code review against a base branch.
 #
 # Usage: agy-review.sh <base_branch>
-# Output: Antigravity's review text to stdout.
+# Output: Antigravity's review text (exit 0) or a quota-exhausted JSON record (exit 75).
 
 set -euo pipefail
 
@@ -29,6 +29,7 @@ if [ -z "$CHANGED_FILES" ]; then
   echo "No changes detected against ${BASE_BRANCH} — skipping Antigravity review." >&2
   exit 0
 fi
+command -v jq >/dev/null 2>&1 || { echo "ERROR: jq is required for Antigravity review." >&2; exit 1; }
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
@@ -142,7 +143,7 @@ append_timing() {
 # Review file first, meta second, pending removed last — a reader that sees `.meta` is
 # guaranteed the review file beside it is whole.
 publish_result() {
-  local status="$1" review_file="" now
+  local status="$1" reset="${2:-}" review_file="" now
   [ -n "$RUN_DIR" ] || return 0
   now=$(date +%s 2>/dev/null || printf '0')
   append_timing "$status" "$((now - START_EPOCH))"
@@ -154,6 +155,9 @@ publish_result() {
     { cat "$PENDING_FILE"
       printf 'status=%s\nexit_code=%s\nfinished_at=%s\nelapsed_seconds=%s\nreview_file=%s\n' \
         "$status" "$AGY_EXIT" "$now" "$((now - START_EPOCH))" "$review_file"
+      if [ -n "$reset" ]; then
+        printf 'reset=%s\n' "$reset"
+      fi
     } >"$META_FILE.tmp.$$" && mv -f "$META_FILE.tmp.$$" "$META_FILE"
   ) 2>/dev/null && rm -f "$PENDING_FILE" 2>/dev/null ||
     echo "WARN: could not persist the agy result to $META_FILE" >&2
@@ -164,7 +168,59 @@ AGY_EXIT=0
 NO_COLOR=1 TERM=dumb agy -p "$REVIEW_PROMPT" \
   --dangerously-skip-permissions \
   --add-dir "$REPO_ROOT" \
-  --print-timeout 15m 2>"$AGY_ERR" | tee "$AGY_OUT" || AGY_EXIT=$?
+  --print-timeout 15m >"$AGY_OUT" 2>"$AGY_ERR" || AGY_EXIT=$?
+
+# agy can print a retry's 429 before reporting a different terminal error.
+TERMINAL_DIAGNOSTIC=""
+if [ "$AGY_EXIT" -gt 0 ] && [ "$AGY_EXIT" -lt 124 ]; then
+  TERMINAL_DIAGNOSTIC=$(awk '
+    { sub(/\r$/, "") }
+    !NF || /^[[:space:]]+at[[:space:]]/ { next }
+    tolower($0) ~ /^[[:space:]]*((your[[:space:]]+)?(quota[[:space:]]+)?(will[[:space:]]+)?resets?[[:space:]]+(in|after|at)|retry[[:space:]]+(in|after)|retry-after:)/ {
+      hint = $0
+      next
+    }
+    { diagnostic = $0; prior_hint = hint; hint = "" }
+    END {
+      print diagnostic
+      if (hint != "") print hint
+      else if (prior_hint != "") print prior_hint
+    }
+  ' "$AGY_ERR")
+fi
+
+is_quota_failure() {
+  local error="${1%%$'\n'*}"
+  case "$error" in
+    AGY_ERROR:\ *)
+      jq -e '(.error_code | tostring) == "429" and (.code_kind == "http" or .status == "RESOURCE_EXHAUSTED")' \
+        <<<"${error#AGY_ERROR: }" >/dev/null 2>&1
+      ;;
+    'API Error: {'*)
+      jq -e '(.code // .statusCode // .error_code | tostring) == "429"' \
+        <<<"${error#API Error: }" >/dev/null 2>&1
+      ;;
+    *)
+      local prefix='^[[:space:]]*((API[[:space:]]+)?error:[[:space:]]*)?'
+      local http='HTTP([[:space:]]+error)?[[:space:]:]+429\b|429([[:space:]]+(Too Many Requests|Resource (has been )?exhausted)\b|[[:space:]]*$)'
+      local resource='RESOURCE_EXHAUSTED([[:space:]]+\(code[[:space:]]+429\)|[[:space:].]*$)'
+      local message='(((individual|model|api|request|usage|your)[[:space:]]+)?quota|rate[[:space:]-]limit)[[:space:]]+((is|has been)[[:space:]]+)?(exhausted|exceeded|reached)\b|you[[:space:]]+(have[[:space:]]+)?(exhausted|exceeded|reached)[[:space:]]+your[[:space:]]+(quota|rate limit)\b'
+      grep -Eiq "$prefix($http|$resource|$message)" <<<"$error"
+      ;;
+  esac
+}
+
+if is_quota_failure "$TERMINAL_DIAGNOSTIC"; then
+  RESET_DURATION='(resets? (in|after)|retry (in|after))[[:space:]]*([0-9]+([.][0-9]+)?[[:space:]]*(hours?|minutes?|seconds?|hrs?|mins?|secs?|h|m|s)[[:space:]]*)+\b'
+  RESET_TIME='resets? at[[:space:]]*[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+(Z|[+-][0-9]{2}:[0-9]{2})'
+  RESET=$(grep -Eio -e "$RESET_DURATION" -e "$RESET_TIME" -e 'retry-after:[[:space:]]*[0-9]+\b' <<<"$TERMINAL_DIAGNOSTIC" \
+    | sed -nE -e '1!d' -e 's/^[^0-9]*//' -e 's/[[:space:]]+$//' -e p || true)
+  QUOTA_RESULT=$(jq -cn --arg reset "$RESET" '{agy_review:"quota-exhausted",reset:(if $reset == "" then null else $reset end)}')
+  publish_result quota-exhausted "$RESET"
+  cat "$AGY_ERR" >&2
+  printf '%s\n' "$QUOTA_RESULT"
+  exit 75
+fi
 
 if ! grep -q '[^[:space:]]' "$AGY_OUT"; then
   publish_result empty
@@ -189,6 +245,7 @@ if [ "$AGY_EXIT" -ne 0 ]; then
 fi
 
 publish_result ok
+cat "$AGY_OUT"
 
 # Forward any agy stderr (warnings, auth notices, rate-limit messages) even on success.
 # Must not be the script's last command as a bare `[ ... ] && ...` list: when stderr is

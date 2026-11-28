@@ -120,12 +120,14 @@ result before ready or merge without waiting for work still running. On GitHub, 
 Use the same SHA in the merge command or ready report. On Forgejo, confirm that the remote head
 and its applicable CI match the local candidate.
 
+Finalize dispositions and update the PR's `Verification:` section from final evidence when
+authorized. When using the agy quota exception on hub, record `Reviewers Skipped: agy — quota exhausted`
+and any known reset in that section or a PR comment before reporting ready or merging. Keep the
+closing lines and report local and remote check outcomes. On lite, preserve
+the final evidence in the merge commit message before retiring the archive.
+
 Apply the [Dispatch pre-merge report](#dispatch-pre-merge-report) gate to every dispatched
 task cycle that has a PR, Codex or Claude, before a ready report or any authorized base merge.
-
-Finalize dispositions and update the PR's `Verification:` section from final evidence when
-authorized. Keep its closing lines and report local and remote check outcomes. On lite, preserve
-the final evidence in the merge commit message before retiring the archive.
 
 ## Dispatch timing
 
@@ -169,8 +171,10 @@ to the CI wait and merge helper per `ci-failure-handling.md`. For a separately v
 
 All dispatched PRs report the reviewed head and sources. For receipts with
 `review_policy: three-source` (legacy receipts without a policy: `require_review_sources`), consolidate the independent Claude primary and the agy and Codex panel
-results from Step 3 and late reclaim. A missing required source blocks readiness and merge.
-Keep pending results available for resume and follow the existing review budget when reclaiming.
+results from Step 3 and late reclaim. A missing required source blocks readiness and merge,
+except for a confirmed agy quota skip on the final head with Claude and Codex complete and CI
+green on that head. Keep pending results available for resume and follow the existing review
+budget when reclaiming.
 
 After final verification, pass the pre-merge report as UTF-8 JSON on stdin to the installed
 dispatch script. Use the assigned path beside the current dispatch receipt. The helper exits 0 even
@@ -191,13 +195,17 @@ Obtain one read-only confirmation for the current SHA from each required source 
 covers a different head. Give each source the previous SHA, its findings and the delta to check.
 Use the regular source launch when no prior result exists. The disposition and re-review budgets still
 apply to code findings. Reclaim agy results from the matching invocation directory per
-`late-source-reclaim.md`. Record the outcomes on the current SHA before reporting ready. Resume
+`late-source-reclaim.md`. A quota skip on a prior SHA needs a fresh outcome on the current SHA.
+Record the outcomes on the current SHA before reporting ready. Resume
 a legacy report the same way, using archived evidence that identifies the reviewed head.
 
 For a receipt with `review_policy: three-source` (legacy: `require_review_sources`), set `review_sources` to an object with the keys
 `claude`, `agy` and `codex`. Use `"complete"` only for a completed, consolidated independent
 result. Otherwise give the reason, such as `"approval denied"`, `"policy excluded"` or
-`"still running"`.
+`"still running"`. For the agy quota exception, set `review_sources.agy` to `"quota-exhausted"`
+and `review.agy_quota_head` to the SHA captured for that agy invocation. It must match `head`.
+List only `claude` and `codex` in `review.sources`, and report `ci: "success"` after final CI
+passes on that SHA. Use `review.status: "passed"` only after both reviews are consolidated.
 
 ```bash
 DISPATCH="<absolute path to dev/skills/dispatch/scripts/dispatch.py>"

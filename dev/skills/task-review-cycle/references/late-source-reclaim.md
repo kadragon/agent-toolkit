@@ -52,7 +52,7 @@ size); argue about runway from it, not from one cycle's impression.
 ## Pre-merge reclaim
 
 Run this during *Final verification*, for each panel source (codex, agy) recorded as
-`Reviewers Skipped` this cycle — still running, or failed. On the hub path that means *after*
+`Reviewers Skipped` this cycle — still running, failed, or agy quota-exhausted. On the hub path that means *after*
 `ci-wait.sh` returns green — the CI wait is free runway for a slow source, so reclaiming
 earlier throws it away.
 
@@ -80,6 +80,7 @@ done
 | `.pending` only, `pid` alive under `kill -0` | The source is still running. Continue final verification and report the `.meta` path. |
 | `.pending` only, `pid` dead | The run died without a result. Nothing to reclaim; the `Reviewers Skipped` line stands. |
 | `.meta` with `status=failed` or `empty`, or no files at all | Nothing to reclaim; the `Reviewers Skipped` line stands. |
+| agy `.meta` with `status=quota-exhausted` for the matching invocation and head | Record the skip and any reset. Reclaim a successful result already available for this head. Otherwise do not relaunch or wait solely for the quota reset. |
 | `.review.txt` and `.pending` but no `.meta` | The meta write failed after the review landed. Read the review file directly and treat it as `status=ok`. |
 
 `head_sha` in the meta is the commit the late review actually read. When it does not match the

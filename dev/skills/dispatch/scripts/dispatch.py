@@ -376,6 +376,10 @@ def report_instruction(result, *, require_review_sources=False):
             "Use the same lowercase names in review.sources. "
             "Use complete only for a completed independent result you consolidated, "
             "or give the reason the source is missing. "
+            "Only a current-head agy quota-exhausted outcome waives its slot. Record it in "
+            "review_sources.agy and set review.agy_quota_head to that invocation's head. "
+            "Omit agy from review.sources and require Claude, Codex and "
+            "passing CI (ci: success) on that head. Record the skip in the PR verification. "
             "An incomplete required review blocks a merge and must report blocked with the reviewer and reason. "
             "Keep the review outcomes in any later PR completion report."
         )
@@ -535,6 +539,11 @@ def validate_result(result):
         raise ValueError("invalid status, phase, or summary")
 
 
+def agy_quota_exhausted(result):
+    outcomes = result.get("review_sources")
+    return isinstance(outcomes, dict) and outcomes.get("agy") == "quota-exhausted"
+
+
 def missing_reviews(result):
     sources = result.get("review_sources")
     if not isinstance(sources, dict):
@@ -542,7 +551,7 @@ def missing_reviews(result):
     missing = {}
     for reviewer in REVIEW_SOURCES:
         outcome = sources.get(reviewer)
-        if outcome == "complete":
+        if outcome == "complete" or (reviewer == "agy" and outcome == "quota-exhausted"):
             continue
         reason = " ".join(outcome.split())[:160] if isinstance(outcome, str) else ""
         missing[reviewer] = reason or "no completed result"
@@ -630,7 +639,14 @@ def review_problem(result, *, require_review_sources=False):
         not isinstance(source, str) or not source.strip() for source in sources
     ):
         return "Independent review sources are missing"
-    if require_review_sources and not {"claude", "agy", "codex"}.issubset(sources):
+    if agy_quota_exhausted(result):
+        if review.get("agy_quota_head") != head:
+            return "Agy quota skip head differs from result head"
+        if not {"claude", "codex"}.issubset(sources) or "agy" in sources:
+            return "Independent review record must list claude and codex without agy after a quota skip"
+        if result.get("ci") != "success":
+            return "Passing CI is required after an agy quota skip"
+    elif require_review_sources and not {"claude", "agy", "codex"}.issubset(sources):
         return "Independent review record must list claude, agy and codex"
     return None
 
@@ -2218,6 +2234,8 @@ def brief_report(report, *, outcome=None):
     fields = (status, result.get("phase"), result.get("summary"), result.get("pr"), watch_stop_reason(report))
     if warning := result.get("review_warning"):
         fields += (warning,)
+    if agy_quota_exhausted(result):
+        fields += ("agy: quota-exhausted",)
     measurements = report.get("timing", {})
     launches = measurements.get("launches", [])
     if launches:

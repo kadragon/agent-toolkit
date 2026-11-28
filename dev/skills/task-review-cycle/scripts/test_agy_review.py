@@ -21,6 +21,7 @@ Windows; CI runs them on ubuntu.
 Run: python3 dev/skills/task-review-cycle/scripts/test_agy_review.py
 """
 
+import json
 import os
 import re
 import subprocess
@@ -48,6 +49,7 @@ for pending in "$AGY_STUB_RESULTS"/*/run.*/review.pending; do
   fi
 done
 printf '%s' "$AGY_STUB_STDOUT"
+printf '%s' "${AGY_STUB_STDERR:-}" >&2
 exit "$AGY_STUB_EXIT"
 """
 
@@ -84,7 +86,7 @@ def make_repo(tmp, review_guidance=None):
     return repo
 
 
-def run(tmp, stdout="", exit_code=0, review_guidance=None, base="main"):
+def run(tmp, stdout="", exit_code=0, review_guidance=None, base="main", stderr=""):
     """Run agy-review.sh against main with a stubbed `agy`. Returns (proc, prompt, snapshot, dir)."""
     repo = make_repo(tmp, review_guidance)
     if review_guidance is not None:
@@ -105,6 +107,7 @@ def run(tmp, stdout="", exit_code=0, review_guidance=None, base="main"):
         "AGY_STUB_RESULTS": str(result_dir),
         "AGY_STUB_PENDING_SNAPSHOT": str(snapshot),
         "AGY_STUB_STDOUT": stdout,
+        "AGY_STUB_STDERR": stderr,
         "AGY_STUB_EXIT": str(exit_code),
     }
     proc = subprocess.run(
@@ -235,6 +238,58 @@ def case_failed_run_records_failure(tmp):
     check("meta status=failed", m.get("status") == "failed", str(m))
     check("meta exit_code=3", m.get("exit_code") == "3", str(m))
     check("no review file", not list(result_dir.rglob("*.txt")))
+
+
+def case_quota_exhaustion(tmp):
+    print("\ncase: agy quota errors publish a skip, with the reset when supplied")
+    for index, (stderr, reset) in enumerate((
+        ("HTTP 429 Too Many Requests\nQuota resets in 2 hours.\n", "2 hours"),
+        ('AGY_ERROR: {"error_code":429,"code_kind":"http","status":"RESOURCE_EXHAUSTED",'
+         '"short_error":"Individual quota reached. Resets in 1h15m38s."}\n', "1h15m38s"),
+        ('API Error: {"code": 429}\nRetry-After: 3600\n', "3600"),
+        ("API Error: 429\n", None),
+        ("Quota resets in 2 hours.\nHTTP 429 Too Many Requests\r\n\r\n", "2 hours"),
+        ("Error: 429 Resource has been exhausted (e.g. check quota).\n    at fetch (client.js:10)\n", None),
+        ("Error: RESOURCE_EXHAUSTED\n", None),
+        ("API Error: You have exhausted your quota on this model.\n", None),
+    )):
+        sub = tmp / str(index)
+        sub.mkdir()
+        proc, _, _, result_dir = run(sub, stdout="partial review", exit_code=1, stderr=stderr)
+        m = meta(result_dir)
+        check("quota exits 75 so plain review consumers cannot count it as a review", proc.returncode == 75, proc.stderr)
+        expected = {"agy_review": "quota-exhausted", "reset": reset}
+        check("stdout contains only the quota record", proc.stdout.strip().startswith("{")
+              and json.loads(proc.stdout) == expected, proc.stdout)
+        check("meta records the quota status and exit code",
+              m.get("status") == "quota-exhausted" and m.get("exit_code") == "1", str(m))
+        check("meta includes the reset when supplied", m.get("reset") == reset, str(m))
+        check("no sidecar review file or pending marker",
+              not list(result_dir.glob("*/run.*/review.txt")) and not list(result_dir.rglob("*.pending")))
+
+
+def case_quota_diagnostics_are_not_review_text_or_hard_failures(tmp):
+    print("\ncase: review text and unrelated failures cannot waive agy")
+    for index, (stdout, stderr, code, status) in enumerate((
+        ("[P1] Handle HTTP 429\n", "", 1, "failed"),
+        ("", "Permission denied. See docs at line 429.\n", 1, "empty"),
+        ("", "Error: EDQUOT: disk quota exceeded, write temp/cache\n", 1, "empty"),
+        ("", "HTTP 429 during retry\nQuota resets in 2 hours.\nPermission denied.\n", 1, "empty"),
+        ("", "API Error: HTTP 403 Forbidden after retrying HTTP 429\n", 1, "empty"),
+        ("Error: fetch failed\n", "Retrying request after HTTP 429 (attempt 3/3)\n", 1, "failed"),
+        ("", 'API Error: {"code": 429\n', 1, "empty"),
+        ("", 'AGY_ERROR: {"error_code":403,"status":"PERMISSION_DENIED",'
+         '"short_error":"Prior retry returned HTTP 429."}\n', 1, "empty"),
+        ("", "HTTP 429\n", 139, "empty"),
+        ("LGTM\n", "HTTP 429 during retry\n", 0, "ok"),
+    )):
+        sub = tmp / str(index)
+        sub.mkdir()
+        proc, _, _, result_dir = run(sub, stdout=stdout, stderr=stderr, exit_code=code)
+        check(f"{status}: exit and meta stay unchanged",
+              (proc.returncode == 0) == (status == "ok") and meta(result_dir).get("status") == status,
+              proc.stderr)
+        check(f"{status}: no quota sentinel", "quota-exhausted" not in proc.stdout, proc.stdout)
 
 
 def case_empty_run_records_empty(tmp):
@@ -372,6 +427,8 @@ def main():
         case_repo_guidance_and_pre_existing,
         case_ok_run_persists_review,
         case_failed_run_records_failure,
+        case_quota_exhaustion,
+        case_quota_diagnostics_are_not_review_text_or_hard_failures,
         case_empty_run_records_empty,
         case_legacy_trio_is_not_reused,
         case_every_run_appends_timing,
