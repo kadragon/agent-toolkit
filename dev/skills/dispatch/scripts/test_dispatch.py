@@ -1991,11 +1991,21 @@ class CodexSendTests(DispatchTestCase):
     IDLE = {"turn": 0, "status": {"state": "idle"}}
     WORKING = {"turn": 0, "status": {"state": "working"}}
     SINGLE_WARNING = f"{READY}\n  ⚠ 1 warning · f2 to view"
+    TWO_WARNINGS = f"{READY}\n  ⚠ 2 warnings · f2 to view"
+    WARNING_CONTROLS = "  k keep & next · esc dismiss & close · ctrl+shift+c copy · ←/→ warning"
     BYPASS_NOTICE = (
         "  Warnings · 1 of 1 · Startup\n\n"
         "  `--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run\n"
         "  without review for this invocation.\n\n"
-        "  k keep & next · esc dismiss & close · ctrl+shift+c copy · ←/→ warning"
+        f"{WARNING_CONTROLS}"
+    )
+    UNSTABLE_FEATURES_NOTICE = (
+        "  Warnings · 2 of 2 · Startup\n\n"
+        "  Under-development features enabled: code_mode, example_feature.\n"
+        "  Under-development features are incomplete and may behave unpredictably.\n"
+        "  To suppress this warning, set `suppress_unstable_features_warning = true` in\n"
+        "  /tmp/Codex Config/config.toml.\n\n"
+        f"{WARNING_CONTROLS}"
     )
     HOOK_REVIEW = (
         "  Hooks need review\n  2 hooks are new or changed.\n\n"
@@ -2130,15 +2140,52 @@ class CodexSendTests(DispatchTestCase):
                 self.assertEqual(operations, ["esc", "send"] if already_open else ["f2", "esc", "send"])
                 self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], True)
 
-    def test_startup_notice_requires_opt_in_and_exact_single_page(self):
+    def test_send_dismisses_two_recognized_startup_pages(self):
+        first = self.BYPASS_NOTICE.replace("1 of 1", "1 of 2")
+        wrapped = self.UNSTABLE_FEATURES_NOTICE.replace("Config/config.toml.", "Config/\n  config.toml.")
+        for pages in ((first, self.UNSTABLE_FEATURES_NOTICE),
+                      (wrapped.replace("2 of 2", "1 of 2"), first.replace("1 of 2", "2 of 2"))):
+            with self.subTest(first=pages[0]), tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "run.json"
+                receipt.write_text(json.dumps({**DispatchReceiptTests.RECEIPT, "trust_hooks": True}),
+                                   encoding="utf-8")
+                terminal = {**DispatchReceiptTests.TERMINAL, **self.IDLE}
+                frames = iter([self.TWO_WARNINGS, pages[0], pages[0], pages[1]])
+                operations = []
+
+                def respond(command, *args):
+                    if command == "get":
+                        return {**terminal, **self.WORKING} if operations[-1:] == ["send"] else terminal
+                    if command == "read":
+                        return self.screen(next(frames) if "esc" not in operations else self.READY)
+                    if command == "keys":
+                        operations.append(args[-1])
+                    else:
+                        self.assertEqual(command, "send")
+                        operations.append("send")
+                    return {}
+
+                with patch("dispatch.hc_json", side_effect=respond), patch("dispatch.time.sleep"), \
+                        redirect_stdout(StringIO()):
+                    try:
+                        send(SimpleNamespace(address="t7", message="a task", run=receipt))
+                    except SystemExit as error:
+                        self.fail(str(error))
+                self.assertEqual(operations, ["f2", "right", "esc", "send"])
+                self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], True)
+
+    def test_startup_notice_requires_opt_in_and_recognized_pages(self):
         terminal = {**DispatchReceiptTests.TERMINAL, **self.IDLE}
         failure = "• Hook failed\n  └ SessionStart hook exited with code 1"
+        first = self.screen(self.BYPASS_NOTICE.replace("1 of 1", "1 of 2"))
+        unknown = self.screen(self.UNSTABLE_FEATURES_NOTICE.replace(
+            "Under-development features are incomplete and may behave unpredictably.", "Review hooks first."))
         for label, opt_in, shown, responses, keys, reason in (
             ("no opt-in", False, self.SINGLE_WARNING, [], [], "F2"),
             ("open without opt-in", False, self.BYPASS_NOTICE, [], [], "F2"),
             ("open after startup", True, self.BYPASS_NOTICE, [{**terminal, "turn": 2}], [], "F2"),
             ("unrelated open page", True, self.BYPASS_NOTICE.replace("Startup", "Runtime"), [], [], "F2"),
-            ("multiple footer", True, self.SINGLE_WARNING.replace("1 warning", "2 warnings"), [], [], "F2"),
+            ("invalid footer count", True, self.SINGLE_WARNING.replace("1 warning", "0 warnings"), [], [], "F2"),
             ("wrong owner", True, self.SINGLE_WARNING,
              [{**terminal, "created_ms": 51}], [], "terminal identity changed"),
             ("busy", True, self.SINGLE_WARNING, [{**terminal, **self.WORKING}], [], "F2"),
@@ -2148,8 +2195,14 @@ class CodexSendTests(DispatchTestCase):
             ("extra body", True, self.SINGLE_WARNING,
              [terminal, {}, self.screen(self.BYPASS_NOTICE.replace("\n\n  k", "\n  Extra warning\n\n  k"))],
              ["f2"], "F2"),
-            ("multiple pages", True, self.SINGLE_WARNING,
+            ("page count mismatch", True, self.SINGLE_WARNING,
              [terminal, {}, self.screen(self.BYPASS_NOTICE.replace("1 of 1", "1 of 2"))], ["f2"], "F2"),
+            ("missing bypass notice", True, self.SINGLE_WARNING,
+             [terminal, {}, self.screen(self.UNSTABLE_FEATURES_NOTICE.replace("2 of 2", "1 of 1")),
+              terminal, {}, self.screen(self.SINGLE_WARNING)], ["f2"], "F2"),
+            ("unknown second page", True, self.TWO_WARNINGS,
+             [terminal, {}, first, terminal, {}, unknown, terminal, {}, self.screen(self.SINGLE_WARNING)],
+             ["f2", "right"], "F2"),
             ("wrong source", True, self.SINGLE_WARNING,
              [terminal, {}, self.screen(self.BYPASS_NOTICE.replace("Startup", "Runtime"))], ["f2"], "F2"),
             ("incomplete page", True, self.SINGLE_WARNING,

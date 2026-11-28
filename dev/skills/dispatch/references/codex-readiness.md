@@ -111,10 +111,18 @@ with or without `--task`. Check `codex --help` for support (verified on Codex CL
 Verify the enabled hook sources and commands and get explicit authorization for the bypass.
 The flag runs enabled hooks without requiring persisted trust for this process and does not
 save approval. Repository trust, hook failures, plugin cache checks and delivery checks still apply.
-On the first send for a verified opt-in receipt, dispatch opens a single warning with F2.
-It closes the viewer with Esc only when the sole Startup page contains the exact native
-hook-trust bypass notice. It then rechecks the composer and waits for the terminal to be idle
-before sending. Other warnings still require manual review.
+On the first send for a verified opt-in receipt, dispatch opens the warning viewer with F2
+and reads each page in order. It recognizes these native Startup notices:
+
+- The `--dangerously-bypass-hook-trust` notice that enabled hooks may run without review.
+- The `Under-development features enabled:` notice, with the feature list and the
+  `suppress_unstable_features_warning = true` setting in the Codex config path. Dispatch checks
+  the full message template.
+
+Dispatch closes the viewer with Esc only after recognizing every page and finding the bypass
+notice. It then rechecks the composer and waits for an idle terminal before sending. An
+unrecognized page or a missing bypass notice leaves the viewer open and withholds the task
+for manual review.
 Omit `--trust-hooks` to use the manual review below.
 
 ## Before a shared-cache Codex wave
