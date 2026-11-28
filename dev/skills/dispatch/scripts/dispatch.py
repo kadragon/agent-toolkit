@@ -156,6 +156,7 @@ BANNED_MODELS = ("fable", "astra")
 CODEX_FAMILIES = ("luna", "terra", "sol")
 CODEX_SLUG = re.compile(r"gpt-(\d+(?:\.\d+)*)-([a-z]+)")
 QUOTA_SCRIPT = Path(__file__).resolve().with_name("quota.py")
+TERMINAL_NAME_LIMIT = 32
 QUOTA_TIMEOUT_SECONDS = 10
 SHARED_CACHE_HOLD = "shared-cache hold"
 EXPIRING_PASS_EXCEPTIONS = ("production DB", "deploy")
@@ -165,7 +166,7 @@ BIAS_EXCEPTIONS = ("unknown-cause debugging", "open grill/spec", "security", "au
 
 def terminal_name(raw):
     """hc names are 1-32 of a-z 0-9 - _."""
-    name = re.sub(r"[^a-z0-9_-]+", "-", raw.lower()).strip("-")[:32]
+    name = re.sub(r"[^a-z0-9_-]+", "-", raw.lower()).strip("-")[:TERMINAL_NAME_LIMIT]
     if not name:
         raise SystemExit(f"cannot build a terminal name from {raw!r}")
     return name
@@ -176,7 +177,7 @@ def child_name(repo, title):
     slug = re.sub(r"[^a-z0-9_-]+", "-", (title or "").lower()).strip("-_")
     if not slug:
         return base
-    return f"{base}-{slug}"[:32].rstrip("-")
+    return f"{base}-{slug}"[:TERMINAL_NAME_LIMIT].rstrip("-")
 
 
 def child_argv(cli, model, effort, message, keep_connectors, result=None, *, trust_hooks=False):
@@ -704,10 +705,14 @@ def free_name(base, explicit, taken):
         return base
     if explicit:
         raise SystemExit(f"terminal name {base!r} is taken by a live terminal")
+    prefix = base[:TERMINAL_NAME_LIMIT - len("-99")]
     n = 2
-    while f"{base[:29]}-{n}" in taken:
+    while True:
+        suffix = f"-{n}"
+        candidate = f"{prefix[:TERMINAL_NAME_LIMIT - len(suffix)]}{suffix}"
+        if candidate not in taken:
+            return candidate
         n += 1
-    return f"{base[:29]}-{n}"
 
 
 def configured_handoff_lines(launch_dir, cwd):
