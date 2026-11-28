@@ -2122,6 +2122,8 @@ def wait(args):
             for path in pending:
                 report = collect_result(path, False, False, args.stall_minutes, warn_drift=False, deadline=deadline)
                 outcome = reached_outcome(report, args.until)
+                if outcome == "stop":
+                    remaining_wait(deadline)
                 line = brief_report(report, outcome=outcome)
                 if args.first and outcome:
                     print(f"{path} · {line}", flush=True)
@@ -2210,10 +2212,11 @@ def screen_stop_reason(snapshot, cli):
     return None
 
 
-def last_commit_ms(cwd, *, timeout=2):
+def last_commit_ms(cwd, *, deadline=None):
     if not cwd:
         return 0
     try:
+        timeout = min(2, remaining_wait(deadline)) if deadline is not None else 2
         commit = subprocess.run(
             ["git", "log", "-1", "--format=%ct", "HEAD", "--"], cwd=cwd, capture_output=True,
             text=True, check=True, timeout=timeout, env={**os.environ, "GIT_NO_LAZY_FETCH": "1"},
@@ -2253,10 +2256,7 @@ def child_stop_reason(terminal, run, result, written, stall_minutes, drift=((), 
             worktree = (result or {}).get("worktree")
             cwd = ((worktree if isinstance(worktree, str) else None)
                    or (terminal.get("foreground") or {}).get("cwd") or terminal.get("cwd"))
-            timeout = min(2, remaining_wait(deadline)) if deadline is not None else 2
-            stale = last_commit_ms(cwd, timeout=timeout) <= cutoff_ms
-            if deadline is not None:
-                remaining_wait(deadline)
+            stale = last_commit_ms(cwd, deadline=deadline) <= cutoff_ms
     if not stale and not changed and state not in {"blocked", "error", "idle", "done"}:
         return None, 0
     try:
@@ -2265,8 +2265,6 @@ def child_stop_reason(terminal, run, result, written, stall_minutes, drift=((), 
         notice = screen_stop_reason(snapshot, run["cli"])
     except (OSError, ValueError, subprocess.SubprocessError):
         snapshot, notice = {}, None
-    if stale and deadline is not None:
-        remaining_wait(deadline)
     if notice:
         return notice, 1
     if (run["cli"] == "codex" and snapshot.get("how") == "screen"

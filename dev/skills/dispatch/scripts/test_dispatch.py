@@ -2869,29 +2869,34 @@ class DispatchWatchTests(unittest.TestCase):
                     else:
                         self.assertEqual(hc.call_args.kwargs["timeout"], 0.5)
 
-    def test_wait_keeps_blocked_report_when_advisory_screen_read_times_out(self):
+    def test_wait_keeps_blocked_report_when_screen_read_times_out(self):
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
-            terminal = {**DispatchReceiptTests.TERMINAL, "status": {"state": "idle"}, "status_ms": 1}
+            result = receipt.with_name("result.json")
             write_json(receipt, {**DispatchReceiptTests.RECEIPT, "cli": "claude", "sent": True})
-            write_json(receipt.with_name("result.json"), {"status": "blocked", "phase": "review", "summary": "blocked"})
+            write_json(result, {"status": "blocked", "phase": "review", "summary": "blocked"})
+            os.utime(result, (1, 1))
             args = SimpleNamespace(first=False, runs=[receipt], until={"blocked"}, timeout=1, stall_minutes=30)
-            now = 0
+            for state in ("idle", "working"):
+                now = 0
+                terminal = {**DispatchReceiptTests.TERMINAL, "status": {"state": state},
+                            "status_ms": 1, "cwd": directory}
 
-            def herdr_probe(command, *args, **kwargs):
-                nonlocal now
-                if command == "get":
-                    return terminal
-                now = 2
-                raise subprocess.TimeoutExpired("hc read", kwargs["timeout"])
+                def herdr_probe(command, *args, **kwargs):
+                    nonlocal now
+                    if command == "get":
+                        return terminal
+                    now = 2
+                    raise subprocess.TimeoutExpired("hc read", kwargs["timeout"])
 
-            with patch("dispatch.time.monotonic", side_effect=lambda: now), \
-                 patch("dispatch.hc_json", side_effect=herdr_probe), redirect_stdout(StringIO()) as output:
-                try:
-                    wait(args)
-                except SystemExit as error:
-                    self.fail(f"The saved blocked outcome should be reported: {error}")
-            self.assertEqual(output.getvalue().split(" · ")[:6], ["t7", "blocked", "review", "blocked", "-", "-"])
+                with self.subTest(state=state), patch("dispatch.time.monotonic", side_effect=lambda: now), \
+                     patch("dispatch.subprocess.run", return_value=SimpleNamespace(stdout="1")), \
+                     patch("dispatch.hc_json", side_effect=herdr_probe), redirect_stdout(StringIO()) as output:
+                    try:
+                        wait(args)
+                    except SystemExit as error:
+                        self.fail(f"The saved blocked outcome should be reported: {error}")
+                    self.assertEqual(output.getvalue().split(" · ")[:4], ["t7", "blocked", "review", "blocked"])
 
     def test_wait_times_out_when_no_selected_outcome_occurs(self):
         report = {"address": "t7", "status": "idle", "state": "live", "stop_reason": None, "result": None}
