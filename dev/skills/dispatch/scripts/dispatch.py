@@ -125,6 +125,7 @@ WARMUP_SETTLE_SECONDS = 2
 MARKETPLACE_UPGRADE_SECONDS = 180
 DRAFT_CLEARS = 5
 DRAFT_CLEAR_SETTLE_SECONDS = 1
+WARNING_CLOSE_SETTLE_SECONDS = 1
 LOST_SETTLE_SECONDS = 2
 RESULT_STATES = {"done", "ready", "blocked", "merged", "working"}
 RESULT_LIMIT = 8192
@@ -1572,10 +1573,9 @@ def startup_warning_page(text):
     if body and WARNING_VIEW_FOOTER.fullmatch(body[-1]):
         body.pop()
     notice = " ".join(body)
-    is_bypass = notice == HOOK_BYPASS_NOTICE
-    if is_bypass or UNSTABLE_FEATURES_NOTICE.fullmatch(notice):
+    if notice == HOOK_BYPASS_NOTICE or UNSTABLE_FEATURES_NOTICE.fullmatch(notice):
         page, count = map(int, title.groups())
-        return page, count, is_bypass
+        return page, count, notice
     return None
 
 
@@ -1706,9 +1706,12 @@ def send_task(args, run_path):
     warning_turn = None
     warning_count = None
     warning_page = 0
+    next_warning_page = 1
     saw_bypass_notice = False
     warning_withheld = f"{address}: task withheld; inspect the Codex warning with F2"
     dismissed_startup_warnings = False
+    closing_warning = None
+    closing_warning_until = 0
     try:
         deadline = time.monotonic() + 30
         while True:
@@ -1720,22 +1723,32 @@ def send_task(args, run_path):
                 raise SystemExit(f"{address}: resend withheld; the Codex composer is not clear")
             if screen == "hooks":
                 raise SystemExit(f"{address}: task withheld; inspect the Codex hook status with /hooks")
+            position = startup_warning_page(text) if screen == "warning-view" else None
+            if closing_warning is not None and screen != "waiting":
+                if position == closing_warning and time.monotonic() < closing_warning_until:
+                    time.sleep(SCREEN_POLL_SECONDS)
+                    continue
+                closing_warning = None
             if screen in {"warning", "warning-view"}:
                 if (not run or run.get("wave") or run.get("trust_hooks") is not True or run["sent"] is not False
                         or dismissed_startup_warnings):
                     raise SystemExit(warning_withheld)
                 if screen == "warning-view":
-                    position = startup_warning_page(text)
                     if position is None:
                         raise SystemExit(warning_withheld)
-                    page, count, is_bypass = position
-                    if (page > count or page not in (warning_page, warning_page + 1)
+                    page, count, notice = position
+                    if warning_count is None:
+                        # A viewer already open at startup can be on any page.
+                        next_warning_page = page
+                    if (page > count or page not in (warning_page, next_warning_page)
                             or (warning_count is not None and count != warning_count)):
                         raise SystemExit(warning_withheld)
-                    if page > warning_page:
-                        saw_bypass_notice = saw_bypass_notice or is_bypass
-                        if page == count and not saw_bypass_notice:
-                            raise SystemExit(warning_withheld)
+                    if page == next_warning_page:
+                        rewinding = page > 1 and (warning_page == 0 or page < warning_page)
+                        if not rewinding:
+                            saw_bypass_notice = saw_bypass_notice or notice == HOOK_BYPASS_NOTICE
+                            if page == count and not saw_bypass_notice:
+                                raise SystemExit(warning_withheld)
                         terminal = hc_json("get", address)
                         verify_terminal(run, terminal)
                         # Herdr can report working while the local warning viewer owns the input.
@@ -1743,14 +1756,21 @@ def send_task(args, run_path):
                         if (terminal["state"] != "live" or turn not in (0, 1)
                                 or (warning_turn is not None and turn != warning_turn)):
                             raise SystemExit(warning_withheld)
-                        if page == count:
+                        if rewinding:
+                            hc_json("keys", address, "left")
+                            next_warning_page = page - 1
+                        elif page == count:
                             hc_json("keys", address, "esc")
                             warning_turn = None
                             dismissed_startup_warnings = True
+                            closing_warning = position
+                            closing_warning_until = min(deadline, time.monotonic() + WARNING_CLOSE_SETTLE_SECONDS)
                             time.sleep(SCREEN_POLL_SECONDS)
                             continue
-                        # Codex dismisses visited pages on Esc. Check all pages before closing.
-                        hc_json("keys", address, "right")
+                        else:
+                            # Codex dismisses visited pages on Esc. Check all pages before closing.
+                            hc_json("keys", address, "right")
+                            next_warning_page = page + 1
                         warning_turn, warning_count, warning_page = turn, count, page
                 elif warning_turn is None:
                     footer = "\n".join(text.rstrip().splitlines()[-2:])
