@@ -5557,7 +5557,11 @@ class ReservedQueueWaveTest(unittest.TestCase):
                                 "delivery": str(self.receipt(unit["branch"].split("/")[-1], ref))})
         self.result("bind-wave", assignments=assignments)
         first_entered, second_entered = Event(), Event()
-        original = queue_backend._materialize_claim
+        partial_metadata, second_lookup = Event(), Event()
+        materialize = queue_backend._materialize_claim
+        git_run = subprocess.run
+        queue_lock = queue_backend._queue_write_lock
+        first = wave["reservations"][0]
 
         def create(repo, unit, *args):
             if unit["candidate"]["title"] == "First group":
@@ -5566,13 +5570,51 @@ class ReservedQueueWaveTest(unittest.TestCase):
             else:
                 self.assertTrue(first_entered.wait(3))
                 second_entered.set()
-            return original(repo, unit, *args)
+                self.assertTrue(partial_metadata.wait(3), "first worktree did not start")
+            return materialize(repo, unit, *args)
+
+        def run(args, **kwargs):
+            if args[:5] == ["git", "-C", str(self.repo), "worktree", "add"] and first["branch"] in args:
+                # Git publishes gitdir and HEAD before it finishes writing commondir.
+                admin = self.repo / ".git" / "worktrees" / Path(first["worktree"]).name
+                admin.mkdir(parents=True)
+                (admin / "gitdir").write_text(str(Path(first["worktree"]) / ".git") + "\n", encoding="utf-8")
+                (admin / "HEAD").write_text("0" * len(wave["base"]) + "\n", encoding="utf-8")
+                (admin / "commondir").touch()
+                partial_metadata.set()
+                try:
+                    self.assertTrue(second_lookup.wait(3), "second worktree did not attempt discovery")
+                finally:
+                    partial_metadata.clear()
+                    shutil.rmtree(admin)
+            result = git_run(args, **kwargs)
+            if partial_metadata.is_set() and args[:5] == ["git", "-C", str(self.repo), "worktree", "list"]:
+                second_lookup.set()
+            return result
+
+        def lock(repo, name="write.lock", timeout=None):
+            if name == "reservation-worktree.lock" and partial_metadata.is_set():
+                try:
+                    with queue_lock(repo, name, timeout=0):
+                        pass
+                except queue_backend.QueueError as error:
+                    self.assertIn("timed out", str(error))
+                    second_lookup.set()
+            return queue_lock(repo, name, timeout)
 
         def claim(assignment):
             request = {"contract": 1, "repo": str(self.repo), "base": wave["base"], **assignment}
-            return queue_backend.handle("claim-reservation", request, {"AGENT_QUEUE_BACKEND": "backlog"})
+            try:
+                return queue_backend.handle("claim-reservation", request, {"AGENT_QUEUE_BACKEND": "backlog"})
+            except queue_backend.QueueError as error:
+                self.fail(str(error))
 
-        with patch.object(queue_backend, "_materialize_claim", side_effect=create), ThreadPoolExecutor(max_workers=2) as pool:
+        with (
+            patch.object(queue_backend, "_materialize_claim", side_effect=create),
+            patch.object(queue_backend, "_queue_write_lock", side_effect=lock),
+            patch.object(queue_backend.subprocess, "run", side_effect=run),
+            ThreadPoolExecutor(max_workers=2) as pool,
+        ):
             outcomes = list(pool.map(claim, assignments))
         self.assertEqual([code for code, _ in outcomes], [0, 0])
         self.assertTrue(all((Path(unit["worktree"]) / "tasks.md").is_file() for _, unit in outcomes))
