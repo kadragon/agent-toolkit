@@ -21,6 +21,7 @@ import pinned_wave
 import shared_codex
 from dispatch import (
     DEFAULT_GIT_LIMITS,
+    LAUNCH_LOOKUP_SECONDS,
     POST_SEND_SETTLE_SECONDS,
     QUEUE_BACKEND,
     STANDING_REVIEW_TRANSFER,
@@ -607,6 +608,87 @@ class DispatchReceiptTests(DispatchTestCase):
             self.assertEqual(receipt["handoff"], {**self.HANDOFF, "extra_lines": extra_lines})
             self.assertEqual(submit.call_args.args[0].run, Path(payload["run"]))
             self.assertEqual(submit.call_args.args[0].message, "$task-next")
+
+    def test_shared_cache_hold_allows_claude_even_with_expiring_codex_passes(self):
+        self.quota.return_value = {**QUOTA_OK, "bias": "codex", "effective_bias": "codex",
+                                   "prefer_expiring_passes": True}
+        owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd())}
+        foreign = {"address": "t9", "state": "live", "parent": "t8"}
+        reply = SimpleNamespace(stdout=json.dumps(self.TERMINAL))
+        label = shared_codex.cache_label(Path(os.environ["CODEX_HOME"]))
+        for model, effort in (("haiku", "medium"), ("sonnet", "high"), ("opus", "high")):
+            with (
+                self.subTest(model=model),
+                tempfile.TemporaryDirectory() as directory,
+                patch("dispatch.hc_json", side_effect=[{"terminals": [foreign]},
+                                                       {"terminals": [owner]}, owner, self.TERMINAL]) as hc,
+                patch("dispatch.warn_linked_worktree"),
+                patch("dispatch.subprocess.run", return_value=reply) as run,
+                patch("dispatch.tempfile.mkdtemp", return_value=directory),
+                redirect_stdout(StringIO()) as stdout,
+            ):
+                launch(self.launch_args(directory, cli="claude", model=model, effort=effort, task=None,
+                                        message="/dev:task-next", bias_exception="shared-cache hold"))
+                hc.assert_any_call("ls", "--label", label, timeout=LAUNCH_LOOKUP_SECONDS)
+                argv = run.call_args.args[0]
+                self.assertEqual(argv[argv.index("claude"):][:5],
+                                 ["claude", "--model", model, "--effort", effort])
+                receipt = Path(json.loads(stdout.getvalue())["run"])
+                audit = json.loads(receipt.read_text(encoding="utf-8"))
+                self.assertEqual(audit["bias_exception"], "shared-cache hold")
+                self.assertNotIn("user_pin_reason", audit)
+
+    def test_shared_cache_exception_requires_a_live_foreign_home_child(self):
+        self.quota.return_value = {**QUOTA_OK, "bias": "codex", "effective_bias": "codex"}
+        args = self.launch_args(Path.cwd(), cli="claude", model="opus", task=None,
+                                message="/dev:task-next", bias_exception="Shared-Cache Hold: t9")
+        for terminals in ([], [{"address": "t9", "state": "finished", "parent": "t8"}],
+                          [{"address": "t9", "state": "live", "parent": "t6"}],
+                          [{"address": "t9", "state": "live", "parent": None}]):
+            with (
+                self.subTest(terminals=terminals),
+                patch("dispatch.hc_json", return_value={"terminals": terminals}),
+                patch("dispatch.subprocess.run") as run,
+            ):
+                with self.assertRaisesRegex(SystemExit, "no live child from another home session"):
+                    launch(args)
+                run.assert_not_called()
+        with patch("dispatch.hc_json", side_effect=TimeoutError), patch("dispatch.subprocess.run") as run:
+            with self.assertRaisesRegex(SystemExit, "cannot check the shared Codex cache"):
+                launch(args)
+            run.assert_not_called()
+        with patch("dispatch.hc_json", return_value={"terminals": None}), patch("dispatch.subprocess.run") as run:
+            with self.assertRaisesRegex(SystemExit, "cannot check the shared Codex cache"):
+                launch(args)
+            run.assert_not_called()
+
+    def test_shared_cache_exception_requires_a_claude_launch_and_home_address(self):
+        for overrides, error in (
+            ({}, "shared-cache hold is only supported for Claude launches"),
+            ({"cli": "claude", "model": "opus", "task": None, "message": "/dev:task-next", "parent": None},
+             "shared-cache hold requires a home session address"),
+        ):
+            with (
+                self.subTest(overrides=overrides),
+                patch.dict(os.environ, {"HC_TERMINAL_ID": ""}),
+                patch("dispatch.hc_json") as hc,
+                patch("dispatch.subprocess.run") as run,
+            ):
+                with self.assertRaisesRegex(SystemExit, error):
+                    launch(self.launch_args(Path.cwd(), bias_exception="shared-cache hold", **overrides))
+                hc.assert_not_called()
+                run.assert_not_called()
+
+    def test_shared_cache_exception_does_not_approve_critical_quota(self):
+        self.quota.return_value = {**QUOTA_OK, "claude": {"state": "ok", "raw_state": "critical"},
+                                   "bias": "codex", "effective_bias": "codex", "prefer_expiring_passes": True}
+        args = self.launch_args(Path.cwd(), cli="claude", model="opus", task=None,
+                                message="/dev:task-next", bias_exception="shared-cache hold")
+        with patch("dispatch.hc_json") as hc, patch("dispatch.subprocess.run") as run:
+            with self.assertRaisesRegex(SystemExit, "claude quota is critical"):
+                launch(args)
+            hc.assert_not_called()
+            run.assert_not_called()
 
     def test_launch_keeps_the_receipt_when_terminal_lookup_fails_after_run(self):
         claude = {"task": None, "message": "/dev:task-next", "model": "opus"}
@@ -1310,7 +1392,7 @@ class DispatchReceiptTests(DispatchTestCase):
         with patch("dispatch.hc_json", side_effect=[
             {"terminals": [owner, first_home_child]}, owner, {"terminals": [first_home_child]},
         ]) as hc, patch("dispatch.subprocess.run") as run:
-            with self.assertRaisesRegex(SystemExit, r"live wave uses this cache \(t7\)"):
+            with self.assertRaisesRegex(SystemExit, r"live wave uses this cache \(t7\).*'shared-cache hold'"):
                 launch(args)
         self.assertEqual(hc.call_args.args[:2], ("ls", "--label"))
         self.assertTrue(hc.call_args.args[2].startswith(f"{shared_codex.LABEL}="))

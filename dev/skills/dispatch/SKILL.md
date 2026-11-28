@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 3.10.2
+version: 3.11.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo listed in
   the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to
@@ -81,7 +81,9 @@ for refresh warnings, pass files, and a manual refresh after redemption.
 | `claude` | Route `luna` to `haiku`, mid-tier `sol` below `xhigh` to `sonnet`, top-tier `sol/high` to `opus/high`, and `terra` to `sonnet` at the chosen effort. Carry any escalation floor. |
 
 - When `prefer_expiring_passes` is true, route top-tier work to the favored CLI at `xhigh`
-  where the task warrants it. Only `production DB` and `deploy` qualify as exceptions.
+  where the task warrants it. Only `production DB` and `deploy` qualify as task-based exceptions.
+- If another home session holds the shared Codex cache, follow `references/codex-readiness.md` →
+  *Before a shared-cache Codex wave* to use the verified Claude fallback at the same tier.
 - Launch: use `--user-pinned` for an explicit user choice. For a `critical` CLI
   (check `raw_state` when present), pass `--approve-critical` only with the user's approval.
   An exception category may be followed by `: detail`. Report any quota warnings.
@@ -157,7 +159,8 @@ answer that with `hc keys <address> down enter` only after telling the user.
 
 For independent Codex waves, use `references/codex-readiness.md` → *Verified wave* to pin
 the reviewed plugin version and send through receipts. For shared-cache launches, follow
-*Before a shared-cache Codex wave* for `prepare-codex` and live-wave holds, then launch:
+*Before a shared-cache Codex wave* for `prepare-codex` and the options if a live wave holds startup.
+Once the shared cache is ready, launch with:
 
 ```sh
 python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model <codex family> \
