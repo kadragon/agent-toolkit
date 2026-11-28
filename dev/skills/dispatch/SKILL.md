@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 3.6.0
+version: 3.7.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo listed in
   the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to
@@ -105,11 +105,10 @@ that edits no file may start one lower (`haiku/low`, `luna/medium`); `max`/`ultr
 | `high` | ordinary work that requires judgment about implementation or review within its scope, or harder or longer work |
 | `xhigh` | unknown-cause debugging, unresolved design or requirements, or a costly mistake |
 
-- For `task-next`, run `python3 -I "<dispatch>/scripts/dispatch.py" pick "<repo path>"`. Add
-  `--full-scan` for batches, known unattended runs, or an unclear selection. Add `--tree` for
-  worktrees; it reads local `origin/HEAD` without fetching. Read stderr (warnings, claims) and the
-  relevant criteria. Size for the hardest eligible candidate in scope, or estimate an unattended
-  single run from the first full-scan result. The child owns final selection and unattended limits.
+- For a reserved queue wave, use Codex subject to the usual critical gate and size each exact unit.
+  For other queue work, run `dispatch.py pick <repo>`. Add `--full-scan` for broad selection and
+  `--tree` to select from local `origin/HEAD`. Read stderr and size for the hardest eligible unit.
+  The child owns final selection and unattended limits.
 - Effort is fixed per session (the model scales thinking per turn within it); each phase is a new launch.
 - When a child stalls, gets its change sent back, or turns out wrong, or when a later phase of
   an escalated task launches, read `references/escalation.md` for the ladder and the relaunch.
@@ -174,11 +173,13 @@ python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model <codex fa
 
 More than one session:
 
-- At most one task session per repo uses the main checkout. For concurrent children, let the
-  launcher choose each name. Use the main checkout as `--cwd` and put `--tree` in the first task invocation.
-  Launching inside a linked worktree can keep Windows from deleting it at cleanup. Before
-  sending the next `task-next --tree` prompt on the same queue, use `pick --tree --full-scan`
-  to confirm the preceding queue child's worktree claim in stderr.
+- Launch from the main checkout and let the launcher name each child. At most one task session
+  uses that checkout. A child launched inside a linked worktree can block its removal on Windows.
+- For an independent `task-next` wave on a built-in queue, reserve the selected units before
+  launching their idle Codex children, then submit their prompts together. Follow
+  [Reserved queue waves](references/launch-handoff.md#reserved-queue-waves).
+- For individual, non-reserved queue launches, use `pick --tree --full-scan`
+  to confirm the preceding child's worktree claim before delivering the next unit.
 - Keep a wave to at most four live children (two under `both-hot`).
 
 ## 5. Watch and decide

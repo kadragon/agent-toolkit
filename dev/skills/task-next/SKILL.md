@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 2.21.0
+version: 2.22.0
 description: >-
   Pull the next queued item from the repo's queue (backlog.md/tasks.md, or GitHub issues)
   and run the full code cycle: branch,
@@ -33,8 +33,8 @@ this skill. For a dispatched `--tree` cycle, use this order:
 | Implement and prepare the candidate | *Step 3 — Run the cycle* and `references/cycle.md` → *Implement*. After implementation, open *Version bump*, *Cleanup*, *Validation evidence* there |
 | Start review | *Step 4 — Hand off* and `references/cycle.md` → *Hand off*. Follow its direct call to `dev:task-review-cycle` and start at *Caller gate* |
 
-Open *Step 2* for manual selection or parked entries, and open `references/edge-cases.md` when
-an edge case applies.
+Open *Step 2* for manual selection or parked entries and `references/edge-cases.md` when applicable.
+With a `Queue reservation`, use `references/tree.md` → *Reserved dispatch intake*.
 
 ## Prerequisites
 
