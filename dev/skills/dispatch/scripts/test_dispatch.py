@@ -43,6 +43,7 @@ from dispatch import (
     prepare_codex,
     release,
     report_instruction,
+    requires_review_sources,
     resolve_codex_model,
     send,
     send_wave,
@@ -607,6 +608,7 @@ class DispatchReceiptTests(DispatchTestCase):
             receipt = json.loads(Path(payload["run"]).read_text(encoding="utf-8"))
             self.assertEqual(receipt["created_ms"], 50)
             self.assertTrue(receipt["require_review_sources"])
+            self.assertEqual(receipt["review_policy"], "three-source")
             self.assertFalse(receipt["sent"])
             self.assertEqual(receipt["quota_snapshot"], snapshot)
             self.assertEqual(receipt["bias"], "claude")
@@ -1244,6 +1246,15 @@ class DispatchReceiptTests(DispatchTestCase):
                     with patch("dispatch.hc_json", return_value=terminal), redirect_stdout(StringIO()) as output:
                         collect(SimpleNamespace(run=receipt, close=False))
                     self.assertEqual(json.loads(output.getvalue())["result"], saved)
+
+    def test_explicit_review_policy_overrides_the_legacy_source_flag(self):
+        self.assertFalse(requires_review_sources({"review_policy": "head-bound", "require_review_sources": True}))
+        self.assertTrue(requires_review_sources({"review_policy": "three-source"}))
+        self.assertTrue(requires_review_sources({"review_policy": "typo", "require_review_sources": False}))
+        self.assertTrue(requires_review_sources({"review_policy": None}))
+        self.assertTrue(requires_review_sources({"review_policy": "unknown"}))
+        self.assertTrue(requires_review_sources({"require_review_sources": True}))
+        self.assertFalse(requires_review_sources({}))
 
     def test_report_review_preserves_a_near_limit_blocked_result(self):
         result = {
