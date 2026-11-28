@@ -105,6 +105,21 @@ unverified. Check that in the child's transcript when enabling the rules for a w
 Sources: [Codex command rules](https://developers.openai.com/codex/rules) and
 [configuration reference](https://developers.openai.com/codex/config-reference).
 
+## Windows worktree readiness
+
+`dispatch.py launch` sets `PYTHONUTF8=1` and `PYTHONIOENCODING=utf-8` for Codex shell
+commands. Run Bash-labeled task-cycle snippets through Git Bash on Windows. Python's
+environment settings govern Python I/O. PowerShell console encoding is configured separately.
+
+`git fetch origin` requires network access and permission to write `FETCH_HEAD` in the Git
+directory. Worktree creation also writes to the shared Git directory. If a child receives
+`Permission denied`, use normal approval for the affected Git command. On a machine that
+allows these commands inside its sandbox, check the child's effective local Codex permissions
+for the exact Git directory (`git rev-parse --path-format=absolute --git-dir --git-common-dir`).
+The machine's permission policy may protect `.git` even within a writable checkout. Configure
+any approved write access in the machine's Codex permission profile and confirm it from the
+child. See the [Codex sandbox documentation](https://learn.chatgpt.com/docs/sandboxing).
+
 ## Hook trust at launch
 
 On the shared cache, Herdr's `dispatch.py launch --trust-hooks` passes `--dangerously-bypass-hook-trust` to Codex

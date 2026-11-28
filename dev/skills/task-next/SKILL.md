@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 2.22.0
+version: 2.22.1
 description: >-
   Pull the next queued item from the repo's queue (backlog.md/tasks.md, or GitHub issues)
   and run the full code cycle: branch,
@@ -22,9 +22,9 @@ A free-text request not yet on the queue is `task-new`'s job.
 
 ## Phase index
 
-Use `rg -n '^#{2,3} ' <file>` to find Markdown headings and ignore matches inside code fences.
-Read each section up to the next heading at the same or a higher level. Resolve paths from
-this skill. For a dispatched `--tree` cycle, use this order:
+Find headings with `rg -n '^#{2,3} ' <file>`. Pass each path separately and ignore matches inside code fences.
+Read to the next same- or higher-level heading and resolve paths from this skill. On Windows, use Git Bash
+for Bash blocks in this skill and its references. For a dispatched `--tree` cycle, use this order:
 
 | Phase | Sections to open |
 |---|---|

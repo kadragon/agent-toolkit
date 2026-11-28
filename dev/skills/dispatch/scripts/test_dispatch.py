@@ -103,7 +103,9 @@ class ChildArgvTests(unittest.TestCase):
                 self.assertEqual(
                     child_argv("codex", model, "high", None, False),
                     ["codex", "--no-daemon", "--no-alt-screen", "--approve-for-me", "-m", model,
-                     "-c", "model_reasoning_effort=high"],
+                     "-c", "model_reasoning_effort=high",
+                     "-c", 'shell_environment_policy.set.PYTHONUTF8="1"',
+                     "-c", 'shell_environment_policy.set.PYTHONIOENCODING="utf-8"'],
                 )
                 with self.assertRaisesRegex(SystemExit, "codex takes no first message"):
                     child_argv("codex", model, "high", "$task-next", False)
@@ -4309,6 +4311,21 @@ class ReservedQueueWaveTest(unittest.TestCase):
     def reserve(self, *titles):
         snapshot = self.prepare()
         return self.result("reserve-wave", base=snapshot["base"], units=[snapshot["by_title"][t] for t in titles])
+
+    def test_reserve_wave_accepts_utf8_with_or_without_bom(self):
+        snapshot = self.prepare()
+        for encoding, title in (("utf-8", "First group"), ("utf-8-sig", "Second group")):
+            with self.subTest(encoding=encoding):
+                unit = snapshot["by_title"][title]
+                request = json.dumps({"base": snapshot["base"], "units": [unit]}).encode(encoding)
+                result = subprocess.run(
+                    [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "reserve-wave", str(self.repo)],
+                    input=request, capture_output=True, check=False,
+                    env={**os.environ, "AGENT_QUEUE_BACKEND": "backlog"},
+                )
+                self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8"))
+                [reservation] = json.loads(result.stdout)["reservations"]
+                self.assertEqual(reservation["candidate"]["ref"], unit["ref"])
 
     def receipt(self, name, ref):
         path = self.root / name / "run.json"

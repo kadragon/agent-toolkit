@@ -169,7 +169,9 @@ def child_argv(cli, model, effort, message, keep_connectors, result=None, *, tru
             raise SystemExit("codex takes no first message at launch; use dispatch.py send")
         # Herdr requires foreground Codex so commands execute inside its terminal.
         argv = ["codex", "--no-daemon", "--no-alt-screen", "--approve-for-me", "-m", model,
-                "-c", f"model_reasoning_effort={effort}"]
+                "-c", f"model_reasoning_effort={effort}",
+                "-c", 'shell_environment_policy.set.PYTHONUTF8="1"',
+                "-c", 'shell_environment_policy.set.PYTHONIOENCODING="utf-8"']
         if trust_hooks:
             argv.append("--dangerously-bypass-hook-trust")
         return argv
@@ -2321,7 +2323,7 @@ def wave_request(repo, data=None):
 
 def read_wave_request():
     try:
-        data = json.loads(sys.stdin.buffer.read().decode("utf-8"))
+        data = json.loads(sys.stdin.buffer.read().decode("utf-8-sig"))
         if not isinstance(data, dict):
             raise ValueError("expected a JSON object")
         return data

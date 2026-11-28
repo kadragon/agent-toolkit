@@ -2052,7 +2052,7 @@ def main(argv: list[str]) -> int:
         sys.stderr.write("usage: queue_backend.py <op> < request.json | --test\n")
         return EXIT_ERROR
     try:
-        req = json.loads(sys.stdin.buffer.read().decode("utf-8") or "null")
+        req = json.loads(sys.stdin.buffer.read().decode("utf-8-sig") or "null")
     except ValueError as e:
         sys.stderr.write(f"queue_backend: request is not JSON: {e}\n")
         return EXIT_ERROR
@@ -2150,9 +2150,11 @@ def run_tests() -> int:
         with open(path, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(text)
 
-    def cli(op: str, req: object, extra_env: dict[str, str] | None = None) -> tuple[int, Any, str]:
+    def cli(op: str, req: object, extra_env: dict[str, str] | None = None, *,
+            bom: bool = False) -> tuple[int, Any, str]:
         run_env = dict(os.environ, **(extra_env or {}))
-        out = subprocess.run([sys.executable, os.path.abspath(__file__), op], input=json.dumps(req),
+        payload = ("\ufeff" if bom else "") + json.dumps(req)
+        out = subprocess.run([sys.executable, os.path.abspath(__file__), op], input=payload,
                              capture_output=True, text=True, encoding="utf-8", env=run_env, check=False)
         try:
             data = json.loads(out.stdout) if out.stdout.strip() else None
@@ -2276,6 +2278,8 @@ def run_tests() -> int:
             code, data, _ = cli("describe", req, base_env)
             _assert(code == 0 and data["backend"] == "backlog" and data["contract"] == 1
                     and "rejected" in data["ops"], "describe → 0 with backend/contract/ops")
+            bom_code, bom_data, bom_err = cli("describe", req, base_env, bom=True)
+            _assert(bom_code == 0 and bom_data == data, f"describe accepts a UTF-8 BOM: {bom_err}")
             code, data, _ = cli("create", dict(req, items=[{"key": "k", "title": "t"}]), base_env)
             _assert(code == 0 and data == {"edit_file": "backlog.md"}, "create on backlog → edit_file")
             code, data, _ = cli("reject", dict(req, ref="backlog.md:9"), base_env)
