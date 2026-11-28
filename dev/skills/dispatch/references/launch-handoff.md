@@ -32,7 +32,8 @@ When the user stated no Git limits, omit `--git-limits` for queue and new work. 
 records the dispatch default through merge (`DEFAULT_GIT_LIMITS` in `dispatch.py`), and the child
 applies `../../task-next/references/git-authorization.md` → *Dispatch default*. Forward a
 user-stated Git limit instead, as `no-push`, `pr-only` or the verbatim grant with
-`--git-grant-recorded`; narrower limits win. Other restrictions travel in `--request`. Queue and new launches reject blank and
+`--git-grant-recorded`; narrower limits win. Never leave a Git restriction only in `--request`;
+non-Git restrictions travel there. Queue and new launches reject blank and
 recognized placeholder values. A free-form
 restriction by itself cannot establish a grant. For implementation-only work, use
 `--no-git-writes`. The child receives `implementation-only` and stops before commits, pushes

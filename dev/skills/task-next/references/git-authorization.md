@@ -33,7 +33,8 @@ Honor a dispatched pre-merge stop even when the original request authorizes a la
 **Dispatch default.** A dispatched queue or new-work cycle whose handoff `Git limits` begins with
 `dispatch-default:` carries a standing user grant (2026-11-28). The user asked dispatch to run the
 work and stated no Git limits, which grants the full workflow through merge. Confirm that the
-forwarded request asks for this work. A dispatched queue or new-work handoff with `Git limits`
+forwarded request asks for this work. Any Git restriction in that request narrows the grant:
+normalize it per the table below, and the narrower limit wins. A dispatched queue or new-work handoff with `Git limits`
 `no-push` or `pr-only` keeps the same standing grant, capped at that row of the table below.
 Record its actions and limit in place of the defaults. Otherwise record:
 
