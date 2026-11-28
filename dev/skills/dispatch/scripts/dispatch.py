@@ -141,10 +141,8 @@ WAIT_POLL_SECONDS = 2
 WAIT_TIMEOUT_SECONDS = 1800
 TASK_COMMANDS = {"claude": ("/dev:task-next", "/dev:task-new"), "codex": ("$task-next", "$task-new")}
 REVIEW_COMMANDS = {"/dev:task-review", "$task-review"}
-# Applied when queue or new work launches without --git-limits; git-authorization.md -> Dispatch default.
 DEFAULT_GIT_LIMITS = ("dispatch-default: through merge (commit, feature-push, pr-write, and base-merge "
                       "after the review cycle passes); the user stated no Git limits")
-# Rendered for task cycles that include task-review; review-sources.md -> Data-sharing policy.
 STANDING_REVIEW_TRANSFER = (
     "Standing user approval (2026-11-28): invoking task-review, directly or through a task-next or "
     "task-new cycle, authorizes sending this repository's change diff, relevant source, Sprint Contract "
@@ -663,7 +661,9 @@ def first_prompt(cli, message, handoff):
               "Git limits": handoff["git_limits"]}
     if "additional_git_limits" in handoff:
         fields["Additional Git limits (verbatim)"] = handoff["additional_git_limits"]
-    if handoff.get("review_transfer_standing"):
+    review_command = message.split(maxsplit=1)[0] in REVIEW_COMMANDS
+    if (handoff.get("review_transfer_standing") or (review_command and "review_transfer_approval" not in handoff
+                                                    and not handoff.get("no_standing_review_approval"))):
         fields["Review transfer approval (standing)"] = STANDING_REVIEW_TRANSFER
     if "review_transfer_approval" in handoff:
         fields["Review transfer approval (verbatim)"] = handoff["review_transfer_approval"]
@@ -748,6 +748,8 @@ def launch_handoff(args, cwd):
         if not no_authority:
             handoff["additional_git_limits"] = args.git_limits
     elif handoff["work_kind"] in {"queue", "new"} and args.git_limits is None:
+        if grant_recorded:
+            raise SystemExit("--git-grant-recorded needs the verbatim grant in --git-limits")
         handoff["git_limits"] = DEFAULT_GIT_LIMITS
     elif handoff["work_kind"] in {"queue", "new"} and (no_authority or not (standard_limits or grant_recorded)):
         raise SystemExit("--git-limits must carry a verified user grant; omit it for the dispatch default "
@@ -760,11 +762,10 @@ def launch_handoff(args, cwd):
         if not approval.strip():
             raise SystemExit("--review-transfer-approval must not be blank")
         handoff["review_transfer_approval"] = approval
-    else:
-        first = (getattr(args, "message", None) or getattr(args, "task", None) or "").split(maxsplit=1)
-        reviews = handoff["work_kind"] in {"queue", "new"} or (first and first[0] in REVIEW_COMMANDS)
-        if reviews and not getattr(args, "no_standing_review_approval", False):
-            handoff["review_transfer_standing"] = True
+    elif getattr(args, "no_standing_review_approval", False):
+        handoff["no_standing_review_approval"] = True
+    elif handoff["work_kind"] in {"queue", "new"}:
+        handoff["review_transfer_standing"] = True
     extra_lines = configured_handoff_lines(Path.cwd(), cwd)
     if extra_lines:
         handoff["extra_lines"] = extra_lines

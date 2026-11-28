@@ -58,7 +58,7 @@ QB="<absolute task-next skill directory>/scripts/queue_backend.py"
 [[ -r "$QB" ]] || { echo "Bundled script missing or unreadable: $QB" >&2; exit 1; }
 TOOLKIT="<agent-toolkit checkout>"
 ITEMS=$(cat <<'ITEMS_JSON'
-[{"key": "dispatch-retro/<area>/<slug>", "title": "[FIX] <dispatch behavior>", "body": "<sanitized body>"}]
+[{"key": "dispatch-retro/<area>/<slug>", "title": "[FIX] <dispatch behavior>", "body": "<sanitized body>", "refile_completed": true}]
 ITEMS_JSON
 )
 jq -nc --arg r "$TOOLKIT" --argjson items "$ITEMS" '{contract: 1, repo: $r, items: $items}' \
@@ -67,6 +67,9 @@ jq -nc --arg r "$TOOLKIT" --argjson items "$ITEMS" '{contract: 1, repo: $r, item
 
 Derive the key from the dispatch behavior, never from the wave: `dispatch-retro/send/unconfirmed-paste`,
 not a date or repo. The same friction in a later wave then reuses the open issue (`reused: true`).
+`refile_completed` files a recurrence when the earlier issue closed as completed. A match closed
+without completion comes back as `relation: "rejected"` in `incomplete[]`: the fix was declined,
+so report it and do not refile.
 Use the tag the fix needs (`[FIX]`, `[DOCS]`, `[HARNESS]`). Body sections:
 
 ```markdown

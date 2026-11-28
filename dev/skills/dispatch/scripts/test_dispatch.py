@@ -351,6 +351,27 @@ class DispatchReceiptTests(DispatchTestCase):
                 if "review_transfer_approval" in overrides:
                     self.assertEqual(fields["Review transfer approval (verbatim)"], self.REVIEW_APPROVAL)
 
+    def test_standing_review_transfer_follows_a_task_review_sent_after_an_idle_codex_launch(self):
+        base = {"request": "Review it", "unit": "PR review", "git_limits": "pr-only", "work_kind": "standalone"}
+        for handoff, message, standing in (
+            (base, "$task-review --pr 12", True),
+            (base, "Review the pending changes", False),
+            ({**base, "no_standing_review_approval": True}, "$task-review --pr 12", False),
+            ({**base, "review_transfer_approval": self.REVIEW_APPROVAL}, "$task-review --pr 12", False),
+        ):
+            with self.subTest(handoff=handoff, message=message):
+                prompt = first_prompt("codex", message, handoff)
+                fields = json.loads(prompt.split("<dispatch-handoff>\n", 1)[1].split("\n</dispatch-handoff>", 1)[0])
+                self.assertEqual(fields.get("Review transfer approval (standing)"),
+                                 STANDING_REVIEW_TRANSFER if standing else None)
+
+    def test_recorded_grant_flag_without_limits_stops_instead_of_using_the_default(self):
+        for kind in ("queue", "new"):
+            with self.subTest(kind=kind), patch("dispatch.hc_json") as hc:
+                with self.assertRaisesRegex(SystemExit, "--git-grant-recorded needs"):
+                    launch(self.launch_args(Path.cwd(), work_kind=kind, git_limits=None, git_grant_recorded=True))
+                hc.assert_not_called()
+
     def test_review_transfer_approval_survives_launch_and_first_send(self):
         grant = self.REVIEW_APPROVAL
         with tempfile.TemporaryDirectory() as directory:
