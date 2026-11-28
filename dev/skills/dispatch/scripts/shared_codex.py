@@ -3,6 +3,8 @@ import hashlib
 import json
 import os
 import re
+import stat
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -46,14 +48,94 @@ def cache_label(home):
     return f"{LABEL}={hashlib.sha256(identity.encode()).hexdigest()[:16]}"
 
 
-def remote_versions(repo, installed):
+def is_commit(value):
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value) is not None
+
+
+def remote_head(repo):
     git = ["git", "-C", str(repo)]
     command([*git, "fetch", "origin"])
     head = command([*git, "ls-remote", "--exit-code", "origin", "HEAD"]).strip()
     match = re.fullmatch(r"([0-9a-f]{40}|[0-9a-f]{64})	HEAD", head)
     if match is None:
         raise ValueError("cannot resolve the marketplace default branch commit")
-    commit = match[1]
+    return match[1]
+
+
+def marketplace_pin(home):
+    """Return the commit the home's configured marketplace is pinned to, or None when it floats."""
+    try:
+        config = tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    ref = (config.get("marketplaces") or {}).get(MARKET, {}).get("ref")
+    return ref if is_commit(ref) else None
+
+
+MARKET_HEADER = re.compile(r"""\s*\[\s*marketplaces\s*\.\s*(?:kadragon|"kadragon"|'kadragon')\s*\]\s*(?:#.*)?""")
+
+
+def pin_marketplace(home, commit):
+    """Set `ref` of the configured marketplace to a full commit, keeping the rest of the file.
+
+    Returns the previous file text so a failed upgrade can put the old ref back.
+    """
+    path = (home / "config.toml").resolve()
+    try:
+        original = path.read_bytes().decode("utf-8")
+    except FileNotFoundError:
+        original = ""
+    lines = original.splitlines(keepends=True)
+    start = next((index for index, line in enumerate(lines) if MARKET_HEADER.fullmatch(line.rstrip("\r\n"))), None)
+    if start is None:
+        raise ValueError(f"{path} has no [marketplaces.{MARKET}] section; add the marketplace to this Codex home first")
+    end = next((index for index in range(start + 1, len(lines)) if lines[index].lstrip().startswith("[")), len(lines))
+    eol = "\r\n" if lines[start].endswith("\r\n") else "\n"
+    pin = f'ref = "{commit}"{eol}'
+    for index in range(start + 1, end):
+        if re.match(r"\s*ref\s*=", lines[index]):
+            lines[index] = pin
+            break
+    else:
+        if not lines[start].endswith("\n"):
+            lines[start] += eol
+        lines.insert(start + 1, pin)
+    text = "".join(lines)
+    if tomllib.loads(text)["marketplaces"][MARKET].get("ref") != commit:
+        raise ValueError(f"cannot pin {path}: the [marketplaces.{MARKET}] section did not take the ref")
+    write_config(path, text)
+    return original
+
+
+def write_config(path, text):
+    """Replace `path` (a symlink's target) keeping its permissions; never exposes the text more widely."""
+    path = path.resolve()
+    mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o600
+    temporary = path.with_name(path.name + ".dispatch-tmp")
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
+        handle.write(text)
+    os.chmod(temporary, mode)
+    temporary.replace(path)
+
+
+def ensure_commit(repo, commit):
+    """Fetch only when the checkout lacks the pinned commit."""
+    git = ["git", "-C", str(repo)]
+    try:
+        command([*git, "cat-file", "-e", f"{commit}^{{commit}}"])
+    except subprocess.CalledProcessError:
+        command([*git, "fetch", "origin"])
+        try:
+            command([*git, "cat-file", "-e", f"{commit}^{{commit}}"])
+        except subprocess.CalledProcessError:
+            raise ValueError(f"the pinned marketplace commit {commit} is not in {repo}") from None
+
+
+def remote_versions(repo, installed, commit=None):
+    git = ["git", "-C", str(repo)]
+    if commit is None:
+        commit = remote_head(repo)
     names = catalog_plugins(json.loads(command([*git, "show", f"{commit}:{CATALOG}"])))
     selected = set(names) & installed.keys()
     if not selected:

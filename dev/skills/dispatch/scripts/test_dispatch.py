@@ -1425,8 +1425,55 @@ class DispatchReceiptTests(DispatchTestCase):
             ):
                 with self.assertRaisesRegex(SystemExit, "marketplace versions changed"):
                     launch(self.launch_args(Path.cwd()))
-            remote.assert_called_once_with(home, versions)
+            remote.assert_called_once_with(home, versions, None)
             self.assertTrue(all(entry.args[0][0] != "hc" for entry in run.call_args_list))
+
+    def test_same_home_launch_compares_against_the_pinned_commit_not_the_remote_head(self):
+        owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd())}
+        sibling = {"address": "t7", "state": "live", "parent": "t6"}
+        versions = {"guard": "1.0.0"}
+        pin = "d" * 40
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            write_json(home / "dispatch-prepared-cache.json", {"repo": str(home), "versions": versions})
+            (home / "config.toml").write_text(f'[marketplaces.kadragon]\nref = "{pin}"\n', encoding="utf-8")
+            with (
+                patch.dict(os.environ, {"CODEX_HOME": directory}),
+                patch("dispatch.hc_json", side_effect=[
+                    {"terminals": [owner, sibling]}, owner, {"terminals": [sibling]}, self.TERMINAL,
+                ]),
+                patch("dispatch.installed_plugin_versions", return_value=versions),
+                patch("shared_codex.ensure_commit") as ensure,
+                patch("shared_codex.remote_versions", return_value=versions) as remote,
+                patch("dispatch.subprocess.run", return_value=SimpleNamespace(stdout=json.dumps(self.TERMINAL))),
+                patch("dispatch.send"), patch("builtins.print"),
+                patch("dispatch.tempfile.mkdtemp", return_value=directory),
+            ):
+                launch(self.launch_args(Path.cwd()))
+            ensure.assert_called_once_with(home, pin)
+            remote.assert_called_once_with(home, versions, pin)
+
+    def test_same_home_launch_warns_when_the_marketplace_is_not_pinned(self):
+        owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd())}
+        sibling = {"address": "t7", "state": "live", "parent": "t6"}
+        versions = {"guard": "1.0.0"}
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            write_json(home / "dispatch-prepared-cache.json", {"repo": str(home), "versions": versions})
+            (home / "config.toml").write_text('[marketplaces.kadragon]\nref = "main"\n', encoding="utf-8")
+            with (
+                patch.dict(os.environ, {"CODEX_HOME": directory}),
+                patch("dispatch.hc_json", side_effect=[
+                    {"terminals": [owner, sibling]}, owner, {"terminals": [sibling]},
+                ]),
+                patch("dispatch.installed_plugin_versions", return_value=versions),
+                patch("shared_codex.remote_versions", return_value={"guard": "1.1.0"}) as remote,
+                patch("dispatch.subprocess.run"), redirect_stderr(StringIO()) as warning,
+            ):
+                with self.assertRaisesRegex(SystemExit, "marketplace versions changed"):
+                    launch(self.launch_args(Path.cwd()))
+            remote.assert_called_once_with(home, versions, None)
+            self.assertIn("not pinned to a commit", warning.getvalue())
 
     def test_launch_records_the_installed_codex_plugin_versions(self):
         with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as home:
@@ -2077,9 +2124,14 @@ class SharedCodexPreparationTests(unittest.TestCase):
         self.enterContext(patch("dispatch.shutil.which", return_value=self.binary))
         self.enterContext(patch.dict(os.environ, {"CODEX_HOME": str(self.home)}))
         self.args = SimpleNamespace(repo=self.root, cwd=self.root, parent="t6")
+        self.home.mkdir()
+        self.config = self.home / "config.toml"
+        self.write_config('ref = "' + "a" * 40 + '"\n')
         self.terminal = {"address": "t7", "parent": "t6", "state": "live",
                          "name": "dispatch-warmup-00112233", "created_ms": 2000}
         self.events = []
+        self.pins = []
+        self.upgrade_fails = False
         self.screen = "  Hooks need review"
         self.screen_updates = []
         self.native_refresh = False
@@ -2088,6 +2140,11 @@ class SharedCodexPreparationTests(unittest.TestCase):
         self.enterContext(patch("dispatch.WARMUP_SETTLE_SECONDS", 0))
         self.enterContext(patch("dispatch.secrets.token_hex", return_value="00112233"))
         self.enterContext(patch("dispatch.time.time_ns", return_value=2_000_000_000))
+
+    def write_config(self, pin=""):
+        self.config.write_text('model = "x"\n\n[marketplaces.kadragon]\nsource_type = "git"\n'
+                               'source = "https://example.test/agent-toolkit.git"\n' + pin
+                               + '\n[plugins."guard@kadragon"]\nenabled = true\n', encoding="utf-8")
 
     def install(self, version, content):
         root = self.cache / version
@@ -2101,6 +2158,9 @@ class SharedCodexPreparationTests(unittest.TestCase):
         if argv[0] == self.binary:
             self.events.append(argv)
             self.assertEqual(kwargs["cwd"], self.root)
+            self.pins.append(shared_codex.marketplace_pin(self.home))
+            if self.upgrade_fails:
+                raise subprocess.CalledProcessError(1, argv)
             self.install("1.1.0", "new guard")
             shutil.rmtree(self.cache / "1.0.0")
             return ""
@@ -2184,6 +2244,92 @@ class SharedCodexPreparationTests(unittest.TestCase):
         report = self.prepare("1.1.0")
         self.assertFalse(report["upgraded"])
         self.assertEqual(report["hook_content_diffs"]["guard"], diff)
+
+    def test_unpinned_marketplace_is_pinned_to_the_verified_remote_commit_before_the_upgrade(self):
+        self.write_config()
+        self.install("1.0.0", "trusted guard")
+        report = self.prepare("1.1.0")
+        self.assertEqual(self.events[:3], ["git fetch", "hooks 1.0.0",
+                                           [self.binary, "plugin", "marketplace", "upgrade", "kadragon"]])
+        self.assertEqual(self.pins, ["a" * 40])
+        self.assertEqual(shared_codex.marketplace_pin(self.home), "a" * 40)
+        self.assertEqual((report["pinned"], report["previously_pinned"]), ("a" * 40, None))
+        text = self.config.read_text(encoding="utf-8")
+        self.assertIn('model = "x"', text)
+        self.assertIn('[plugins."guard@kadragon"]\nenabled = true', text)
+
+    def test_pin_advances_to_the_new_remote_commit_between_waves(self):
+        old = "b" * 40
+        self.write_config(f'ref = "{old}"\n')
+        self.install("1.0.0", "trusted guard")
+        report = self.prepare("1.1.0")
+        self.assertIn([self.binary, "plugin", "marketplace", "upgrade", "kadragon"], self.events)
+        self.assertEqual(self.pins, ["a" * 40])
+        self.assertEqual(shared_codex.marketplace_pin(self.home), "a" * 40)
+        self.assertEqual((report["pinned"], report["previously_pinned"]), ("a" * 40, old))
+        self.assertNotIn(old, self.config.read_text(encoding="utf-8"))
+
+    def test_failed_upgrade_restores_the_previous_ref(self):
+        old = "b" * 40
+        self.write_config(f'ref = "{old}"\n')
+        before = self.config.read_text(encoding="utf-8")
+        self.install("1.0.0", "trusted guard")
+        self.upgrade_fails = True
+        with self.assertRaisesRegex(SystemExit, "cannot prepare shared-cache Codex"):
+            self.prepare("1.1.0")
+        self.assertEqual(self.pins, ["a" * 40])
+        self.assertEqual(self.config.read_text(encoding="utf-8"), before)
+        self.assertEqual(shared_codex.marketplace_pin(self.home), old)
+
+    def test_pin_accepts_other_toml_spellings_of_the_marketplace_table(self):
+        for header in ('[marketplaces."kadragon"]', "[ marketplaces . kadragon ]  # managed"):
+            with self.subTest(header=header):
+                self.config.write_text(f'{header}\nsource_type = "git"\n\n[other]\nref = "x"\n', encoding="utf-8")
+                shared_codex.pin_marketplace(self.home, "e" * 40)
+                self.assertEqual(shared_codex.marketplace_pin(self.home), "e" * 40)
+                self.assertIn('[other]\nref = "x"', self.config.read_text(encoding="utf-8"))
+
+    @unittest.skipIf(os.name == "nt", "POSIX permission bits and symlinks")
+    def test_pin_keeps_the_file_mode_and_writes_through_a_symlink(self):
+        target = self.root / "dotfiles-config.toml"
+        target.write_text(self.config.read_text(encoding="utf-8"), encoding="utf-8")
+        target.chmod(0o600)
+        self.config.unlink()
+        self.config.symlink_to(target)
+        shared_codex.pin_marketplace(self.home, "f" * 40)
+        self.assertTrue(self.config.is_symlink())
+        self.assertEqual(shared_codex.marketplace_pin(self.home), "f" * 40)
+        self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(list(self.home.glob("*.dispatch-tmp")) + list(self.root.glob("*.dispatch-tmp")), [])
+
+    def test_pinned_commit_missing_from_the_checkout_is_fetched_once(self):
+        commit = "d" * 40
+        missing = subprocess.CalledProcessError(128, "git")
+        with patch("shared_codex.command", side_effect=[missing, "", ""]) as cmd:
+            shared_codex.ensure_commit(self.root, commit)
+        self.assertEqual([entry.args[0][3:] for entry in cmd.call_args_list],
+                         [["cat-file", "-e", f"{commit}^{{commit}}"], ["fetch", "origin"],
+                          ["cat-file", "-e", f"{commit}^{{commit}}"]])
+        with patch("shared_codex.command", side_effect=[missing, "", missing]):
+            with self.assertRaisesRegex(ValueError, "is not in"):
+                shared_codex.ensure_commit(self.root, commit)
+
+    def test_pin_requires_a_configured_marketplace(self):
+        self.config.write_text('model = "x"\n', encoding="utf-8")
+        self.install("1.1.0", "new guard")
+        with self.assertRaisesRegex(SystemExit, r"no \[marketplaces.kadragon\] section"):
+            self.prepare("1.1.0")
+        self.assertEqual(self.config.read_text(encoding="utf-8"), 'model = "x"\n')
+        self.assertNotIn([self.binary, "plugin", "marketplace", "upgrade", "kadragon"], self.events)
+
+    def test_only_a_full_commit_counts_as_a_pin(self):
+        for pin, expected in (('ref = "main"\n', None), ('ref = "abc123"\n', None), ("", None),
+                              ('ref = "' + "c" * 40 + '"\n', "c" * 40)):
+            with self.subTest(pin=pin):
+                self.write_config(pin)
+                self.assertEqual(shared_codex.marketplace_pin(self.home), expected)
+        self.config.unlink()
+        self.assertIsNone(shared_codex.marketplace_pin(self.home))
 
     def test_equal_versions_without_a_trusted_baseline_still_report_pending_hooks(self):
         self.install("1.1.0", "new guard")
