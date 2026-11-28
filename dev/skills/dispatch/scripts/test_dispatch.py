@@ -1553,15 +1553,19 @@ class DispatchReceiptTests(DispatchTestCase):
         working = "Working (5s • esc to interrupt)"
         composer = "› Ask Codex to do anything\n\n  GPT-6.2-Sol default · ~/repo"
         draft = ("› Unsent follow-up\n\n  GPT-6.2-Sol default · ~/repo\n"
-                 "  ← for agents · ? for shortcuts       ⚠ 1 warning · f2 to view")
+                 "  ← for agents · ? for shortcuts")
+        warning = "       ⚠ 1 warning · f2 to view"
+        ide_context = "       IDE context"
         cases = (
             (f"{old_turn}\n\n{working}", None),
             (f"{old_turn}\n\n{working}\n\n{composer}", None),
             (f"{old_turn}\n\n• Working on the next task\n\n{composer}", None),
-            (f"{old_turn}\n\n{draft}", None),
+            (f"{old_turn}\n\n{draft}{warning}", None),
             (f"› Next task\n\n{failure}\n\n{working}", "hooks_broken"),
             (f"› Next task\n\n{failure}\n\n{composer}", "hooks_broken"),
-            (f"› Next task\n\n{failure}\n\n{draft}", "hooks_broken"),
+            (f"› Next task\n\n{failure}\n\n{draft}{warning}", "hooks_broken"),
+            (f"› Next task\n\n{failure}\n\n{draft}{ide_context}", "hooks_broken"),
+            (f"› Next task\n\n{failure}\n\n{draft}{ide_context}{warning}", "hooks_broken"),
             (f"{failure}\n\n{composer}", "hooks_broken"),
         )
         with tempfile.TemporaryDirectory() as directory, \
