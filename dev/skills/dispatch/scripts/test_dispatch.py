@@ -3424,6 +3424,8 @@ class CodexSendTests(DispatchTestCase):
             ("wrapped path with a space", spaced_path, [spaced_path.replace("/tmp/ ", "/tmp/\n  ")], True),
             ("different path", last, [wrapped_path.replace("/tmp/", "/var/")], False),
             ("different visible spacing", last, [spaced_path], False),
+            ("conflicting redraws", wrapped_path.replace("/tmp/Codex", "/tmp/\n  Codex"),
+             [last, spaced_path], False),
             ("expired window", last, [wrapped_path] * 8, False),
         ):
             with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
@@ -3461,7 +3463,7 @@ class CodexSendTests(DispatchTestCase):
                     else:
                         with self.assertRaisesRegex(SystemExit, "task withheld.*F2"):
                             send(args)
-                        expected_wait = 1 if label == "expired window" else 0.25
+                        expected_wait = {"expired window": 1, "conflicting redraws": 0.5}.get(label, 0.25)
                         self.assertEqual(now - escaped_at, expected_wait)
                 expected = ["right", "esc", "send"] if sends else ["right", "esc"]
                 self.assertEqual(operations, expected)

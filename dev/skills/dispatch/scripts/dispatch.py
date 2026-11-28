@@ -1606,19 +1606,23 @@ def startup_warning_page(text):
     return page, count, notice
 
 
-def same_startup_warning_page(current, previous):
+def reconcile_startup_warning_page(current, previous):
     if current is None or current[:2] != previous[:2]:
-        return False
-    if current[2] == previous[2]:
-        return True
+        return None
+    if current == previous:
+        return previous
     layout = r"([^ \n])([ \n]*)"
     current_layout = re.findall(layout, current[2])
     previous_layout = re.findall(layout, previous[2])
+    if len(current_layout) != len(previous_layout):
+        return None
     # A Codex display row break can split a path component or replace a space.
-    return len(current_layout) == len(previous_layout) and all(
-        char == old_char and (gap == old_gap or {gap, old_gap} in ({"\n", ""}, {"\n", " "}))
-        for (char, gap), (old_char, old_gap) in zip(current_layout, previous_layout)
-    )
+    notice = []
+    for (char, gap), (old_char, old_gap) in zip(current_layout, previous_layout):
+        if char != old_char or (gap != old_gap and {gap, old_gap} not in ({"\n", ""}, {"\n", " "})):
+            return None
+        notice.append(char + (gap if old_gap == "\n" else old_gap))
+    return current[0], current[1], "".join(notice)
 
 
 def send(args):
@@ -1767,10 +1771,11 @@ def send_task(args, run_path):
                 raise SystemExit(f"{address}: task withheld; inspect the Codex hook status with /hooks")
             position = startup_warning_page(text) if screen == "warning-view" else None
             if closing_warning is not None and screen != "waiting":
-                if (time.monotonic() < closing_warning_until
-                        and same_startup_warning_page(position, closing_warning)):
-                    time.sleep(SCREEN_POLL_SECONDS)
-                    continue
+                if time.monotonic() < closing_warning_until:
+                    closing_warning = reconcile_startup_warning_page(position, closing_warning)
+                    if closing_warning is not None:
+                        time.sleep(SCREEN_POLL_SECONDS)
+                        continue
                 closing_warning = None
             if screen in {"warning", "warning-view"}:
                 if (not run or run.get("wave") or run.get("trust_hooks") is not True or run["sent"] is not False
