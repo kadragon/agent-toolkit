@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 3.12.0
+version: 3.13.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo listed in
   the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to
@@ -70,9 +70,9 @@ Pick the tier by capability, then the CLI by quota bias.
 A subagent's spawner picks its model and effort per spawn (Claude Agent `model`/`effort`, Codex agent fields) by these tiers.
 
 For wave planning, run `python3 -I "<dispatch>/scripts/quota.py" --refresh-if-stale`. Use its `effective_bias`
-in the table and cap the wave at two live children under `both-hot`. The launcher reruns the check
-from cache and saves the snapshot and any override in `run.json`. See `references/quota-snapshot.md`
-for refresh warnings, pass files, and a manual refresh after redemption.
+in the table and its `bias` in [Size a wave](references/launch-handoff.md#size-a-wave). The launcher
+reruns the quota check from cache and saves the snapshot and any override in `run.json`.
+See `references/quota-snapshot.md` for refresh warnings, pass files, and a manual refresh after redemption.
 
 | bias | Change |
 |------|--------|
@@ -181,7 +181,7 @@ More than one session:
   [Reserved queue waves](references/launch-handoff.md#reserved-queue-waves).
 - For individual, non-reserved queue launches, use `pick --tree --full-scan`
   to confirm the preceding child's worktree claim before delivering the next unit.
-- Keep a wave to at most four live children (two under `both-hot`).
+- Apply [Size a wave](references/launch-handoff.md#size-a-wave) before reserving or launching children.
 
 ## 5. Watch and decide
 

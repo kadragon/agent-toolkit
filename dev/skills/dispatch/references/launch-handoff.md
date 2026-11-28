@@ -40,9 +40,39 @@ restriction by itself cannot establish a grant. For implementation-only work, us
 or PR writes. Any additional restrictions from `--git-limits` apply from worktree preparation
 onward. The child quotes them separately in the Sprint Contract for handoff and resume.
 
+## Size a wave
+
+Add units in priority order while all four checks hold. Before reserving or launching, state
+the planned number and the constraint that would prevent adding the next unit.
+
+- **Quota:** Use the refreshed snapshot from step 3. Count live children before adding new ones.
+  When `bias` is `both-hot`, allow at most two live children across the wave to conserve runway
+  on both CLIs. Use `effective_bias` for routing. Each launch still needs any required critical
+  approval.
+- **Edit overlap:** Compare the expected changed paths and dependencies for the proposed units
+  and in-flight work on the same repo. Defer units with dependencies, unknown edit scope, or
+  overlapping edits. Routine release manifest bumps can share paths when they can use the
+  existing pre-merge resync and version-bump flow.
+- **Local reviewer load:** Check the live sessions with `hc ls` and available process capacity
+  with the host's CPU and memory tools or measured prior waves. Account for ongoing processes
+  and budget for the peak reviewer count per child on its review route. A hub child with the
+  Claude primary and the agy and Codex panel can need three concurrent reviewer processes.
+  Reduce the wave until the combined peak fits. If capacity for concurrent children is unknown,
+  run one child and use its measured load when sizing the next wave.
+- **Merge resync cost:** Count the PRs targeting each base, including in-flight PRs, and plan
+  their merge order. Budget one resync and re-verification for every PR after the first, since
+  each prior merge can advance the base. Use measured durations from earlier waves or an
+  explicit count of resyncs the home session can supervise. If this budget is unknown, run
+  one PR for that base before adding more.
+
+An explicit user instruction can raise the planned size by setting a larger resync budget or
+providing additional reviewer capacity. Recheck the proposed size against the actual capacity,
+edit independence, the `both-hot` limit, and per-CLI approval gates.
+
 ## Reserved queue waves
 
 Use this path for independent worktree assignments on the built-in file and GitHub queues.
+Apply the wave size above to the selection before making reservations.
 Refresh the target's origin, then run `dispatch.py pick <repo> --reservable`. It returns one
 `base` and the exact `candidates`, together with parked and claimed refs. Choose complete,
 distinct candidates. Pass the selected objects verbatim on stdin to `dispatch.py reserve-wave
