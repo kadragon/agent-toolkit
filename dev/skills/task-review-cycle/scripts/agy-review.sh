@@ -69,7 +69,7 @@ Tag each finding:
 - [P1] Urgent — incorrect behavior under normal conditions that must be fixed before merge
 - [P2] Normal — actionable non-blocking defects. If introduced here, fix in the PR or leave a PR comment without filing an issue.
 - [P3] Low — at most a PR comment, including nits. Never file an issue.
-- [pre_existing] Advisory — a verified bug already present at the base and not worsened by the change
+- [pre_existing] Advisory — a verified bug already present at the base and not worsened by the change. Include this tag alongside its P0–P3 priority to show impact.
 
 ## Comment format
 
@@ -83,7 +83,7 @@ For each finding, provide:
 ## Output structure
 
 List findings ordered by priority (P0 first, pre_existing last). After all findings, add:
-- **Overall verdict**: \"LGTM\" if no P0/P1 issues, or \"Changes Requested\" with a 1-sentence explanation.
+- **Overall verdict**: \"LGTM\" if no P0/P1 issues introduced or worsened by the diff, or \"Changes Requested\" with a 1-sentence explanation. Pre-existing findings are advisory at every priority.
 - If no issues worth flagging exist, say so plainly — do not invent findings.
 ${GUIDANCE}"
 

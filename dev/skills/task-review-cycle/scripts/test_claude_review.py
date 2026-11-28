@@ -186,9 +186,11 @@ def case_blocking_scope_and_failure_field(tmp):
     check("pre-existing edge cases without exposure stay in PR comments",
           "everyday path with its failing condition or cite reproduction evidence from real use" in flat
           and "With neither, treat the bug as a PR comment only." in flat)
+    check("pre-existing findings include their priority", '"priority":"P0"|"P1"|"P2"|"P3"' in flat)
     check("schema carries a failure field", '"failure":"' in flat, prompt[:800])
     check("failure is defined as a concrete demonstration", "how to show it fails" in flat, prompt[:800])
     check("passthrough never drops a blocking finding", "never re-rank, re-judge, merge, summarize or drop a blocking finding" in flat, prompt[:1600])
+    check("passthrough includes actionable P2", "Include actionable P2 findings as well." in flat)
     check("regular review excludes comment rules", '"source":"comments"' not in prompt and "## Keep list" not in prompt)
 
 

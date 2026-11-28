@@ -13,8 +13,9 @@ orchestrator's inline grading.
 2. **Re-read the diff and base** for each finding. A regression can surface on an unchanged
    line when this branch causes it. A `pre_existing` severity or title tag is advisory: verify the
    same failure existed at the base, the branch did not worsen it, and the diff touches or reads
-   the relevant code. Normalize Codex's `[pre_existing]` title above its numeric priority. Drop
-   unrelated code, inapplicable concerns, and findings with no concrete path to harm.
+   the relevant code. Use confirmed `pre_existing` status to determine scope and keep the
+   finding's P0–P3 priority for filing. Drop unrelated code, inapplicable concerns, and findings
+   with no concrete path to harm.
 3. **Drop low confidence and excluded categories.** Confidence < 50 goes to a collapsed
    "Low confidence (not actioned)" note, not the table. So does a `code-review` finding with an
    empty `failure` — no input, state, test, command, or unmet User Story that shows it fails. Panel findings carry
@@ -73,15 +74,16 @@ For dispatched work, record each review launch and consolidation per *Dispatch t
 - Apply the normal gate until the one general re-review has been consolidated. If unused,
   keep the normal gate through late reclaim. Record closure in `cycle_state.py note` after
   consolidating the re-review, or when ready without it. Route valid new ordinary findings
-  from later sources through the filing threshold below, even at P0/P1. This includes late reclaim and findings
-  incidental to focused confirmation. Retain accepted blockers. A repeat keeps its ID and gate.
+  from later sources through the filing threshold below, even at P0/P1. This includes late
+  reclaim and findings incidental to focused confirmation. Retain accepted blockers. A repeat
+  keeps its ID and gate.
 - For each blocker, check the branch diff for the same failure pattern and fix every in-scope
   instance in one pass. During repairs, run the tests or checks covering the changed behavior.
   If a targeted check fails, fix forward once within the finding's scope. If it still fails,
   stop on contract or blocking security findings. For other findings, withdraw only its edits
   and route it through the filing threshold if the remaining candidate can still satisfy the
-  contract and final checks. Keep advisory
-  edits separable and use `comment-rules.md` for their disposition.
+  contract and final checks. Keep advisory edits separable and use `comment-rules.md` for their
+  disposition.
 - Confirm fixed contract and security blockers against their original criteria or failure
   paths, including those first surfaced after the cap. Batch ready findings and give the
   permitted reviewer their stable IDs, changed scope, and targeted evidence. Allow one focused
@@ -273,16 +275,18 @@ late results and unapplied advisory comment findings.
 
 | Finding | Disposition |
 | --- | --- |
-| P3 or nit, including a pre-existing one | At most a PR comment. |
+| P3, a nit, or an unapplied `comments` finding | At most a PR comment. The `comments` source uses a placeholder severity. |
 | P2 introduced or worsened by this branch | Fix in this PR if in scope and approved. Otherwise leave a PR comment. |
 | Verified pre-existing defect above P3 | File only if it occurs on an everyday path or has reproduction evidence from real use. Otherwise leave a PR comment. |
-| P0/P1 introduced or worsened by this branch | Apply the blocking gate. Preserve the existing queue route when scope or the review window defers the finding. |
+| P0/P1 introduced or worsened by this branch | Apply the blocking gate. Preserve the existing queue route when scope, the review window, or withdrawal of a failed fix under *Fix rounds and re-review* defers the finding. |
 | Other advisory findings | At most a PR comment. |
 
 For a pre-existing defect, name the everyday command or workflow and explain why the failing
 condition occurs during ordinary use, or cite a real incident, user report, or reproduction
 from actual use. A synthetic test or a hypothetical supported input can establish the
 defect. Eligibility also requires evidence of exposure or an everyday path.
+For legacy pre-existing findings without a priority, assign a priority from verified impact
+or leave a PR comment if the impact is unclear.
 
 On hub, authorize `pr-write` before posting non-sensitive comment-only findings on the PR.
 Include the finding ID, priority, file:line and concrete failure. On resume or late reclaim,

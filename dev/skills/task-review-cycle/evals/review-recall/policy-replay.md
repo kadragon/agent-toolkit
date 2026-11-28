@@ -20,9 +20,10 @@ state the next action in one sentence. Return one row per ID.
 | p11 | The full local suite passed on an earlier tree. A late repair changed a file the suite covers. Decide whether to reuse the old result for the final candidate. |
 | p12 | A P2 bug in a path the PR reads also fails on the base. A synthetic test shows failure for a checkout named with a trailing tab. No normal workflow produces that name, and no user has reported the failure. |
 | p13 | A P2 bug in touched code also fails on the base. A normal invocation using the default checkout path triggers it. |
-| p14 | A P2 bug also fails on the base. The input is unusual, but a user reported it from a real run and supplied logs that reproduce the failure. |
+| p14 | A P2 bug in code the PR reads also fails on the base. The input is unusual, but a user reported it from a real run and supplied logs that reproduce the failure. |
 | p15 | The PR introduces a P2 bug. It has no contract or security implications and the author leaves it unresolved. |
-| p16 | A pre-existing P3 nit affects the default workflow and has a real user report. |
+| p16 | A pre-existing P3 nit in touched code affects the default workflow and has a real user report. |
+| p17 | An introduced ordinary P1 fix fails its targeted check twice. The fix is withdrawn, and the remaining candidate still meets the contract and passes final checks. |
 
 ## Filing expectations
 
@@ -36,3 +37,4 @@ against these candidate outcomes. The same threshold applies to GitHub and the f
 | p14 | Queue-eligible because the reproduction comes from real use. |
 | p15 | PR comment only. An unresolved introduced P2 stays in the PR. |
 | p16 | At most a PR comment. Exposure does not make P3 eligible for filing. |
+| p17 | Queue the finding under the existing failed-fix deferral rule. |

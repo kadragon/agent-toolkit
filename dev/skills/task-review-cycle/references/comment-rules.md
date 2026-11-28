@@ -76,4 +76,4 @@ thin `IMPORTANT` / `do not remove` verdict either way, trace the symbol before a
   but keep a `suppression`: removing it before its cause is fixed fails the required checks.
 - `constraint` → without `--auto`, offer the encoding and wait. Approved → encode, then delete.
   Declined or `--auto` → keep the comment and route the unapplied finding through the same
-  follow-up rules. The comment goes in the cycle that lands its check.
+  follow-up rules.

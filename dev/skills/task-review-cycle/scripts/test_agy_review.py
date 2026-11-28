@@ -204,7 +204,9 @@ def case_repo_guidance_and_pre_existing(tmp):
     check("pre-existing edge cases without exposure stay in PR comments",
           "everyday path with its failing condition or cite reproduction evidence from real use" in prompt
           and "With neither, treat the bug as a PR comment only." in prompt)
-    check("only P0/P1 affect the verdict", "LGTM\" if no P0/P1 issues" in prompt)
+    check("pre-existing findings include their priority", "tag alongside its P0–P3 priority" in prompt)
+    check("only introduced P0/P1 affect the verdict",
+          "LGTM\" if no P0/P1 issues introduced or worsened by the diff" in prompt)
 
 
 def case_ok_run_persists_review(tmp):

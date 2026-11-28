@@ -734,6 +734,8 @@ def case_custom_prompts(tmp: Path, _live: int):
         check(f"{label} root guidance appended once", result.stdout.count(guidance) == 1, result.stdout)
         check(f"{label} excludes local edits", local not in result.stdout, result.stdout)
         check(f"{label} receives advisory tag", "[pre_existing]" in result.stdout, result.stdout)
+        check(f"{label} pre-existing findings retain their numeric priority",
+              "alongside its numeric priority" in result.stdout)
         check(f"{label} introduced P2 stays in the PR",
               "introduced P2 as in-PR fixes or advisory PR comments without issue filing" in result.stdout)
         check(f"{label} pre-existing edge cases without exposure stay in PR comments",
