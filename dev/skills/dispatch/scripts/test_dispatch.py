@@ -9,7 +9,7 @@ import tempfile
 import time
 import unittest
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
-from io import StringIO
+from io import BytesIO, StringIO, TextIOWrapper
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import ANY, call, patch
@@ -28,6 +28,7 @@ from dispatch import (
     free_name,
     launch,
     lock_run,
+    main,
     pick,
     release,
     report_instruction,
@@ -630,7 +631,9 @@ class DispatchReceiptTests(DispatchTestCase):
                     if status == "ready":
                         with self.assertRaisesRegex(SystemExit, "left intact"):
                             collect(args)
-                        hc.assert_called_once_with("get", "t7")
+                        self.assertEqual(hc.call_args_list, [
+                            call("get", "t7"), call("read", "--lines", "0", "t7", timeout=ANY),
+                        ])
                     else:
                         collect(args)
                         self.assertEqual(hc.call_args_list, [
@@ -644,6 +647,87 @@ class DispatchReceiptTests(DispatchTestCase):
                 with self.assertRaisesRegex(SystemExit, "terminal identity changed"):
                     collect(args)
                 hc.assert_called_once_with("get", "t7")
+
+    def test_collect_close_after_drift(self):
+        change = ["dev 5.0.1 -> 5.0.4"]
+        composer = "\n\n› Ask Codex to do anything"
+        missing_hook = "• Hook failed\n  └ failed to spawn hook (os error 2)"
+        cases = (
+            ("idle", "ready", change, ["dev"], None, None, "hooks_broken"),
+            ("idle", "ready", change, [], None, None, "plugin_drift"),
+            ("idle", "ready", [], [], missing_hook + composer, ("idle", 10), "hooks_broken"),
+            ("idle", "ready", [], [], missing_hook + composer, ("working", 11), None),
+            ("idle", "ready", [], [], missing_hook + composer, ("idle", 12), None),
+            ("idle", "ready", [], [], missing_hook + "\n\n• Review finished" + composer, None, None),
+            ("idle", "ready", [], [], "• Hook failed\n  └ hook exited 1" + composer, None, None),
+            ("done", "merged", change, ["dev"], None, None, "hooks_broken"),
+            ("working", "ready", change, ["dev"], None, None, None),
+            ("idle", "working", change, ["dev"], None, None, None),
+            ("idle", None, change, ["dev"], None, None, None),
+        )
+        for state, status, changed, removed, screen, next_state, reason in cases:
+            with self.subTest(state=state, result=status, screen=screen, next_state=next_state, reason=reason), \
+                 tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "run.json"
+                write_json(receipt, self.RECEIPT)
+                if status:
+                    write_json(receipt.with_name("result.json"), {
+                        "status": status, "phase": "review", "summary": "Review result",
+                    })
+                terminal = {**self.TERMINAL, "status": {"state": state}, "status_ms": 10}
+                replies = [terminal]
+                calls = [call("get", "t7")]
+                if screen:
+                    replies.append({"how": "screen", "text": screen})
+                    calls.append(call("read", "--lines", "0", "t7", timeout=ANY))
+                if next_state:
+                    current_state, status_ms = next_state
+                    replies.append({**terminal, "status": {"state": current_state}, "status_ms": status_ms})
+                    calls.append(call("get", "t7"))
+                if reason or screen:
+                    replies.extend([{}, {**terminal, "state": "finished"}, {}])
+                if reason:
+                    calls.extend([call("kill", "t7"), call("get", "t7", timeout=ANY), call("rm", "t7")])
+                output = StringIO()
+                with (
+                    patch("dispatch.plugin_drift", return_value=(changed, removed)),
+                    patch("dispatch.hc_json", side_effect=replies) as hc,
+                    redirect_stderr(StringIO()),
+                    redirect_stdout(output),
+                ):
+                    if reason:
+                        try:
+                            collect(SimpleNamespace(run=receipt, close=True))
+                        except SystemExit as error:
+                            self.fail(str(error))
+                        self.assertEqual(json.loads(output.getvalue())["closed_reason"], reason)
+                    else:
+                        with self.assertRaisesRegex(SystemExit, "left intact"):
+                            collect(SimpleNamespace(run=receipt, close=True))
+                    self.assertEqual(hc.call_args_list, calls)
+                self.assertEqual(json.loads(receipt.read_text(encoding="utf-8")).get("closed_reason"), reason)
+
+    def test_collect_close_does_not_treat_unverifiable_wave_as_drift(self):
+        terminal = {**self.TERMINAL, "status": {"state": "idle"}}
+        screen = {"how": "screen", "text": "› Ask Codex to do anything"}
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            write_json(receipt, {**self.RECEIPT, "wave": str(Path(directory) / "wave.json")})
+            write_json(receipt.with_name("result.json"), {
+                "status": "ready", "phase": "review", "summary": "Review result",
+            })
+            with (
+                patch("dispatch.pinned_wave.wave_path", return_value=Path(directory) / "wave.json"),
+                patch("dispatch.pinned_wave.read_wave", side_effect=OSError("unreadable wave")),
+                patch("dispatch.hc_json", side_effect=[terminal, screen, {**terminal, "state": "finished"}, {}]) as hc,
+                redirect_stderr(StringIO()),
+            ):
+                with self.assertRaisesRegex(SystemExit, "left intact"):
+                    collect(SimpleNamespace(run=receipt, close=True))
+            self.assertEqual(hc.call_args_list, [
+                call("get", "t7"), call("read", "--lines", "0", "t7", timeout=ANY),
+            ])
+            self.assertNotIn("closed_reason", json.loads(receipt.read_text(encoding="utf-8")))
 
     def test_collect_gates_ready_and_warns_on_completed_reports(self):
         terminal = {**self.TERMINAL, "status": {"state": "done"}}
@@ -795,10 +879,13 @@ class DispatchReceiptTests(DispatchTestCase):
                 collect(SimpleNamespace(run=receipt, close=True))
             self.assertEqual(hc.call_args_list, [call("get", "t7"), call("rm", "t7")])
             live = {**self.TERMINAL, "status": {"state": "idle"}}
-            with patch("dispatch.hc_json", return_value=live) as hc:
+            screen = {"how": "screen", "text": "› Ask Codex to do anything"}
+            with patch("dispatch.hc_json", side_effect=[live, screen]) as hc:
                 with self.assertRaisesRegex(SystemExit, "left intact"):
                     collect(SimpleNamespace(run=receipt, close=True))
-                hc.assert_called_once_with("get", "t7")
+                self.assertEqual(hc.call_args_list, [
+                    call("get", "t7"), call("read", "--lines", "0", "t7", timeout=ANY),
+                ])
 
     def test_collect_reads_a_result_without_status_as_working(self):
         done = {**self.TERMINAL, "status": {"state": "done"}}
@@ -1755,7 +1842,7 @@ class DispatchWatchTests(unittest.TestCase):
         same = {**report, "result": {**report["result"], "review_retries": 2}}
         ready = {**report, "status": "done", "result": {"status": "ready", "phase": "review",
                                                        "summary": "검증 완료", "pr": "#10"}}
-        args = SimpleNamespace(runs=["run.json"], until={"ready", "blocked", "merged", "idle", "stop"},
+        args = SimpleNamespace(first=False, runs=["run.json"], until={"ready", "blocked", "merged", "idle", "stop"},
                                timeout=30, stall_minutes=30)
         with patch("dispatch.collect_result", side_effect=[report, same, ready]) as probe, \
              patch("dispatch.hc_rpc", return_value={"result": {}}) as hc, patch("dispatch.time.sleep"), redirect_stdout(StringIO()) as output:
@@ -1769,12 +1856,31 @@ class DispatchWatchTests(unittest.TestCase):
             "t7 · ready · review · 검증 완료 · #10 · -",
         ])
 
+    def test_wait_first_returns_on_the_first_selected_outcome(self):
+        idle = {"address": "t7", "status": "idle", "state": "live", "stop_reason": None, "result": None}
+        ready = {**idle, "address": "t8", "status": "done", "result": {"status": "ready", "pr": "#10"}}
+        reports = [idle, ready, {**ready, "address": "t9"}, {**ready, "address": "t7"}]
+        with TextIOWrapper(BytesIO(), encoding="utf-8") as output, redirect_stdout(output), \
+             TextIOWrapper(BytesIO(), encoding="utf-8") as progress, redirect_stderr(progress), \
+             patch("dispatch.collect_result", side_effect=reports) as probe, \
+             patch("dispatch.hc_rpc") as hc, patch("dispatch.time.sleep") as sleep:
+            main(["wait", "--first", "--until", "ready", "a.json", "b.json", "c.json"])
+            output.seek(0)
+            printed = output.read()
+            progress.seek(0)
+            statuses = progress.read()
+        self.assertEqual([invocation.args[0].name for invocation in probe.call_args_list], ["a.json", "b.json"])
+        hc.assert_not_called()
+        sleep.assert_not_called()
+        self.assertEqual(printed, f"{Path('b.json').resolve()} · t8 · ready · - · - · #10 · -\n")
+        self.assertEqual(statuses, "t7 · idle · - · - · - · -\n")
+
     def test_wait_requires_all_receipts_and_a_stopped_terminal_for_done(self):
         working = {"address": "t7", "status": "working", "state": "live", "stop_reason": None,
                    "result": {"status": "done", "phase": "implement", "summary": "phase complete"}}
         stopped = {**working, "status": "done"}
         second = {**working, "address": "t8", "result": None, "stop_reason": "hooks_broken"}
-        args = SimpleNamespace(runs=["a.json", "b.json"], until={"done", "stop"}, timeout=30, stall_minutes=30)
+        args = SimpleNamespace(first=False, runs=["a.json", "b.json"], until={"done", "stop"}, timeout=30, stall_minutes=30)
         with patch("dispatch.collect_result", side_effect=[working, second, stopped]) as probe, \
              patch("dispatch.hc_rpc", return_value={"result": {}}), patch("dispatch.time.sleep"), redirect_stdout(StringIO()) as output:
             wait(args)
@@ -1785,7 +1891,7 @@ class DispatchWatchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
             receipt.write_text(json.dumps({"address": "t7", "closed_reason": "finished"}), encoding="utf-8")
-            args = SimpleNamespace(runs=[receipt], until={"stop"}, timeout=30, stall_minutes=30)
+            args = SimpleNamespace(first=False, runs=[receipt], until={"stop"}, timeout=30, stall_minutes=30)
             with patch("dispatch.hc_json") as hc, redirect_stdout(StringIO()) as output:
                 wait(args)
         hc.assert_not_called()
@@ -1794,7 +1900,7 @@ class DispatchWatchTests(unittest.TestCase):
     def test_wait_stops_and_surfaces_drift_even_while_old_hook_directory_exists(self):
         report = {"address": "t7", "status": "working", "state": "live", "stop_reason": None,
                   "result": None, "plugin_drift": ["dev old -> new"]}
-        args = SimpleNamespace(runs=["run.json"], until={"stop"}, timeout=30, stall_minutes=30)
+        args = SimpleNamespace(first=False, runs=["run.json"], until={"stop"}, timeout=30, stall_minutes=30)
         with patch("dispatch.collect_result", return_value=report), patch("dispatch.hc_rpc") as hc, \
              redirect_stdout(StringIO()) as output:
             wait(args)
@@ -1805,7 +1911,7 @@ class DispatchWatchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
             receipt.write_text(json.dumps({"address": "t7", "created_ms": 1}), encoding="utf-8")
-            args = SimpleNamespace(runs=[receipt], until={"stop"}, timeout=30, stall_minutes=30)
+            args = SimpleNamespace(first=False, runs=[receipt], until={"stop"}, timeout=30, stall_minutes=30)
             gone = subprocess.CalledProcessError(3, "hc", stderr='{"error":{"kind":"not_found"}}')
             with patch("dispatch.hc_json", side_effect=gone), redirect_stdout(StringIO()) as output:
                 wait(args)
@@ -1815,7 +1921,7 @@ class DispatchWatchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
             receipt.write_text(json.dumps({"address": "t7", "created_ms": 1}), encoding="utf-8")
-            args = SimpleNamespace(runs=[receipt], until={"stop"}, timeout=1, stall_minutes=30)
+            args = SimpleNamespace(first=False, runs=[receipt], until={"stop"}, timeout=1, stall_minutes=30)
             with patch("dispatch.hc_json", side_effect=subprocess.TimeoutExpired("hc", 1)) as hc, \
                  self.assertRaisesRegex(SystemExit, "timed out"):
                 wait(args)
@@ -1824,7 +1930,7 @@ class DispatchWatchTests(unittest.TestCase):
 
     def test_wait_times_out_when_no_selected_outcome_occurs(self):
         report = {"address": "t7", "status": "idle", "state": "live", "stop_reason": None, "result": None}
-        args = SimpleNamespace(runs=["run.json"], until={"ready"}, timeout=1, stall_minutes=30)
+        args = SimpleNamespace(first=False, runs=["run.json"], until={"ready"}, timeout=1, stall_minutes=30)
         with patch("dispatch.collect_result", return_value=report), \
              patch("dispatch.time.monotonic", side_effect=[0, 2]), redirect_stdout(StringIO()) as output:
             with self.assertRaisesRegex(SystemExit, "timed out"):
