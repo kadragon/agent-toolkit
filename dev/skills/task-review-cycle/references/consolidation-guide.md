@@ -96,7 +96,7 @@ review checkpoint as `Reviewed head <sha>`. Use that SHA as `REVIEWED_HEAD` for 
 and the merge command. After a repair or resync, record a new SHA when review and targeted
 evidence cover the new candidate under the existing review budget.
 
-On hub, follow `ci-failure-handling.md` for CI on the current PR head, then reclaim late results
+On hub, follow `ci-failure-handling.md` for CI and merge timing on the current PR head, then reclaim late results
 per `late-source-reclaim.md`. On the local-only route, reclaim at its stop point. If reclaim leads
 to an in-scope repair, run targeted checks, commit it, and return through CI on hub. Apply the
 existing review budget and gate to every repair, including CI repairs and fixes after resync.
@@ -120,6 +120,30 @@ Codex task cycle before a ready report or any authorized base merge.
 Finalize dispositions and update the PR's `Verification:` section from final evidence when
 authorized. Keep its closing lines and report local and remote check outcomes. On lite, preserve
 the final evidence in the merge commit message before retiring the archive.
+
+## Dispatch timing
+
+Use the receipt beside the assigned `result.json`. Start one measurement before each
+independent review round, including a re-review or a focused confirmation. Use the
+candidate's full Git SHA from before reviewer launch. Keep the printed attempt number in
+the review checkpoint and finish that attempt when consolidating its verdict. Use
+`incomplete` if the attempt produced no verdict. Reuse the number when reclaiming the
+same attempt. A new reviewer launch gets a new number.
+
+```bash
+DISPATCH="<absolute path to dev/skills/dispatch/scripts/dispatch.py>"
+RESULT="<assigned result.json path>"
+DISPATCH_TIMING_RUN="${RESULT%/*}/run.json"
+HEAD_SHA=$(git rev-parse --verify HEAD) || exit 1
+ATTEMPT=$(python3 -I "$DISPATCH" timing "$DISPATCH_TIMING_RUN" start review "$HEAD_SHA")
+# At verdict consolidation, using the recorded attempt number:
+python3 -I "$DISPATCH" timing "$DISPATCH_TIMING_RUN" finish review "$ATTEMPT" complete
+```
+
+Report unavailable timing and continue the review when recording fails. For the CI wait and
+merge helper, set `DISPATCH_TIMING_RUN` to the same receipt. For a separately verified merge
+(including a confirmed lite push), run
+`dispatch.py timing <receipt> merged <confirmed feature head>`. Omit the head when unavailable.
 
 ## Dispatch pre-merge report
 

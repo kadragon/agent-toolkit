@@ -98,6 +98,13 @@ QUEUED=$(jq -r '.queued // false' <<<"$MERGE_RESULT" 2>/dev/null || echo false)
 UNCONFIRMED=$(jq -r '.unconfirmed // false' <<<"$MERGE_RESULT" 2>/dev/null || echo false)
 if [ "$MERGE_OK" = "true" ]; then
   MERGE_MSG="PR #${PR_NUMBER} merged with ${MERGE_METHOD}"
+  if [ -n "${DISPATCH_TIMING_RUN:-}" ]; then
+    TIMING=(python3 -I "$SCRIPT_DIR/../../dispatch/scripts/dispatch.py" timing "$DISPATCH_TIMING_RUN" merged)
+    if [ -n "$EXPECTED_HEAD" ]; then
+      TIMING+=("$EXPECTED_HEAD")
+    fi
+    "${TIMING[@]}" || true
+  fi
 elif [ "$QUEUED" = "true" ]; then
   MERGE_MSG="PR #${PR_NUMBER} queued for merge, not merged yet"
 elif [ "$UNCONFIRMED" = "true" ]; then

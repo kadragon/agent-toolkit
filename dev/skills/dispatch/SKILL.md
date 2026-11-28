@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 3.4.0
+version: 3.5.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo listed in
   the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to
@@ -197,6 +197,7 @@ Tell the user each terminal's name, address and repo. Watch in the background an
   `collect` for details and review evidence. `--stall-minutes N` overrides the 30-minute
   inactivity threshold. Report the stop reason, model, effort and any measured token totals or
   review retries. On `hooks_broken` or `plugin_drift`, see `references/codex-readiness.md`.
+- For phase durations, final head and merge confirmation, see [Phase timing](references/phase-timing.md).
 - After a wave has merged and been cleaned up, tell the user that `/clear` starts the next
   wave from an empty context. Filter running terminals by the validated parent in the launch
   receipts. When compacting context, keep receipts, active phases and decisions.
@@ -237,8 +238,8 @@ reconfirm `state: finished` and use `collect --close --force`. For a live child,
 After close returns `"closed": true`, save any result or receipt details you still need.
 For a pinned wave, close every child and release the wave before removing its receipts.
 Use the exact `run.json` path printed by `launch`. Remove that file, `run.lock`, `result.json`,
-and any identified temporary writes. Remove the directory if empty, or report its path if files
-remain. If close fails, keep the receipt files for diagnosis.
+`timing.json`, `timing.lock`, and any identified temporary writes. Remove the directory if empty,
+or report its path if files remain. If close fails, keep the receipt files for diagnosis.
 
 ### Continue with another phase
 

@@ -14,6 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import ANY, call, patch
 
+import phase_timing
 import pinned_wave
 from dispatch import (
     POST_SEND_SETTLE_SECONDS,
@@ -35,6 +36,7 @@ from dispatch import (
     resolve_codex_model,
     send,
     terminal_name,
+    timing,
     transcript_echoed,
     verify_delivery_turn,
     verify_pinned_delivery,
@@ -1835,6 +1837,37 @@ class PinnedWaveTests(unittest.TestCase):
 
 
 class DispatchWatchTests(unittest.TestCase):
+    def test_timing_bounds_history_and_reports_missing_measurements(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            write_json(receipt, {"address": "t7"})
+            output = StringIO()
+            with redirect_stdout(output):
+                timing(SimpleNamespace(run=receipt, event=None))
+            report = json.loads(output.getvalue())
+            self.assertIsNone(report["final_head"])
+            self.assertIsNone(report["merge"])
+            self.assertIsNone(report["launches"][0]["startup_ms"])
+            self.assertFalse(receipt.with_name("timing.json").exists())
+
+            head = "a" * 40
+            data = phase_timing.read(receipt.with_name("timing.json"))
+            for at in range(phase_timing.MAX_LAUNCHES):
+                phase_timing.new_launch(data, at)
+            for at in range(phase_timing.MAX_ATTEMPTS + 1):
+                phase_timing.start(data, "review", head, at)
+            phase_timing.finish(data, "review", 1, "complete", 30)
+            phase_timing.finish(data, "review", 2, "complete", 0)
+            report = phase_timing.report(data, {"head": head})
+            self.assertEqual(report["dropped_launches"], 1)
+            launch = report["launches"][-1]
+            self.assertEqual(launch["dropped_review"], 1)
+            self.assertEqual(len(launch["review"]), phase_timing.MAX_ATTEMPTS)
+            self.assertEqual(launch["review"][0]["attempt"], 2)
+            self.assertIsNone(launch["review"][0]["elapsed_ms"])  # Clock moved backward.
+            with self.assertRaisesRegex(ValueError, "full head SHA"):
+                phase_timing.start(data, "ci", "a prompt or a credential", 1)
+
     def test_wait_ignores_legacy_done_while_working_and_emits_only_changes(self):
         report = {"address": "t7", "status": "working", "state": "live", "stop_reason": None,
                   "result": {"status": "done", "phase": "implement", "summary": "작업 중\nsecond line",
@@ -2075,6 +2108,86 @@ class CodexSendTests(DispatchTestCase):
         ):
             launch(saved.launch_args(directory, **options))
         return mocked_hc.call_args_list
+
+    def test_phase_timing_survives_retry_relaunch_and_repeated_collection(self):
+        terminal = DispatchReceiptTests.TERMINAL
+        sent = False
+
+        def respond(command, *args):
+            nonlocal sent
+            if command == "get":
+                return {**terminal, **(self.WORKING if sent else self.IDLE)}
+            if command == "read":
+                return self.screen(self.READY)
+            self.assertEqual(command, "send")
+            sent = True
+            return {}
+
+        def event(receipt, at, verb, **options):
+            with patch("dispatch.phase_timing.now_ms", return_value=at), redirect_stdout(StringIO()) as output:
+                timing(SimpleNamespace(run=receipt, event=verb, **options))
+            return output.getvalue().strip()
+
+        first_head, final_head = "a" * 40, "b" * 40
+        with tempfile.TemporaryDirectory() as directory:
+            first = Path(directory) / "run.json"
+            with patch("dispatch.phase_timing.now_ms", side_effect=[1000, 1100]):
+                self.launch_codex(directory, respond, task="$task-next #520 private prompt")
+            review = int(event(first, 5000, "start", phase="review", head=first_head))
+            event(first, 5200, "finish", phase="review", attempt=review, outcome="complete")
+            event(first, 5300, "finish", phase="review", attempt=review, outcome="complete")
+            pending_review = int(event(first, 5350, "start", phase="review", head=first_head))
+            attempt = int(event(first, 5400, "start", phase="ci", head=first_head))
+            event(first, 5500, "finish", phase="ci", attempt=attempt, outcome="incomplete")
+            attempt = int(event(first, 5600, "start", phase="ci", head=first_head))
+            event(first, 5800, "finish", phase="ci", attempt=attempt, outcome="failed")
+            finished = {**terminal, "state": "finished"}
+            with (
+                patch("dispatch.phase_timing.now_ms", return_value=6000),
+                patch("dispatch.hc_json", side_effect=[finished, {}]),
+                redirect_stdout(StringIO()),
+            ):
+                collect(SimpleNamespace(run=first, close=True))
+
+            replacement = Path(directory) / "replacement"
+            replacement.mkdir()
+            second = replacement / "run.json"
+            sent = False
+            with patch("dispatch.phase_timing.now_ms", side_effect=[6500, 6700]):
+                self.launch_codex(replacement, respond, relaunch_from=first)
+            review = int(event(second, 8000, "start", phase="review", head=final_head))
+            event(second, 8050, "finish", phase="review", attempt=pending_review, outcome="complete")
+            attempt = int(event(second, 8100, "start", phase="ci", head=final_head))
+            event(second, 8200, "finish", phase="review", attempt=review, outcome="complete")
+            event(second, 8350, "finish", phase="ci", attempt=attempt, outcome="passed")
+            event(second, 8500, "merged", head=None)
+            event(second, 8550, "merged", head=final_head)
+            event(second, 8600, "merged", head=first_head)
+            saved = second.with_name("timing.json")
+            original = saved.read_bytes()
+            self.assertNotIn(b"private prompt", original)
+            with (
+                patch("dispatch.phase_timing.now_ms", side_effect=AssertionError("poll is read-only")),
+                patch("dispatch.hc_json", return_value=finished),
+                redirect_stdout(StringIO()) as output,
+            ):
+                for _ in range(2):
+                    collect(SimpleNamespace(run=second, close=False))
+                collect(SimpleNamespace(run=second, close=False, brief=True))
+            earlier, later, brief = output.getvalue().splitlines()
+            self.assertEqual(earlier, later)
+            self.assertEqual(saved.read_bytes(), original)
+            self.assertIn("startup=200ms implementation=1300ms review=200ms ci=250ms restart=500ms", brief)
+            report = json.loads(earlier)["timing"]
+            self.assertEqual(report["final_head"], final_head)
+            self.assertEqual(report["merge"], {"head": final_head, "confirmed_ms": 8500, "elapsed_ms": 7500})
+            original_launch, restart = report["launches"]
+            self.assertEqual((original_launch["startup_ms"], original_launch["implementation_ms"]), (100, 3900))
+            self.assertEqual(original_launch["review"][0]["finished_ms"], 5200)
+            self.assertEqual(original_launch["review"][1]["finished_ms"], 8050)
+            self.assertEqual([a["head"] for a in original_launch["ci"]], [first_head, first_head])
+            self.assertEqual([a["outcome"] for a in original_launch["ci"]], ["incomplete", "failed"])
+            self.assertEqual(restart["review"][0]["head"], final_head)
 
     def test_launch_withholds_task_on_visible_hook_review_or_failure(self):
         for trust, dialog in ((False, self.HOOK_REVIEW), (True, self.HOOK_REVIEW),

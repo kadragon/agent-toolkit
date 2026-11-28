@@ -12,6 +12,7 @@ SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 [[ -f "$SKILL_DIR/scripts/ci-wait.sh" ]] || { echo "Bundled script unavailable: $SKILL_DIR/scripts/ci-wait.sh" >&2; exit 1; }
 HUB_TYPE="<hub type printed by Setup>"
 PR_NUMBER="<PR number>"
+DISPATCH_TIMING_RUN="<absolute run.json path when dispatched, otherwise empty>"
 CI_ARGS=("$PR_NUMBER")
 case "$HUB_TYPE" in
   github)
@@ -21,7 +22,7 @@ case "$HUB_TYPE" in
   forgejo) ;;
   *) echo "Could not identify the hub from Setup" >&2; exit 1 ;;
 esac
-RESULT=$(bash "$SKILL_DIR/scripts/ci-wait.sh" "${CI_ARGS[@]}")
+RESULT=$(DISPATCH_TIMING_RUN="$DISPATCH_TIMING_RUN" bash "$SKILL_DIR/scripts/ci-wait.sh" "${CI_ARGS[@]}")
 PASSED=$(echo "$RESULT" | jq -r '.passed')
 REASON=$(echo "$RESULT" | jq -r '.reason // empty')
 ```
@@ -89,7 +90,9 @@ increment it (they route to the user-escalation branch in "Wait for CI" instead)
 
 ## Merge and Clean Up
 
-SKILL.md Step 6 → *Hub path* issues the merge. In the helper's JSON, `merge_ok: false` → report
+SKILL.md Step 6 → *Hub path* issues the merge. Export `DISPATCH_TIMING_RUN` to the absolute
+`run.json` path for a dispatched run. Record a separately confirmed merge per
+`consolidation-guide.md` → *Dispatch timing*. In the helper's JSON, `merge_ok: false` → report
 the error (conflicts, branch protection) and suggest the user resolve it; `queued: true` = in a
 merge queue, not merged yet; `unconfirmed: true` = state unknown, check the PR before retrying.
 Cleanup warnings are reported, never blocking.

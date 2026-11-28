@@ -7,6 +7,7 @@
                      --work-kind queue|new|standalone --request REQUEST --unit UNIT
                      [--git-limits LIMITS] [--git-grant-recorded | --no-git-writes]
                      [--review-transfer-approval APPROVAL]
+                     [--relaunch-from PREVIOUS_RUN]
                      [--name N] [--title TEXT] [--parent T] [--task TASK] [--trust-hooks] [--keep-connectors]
                      [--dry-run] [MESSAGE]
       Start a background child with hc run --bg. Prints launch and receipt details as JSON.
@@ -19,6 +20,8 @@
       Send to a clear Codex composer. A receipt allows startup, phase reuse, or recovery.
   dispatch.py report-review RESULT
       Read a Codex pre-merge report from stdin and atomically write ready or blocked.
+  dispatch.py timing RUN [start PHASE HEAD | finish PHASE ATTEMPT OUTCOME | merged [HEAD]]
+      Read timing or record a review/CI attempt or an independently confirmed merge.
   dispatch.py collect RECEIPT [--stall-minutes N] [--close [--force]]
       Read the result, status and any stop reason. Close an owned child.
       A Codex child whose hooks fail, or whose launch-time kadragon plugin version directory
@@ -43,6 +46,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import phase_timing  # noqa: E402
 import pinned_wave  # noqa: E402
 
 CLAUDE_SETTINGS = {
@@ -275,21 +279,68 @@ def load_run(path):
 
 
 @contextmanager
-def lock_run(path):
+def lock_run(path, *, blocking=False):
     with path.with_suffix(".lock").open("a+b") as lock:
         lock.seek(0)
         try:
             if os.name == "nt":
                 import msvcrt
 
-                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK if blocking else msvcrt.LK_NBLCK, 1)
             else:
                 import fcntl
 
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(lock, fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as error:
             raise SystemExit(f"cannot lock dispatch receipt {path}: {error}") from None
         yield
+
+
+def timing_path(receipt):
+    return receipt.with_name("timing.json")
+
+
+def record_timing(receipt, update, *args):
+    path = timing_path(receipt)
+    with lock_run(path, blocking=True):
+        data = phase_timing.read(path)
+        before = serialize_result(data)
+        value = update(data, *args, phase_timing.now_ms())
+        after = serialize_result(data)
+        if before != after:
+            write_atomic(path, after)
+        return value
+
+
+def mark_timing(receipt, field):
+    try:
+        record_timing(receipt, phase_timing.mark, field)
+    except (OSError, ValueError, KeyError, TypeError, IndexError, SystemExit) as error:
+        print(f"dispatch timing unavailable: {error}", file=sys.stderr)
+
+
+def timing_report(receipt, result):
+    try:
+        return phase_timing.report(phase_timing.read(timing_path(receipt)), result)
+    except (OSError, ValueError, KeyError, TypeError, IndexError) as error:
+        return {"final_head": None, "launches": [], "merge": None, "error": str(error)}
+
+
+def timing(args):
+    receipt = Path(args.run).resolve()
+    load_run(receipt)
+    try:
+        if args.event == "start":
+            print(record_timing(receipt, phase_timing.start, args.phase, args.head))
+        elif args.event == "finish":
+            record_timing(receipt, phase_timing.finish, args.phase, args.attempt, args.outcome)
+        elif args.event == "merged":
+            record_timing(receipt, phase_timing.merged, args.head)
+        else:
+            result, _ = read_result(receipt)
+            print(json.dumps(timing_report(receipt, result), ensure_ascii=False))
+    except (OSError, ValueError, KeyError, TypeError, IndexError) as error:
+        raise SystemExit(f"dispatch timing unavailable: {error}") from None
 
 
 def verify_terminal(run, terminal):
@@ -733,6 +784,16 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
     home = args.parent or os.environ.get("HC_TERMINAL_ID") or None
     result_path = None
     child = None
+    previous = getattr(args, "relaunch_from", None)
+    if previous:
+        previous = Path(previous).expanduser().resolve()
+        load_run(previous)
+        try:
+            history = phase_timing.read(timing_path(previous))
+        except (OSError, ValueError) as error:
+            raise SystemExit(f"cannot carry dispatch timing from {previous}: {error}") from None
+    else:
+        history = phase_timing.empty_history()
     if wave:
         codex_args = child_argv(args.cli, model, args.effort, message, args.keep_connectors)
         child = [wave["binary"], *codex_args[1:]]
@@ -787,7 +848,8 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
         except OSError as error:
             raise SystemExit(f"pinned launch withheld; could not register child: {error}") from None
     versions = installed_plugin_versions() if args.cli == "codex" and not wave else {}
-    launched_ms = time.time_ns() // 1_000_000 - 1000  # slack for clock rounding between processes
+    started_ms = phase_timing.now_ms()
+    launched_ms = started_ms - 1000  # slack for clock rounding between processes
     try:
         if wave:
             reply = hc_rpc("terminal.run", params, LAUNCH_LOOKUP_SECONDS)
@@ -842,6 +904,13 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
         run["title"] = title
     if args.cli == "codex" and handoff["work_kind"] != "standalone":
         run["require_review_sources"] = True
+    phase_timing.new_launch(history, started_ms)
+    if args.cli == "claude" and lookup_error is None and terminal.get("parent") == home:
+        phase_timing.mark(history, "delivered_ms", phase_timing.now_ms())
+    try:
+        write_json(timing_path(receipt), history)
+    except OSError as error:
+        print(f"dispatch timing unavailable: {error}", file=sys.stderr)
     try:
         write_json(receipt, {**run, "handoff": handoff} if args.cli == "codex" else run)
     except OSError as error:
@@ -1108,6 +1177,8 @@ def send_task(args, run_path):
             if not started and (not result or written == run.get("previous_result")):
                 raise SystemExit("previous delivery is unconfirmed; inspect the child's composer before resuming")
             run["sent"] = True
+            if not run.get("sent_continuation"):
+                mark_timing(run_path, "delivered_ms")
             write_json(run_path, run)
         if not resend and run["sent"] != continuation:
             raise SystemExit("use --continue only after the first task is confirmed")
@@ -1388,6 +1459,8 @@ def send_task(args, run_path):
                 if run:
                     run["sent"] = True
                     run["screen_reads"] += screen_reads
+                    if not continuation:
+                        mark_timing(run_path, "delivered_ms")
                     write_json(run_path, run)
                 print(json.dumps({"address": address, "submitted": True, "screen_reads": screen_reads}))
                 return
@@ -1425,6 +1498,21 @@ def brief_report(report):
     fields = (status, result.get("phase"), result.get("summary"), result.get("pr"), watch_stop_reason(report))
     if warning := result.get("review_warning"):
         fields += (warning,)
+    measurements = report.get("timing", {})
+    launches = measurements.get("launches", [])
+    if launches:
+        latest = launches[-1]
+        head = measurements["final_head"]
+
+        def last_duration(phase):
+            return next((entry["elapsed_ms"] for launch in reversed(launches)
+                         for entry in reversed(launch[phase]) if not head or entry["head"] == head), None)
+
+        durations = {"startup": latest["startup_ms"], "implementation": latest["implementation_ms"],
+                     "review": last_duration("review"), "ci": last_duration("ci"), "restart": latest["restart_ms"]}
+        summary = " ".join(f"{name}={value}ms" if value is not None else f"{name}=?"
+                           for name, value in durations.items())
+        fields += (summary,)
     return " · ".join((report["address"], *(field(value) or "-" for value in fields)))
 
 
@@ -1671,14 +1759,14 @@ def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadli
     timeout = remaining_wait(deadline) if deadline is not None else None
     if deadline is not None and run.get("closed_reason"):
         return {"address": run["address"], "status": None, "state": "finished", "result": result,
-                "stop_reason": None}
+                "stop_reason": None, "timing": timing_report(path, result)}
     try:
         confirm_launch_identity(path, run, locked=close, timeout=timeout)
         terminal = hc_json("get", run["address"], **({"timeout": remaining_wait(deadline)} if timeout else {}))
     except subprocess.CalledProcessError as error:
         if deadline is not None and herdr_error_kind(error) == "not_found":
             return {"address": run["address"], "status": None, "state": "finished", "result": result,
-                    "stop_reason": "Herdr terminal no longer exists"}
+                    "stop_reason": "Herdr terminal no longer exists", "timing": timing_report(path, result)}
         raise
     verify_terminal(run, terminal)
     status = (terminal.get("status") or {}).get("state")
@@ -1733,12 +1821,13 @@ def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadli
             wait_for_terminal_exit(run)
         hc_json("rm", run["address"])
         closed = {"closed_reason": closed_reason}
+        mark_timing(path, "closed_ms")
         write_json(path, {**run, **closed})
     else:
         reason, reads = child_stop_reason(terminal, run, result, written, stall_minutes, (changed, removed),
                                           deadline=deadline)
     return {"address": run["address"], "status": status, "state": terminal["state"],
-                      "result": result, "stop_reason": reason,
+                      "result": result, "stop_reason": reason, "timing": timing_report(path, result),
                       "scope_decision_categories": repeated_review_categories(result), "closed": close,
                       "screen_reads": run["screen_reads"], "collect_screen_reads": reads,
                       **({"plugin_drift": changed} if changed else {}), **closed}
@@ -1872,6 +1961,7 @@ def main(argv):
                           help="confirm that free-form --git-limits records the verified user grant")
     git_mode.add_argument("--no-git-writes", action="store_true", help="hand off implementation-only work")
     launch_parser.add_argument("--review-transfer-approval", help="verbatim user grant for reviewer data transfer")
+    launch_parser.add_argument("--relaunch-from", help="previous dispatch receipt to carry timing across a relaunch")
     launch_parser.add_argument("--name")
     launch_parser.add_argument("--title", help="short task title; hc label title=TEXT, and the name source without --name")
     launch_parser.add_argument("--parent")
@@ -1902,6 +1992,18 @@ def main(argv):
     report_parser = sub.add_parser("report-review", help="write a gated pre-merge review result")
     report_parser.add_argument("result")
     report_parser.set_defaults(func=report_review)
+    timing_parser = sub.add_parser("timing", help="inspect or record dispatch phase timings")
+    timing_parser.add_argument("run")
+    timing_parser.set_defaults(func=timing)
+    events = timing_parser.add_subparsers(dest="event")
+    start_parser = events.add_parser("start")
+    start_parser.add_argument("phase", choices=phase_timing.PHASES)
+    start_parser.add_argument("head")
+    finish_parser = events.add_parser("finish")
+    finish_parser.add_argument("phase", choices=phase_timing.PHASES)
+    finish_parser.add_argument("attempt", type=int)
+    finish_parser.add_argument("outcome", choices=phase_timing.OUTCOMES)
+    events.add_parser("merged").add_argument("head", nargs="?")
     collect_parser = sub.add_parser("collect")
     collect_parser.add_argument("run")
     collect_parser.add_argument("--stall-minutes", type=int, default=STALL_MINUTES)

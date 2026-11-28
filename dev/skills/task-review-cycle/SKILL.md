@@ -3,7 +3,7 @@ name: task-review-cycle
 description: >-
   Internal review-cycle primitive for `task-review`. Not a standalone entry
   point — do not invoke without an explicit caller argument.
-version: 1.19.0
+version: 1.20.0
 ---
 # Dev Review Cycle
 Review workflow adapted from [How the Claude Code team does code review](https://claude.dev/blog/solving-code-review-at-anthropic/) (2026-10-15).
@@ -110,8 +110,8 @@ PR_URL=$(jq -r '.pr_url' <<<"$RESULT")
 `pr_number` null but `pr_url` not → take `basename "$PR_URL"`. Both null → halt.
 
 ## Step 2: Review
-Recover review progress per `references/consolidation-guide.md` → *Resume checkpoints*
-before launching any reviewer.
+Before launching reviewers, use `references/consolidation-guide.md` → *Resume checkpoints* and
+record the attempt for a dispatched task per *Dispatch timing*.
 Apply `references/review-sources.md` → *Data-sharing policy* to every primary, panel, and fallback reviewer.
 **Lite → one reviewer, the engine that did not drive this cycle (`references/risk-routing.md` → *Lite reviewer*), then the advisory pass below.** Otherwise
 **one Claude reviewer — a foreground shell-out, never a spawned agent.** `SECURITY_HIT` non-empty

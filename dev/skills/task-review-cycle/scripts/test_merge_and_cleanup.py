@@ -489,6 +489,34 @@ def case_script_dir_ignores_cdpath(tmp):
     print("ok script_dir_ignores_cdpath")
 
 
+def case_dispatch_records_only_confirmed_merge(tmp):
+    repo, scripts = make_repo(tmp), make_script_dir(tmp)
+    dispatch = scripts / "../../dispatch/scripts"
+    dispatch.mkdir(parents=True)
+    for name in ("dispatch.py", "phase_timing.py", "pinned_wave.py", "codex_app_server.py"):
+        shutil.copy(SCRIPT.parent / "../../dispatch/scripts" / name, dispatch)
+    receipt = scripts / "run.json"
+    receipt.write_text('{"address": "t7"}', encoding="utf-8")
+    head = git(repo, "rev-parse", "HEAD").stdout.strip()
+    command = ["bash", str(scripts / "merge-and-cleanup.sh"), "1", "main", FEATURE,
+               '{"squash":true}', "--expected-head", head]
+    measurements = receipt.with_name("timing.json")
+    case = "dispatch_records_only_confirmed_merge"
+    for response in ({"merge_ok": False, "queued": True}, {"merge_ok": False, "unconfirmed": True},
+                     {"merge_ok": True}):
+        (scripts / "hub.sh").write_text(f"echo '{json.dumps(response)}'\n", encoding="utf-8")
+        proc = subprocess.run(command, cwd=repo, check=True, capture_output=True, text=True,
+                              env={**os.environ, "DISPATCH_TIMING_RUN": str(receipt)})
+        if json.loads(proc.stdout)["merge_ok"] != response["merge_ok"]:
+            fail(case, f"unexpected merge response: {proc.stdout}")
+        if measurements.exists() != response["merge_ok"]:
+            fail(case, f"timing file does not match merge confirmation: {response}")
+    recorded = json.loads(measurements.read_text(encoding="utf-8"))["merge"]
+    if recorded["head"] != head or not isinstance(recorded["confirmed_ms"], int):
+        fail(case, f"invalid merge timing: {recorded}")
+    print(f"ok {case}")
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="merge-cleanup-")
     try:
@@ -513,6 +541,7 @@ def main():
         case_hub_merge_state_unconfirmed(tmp)
         case_dirty_main_checkout_not_fast_forwarded(tmp)
         case_script_dir_ignores_cdpath(tmp)
+        case_dispatch_records_only_confirmed_merge(tmp)
     finally:
         shutil.rmtree(tmp, onerror=_force_remove)
     print("PASS")

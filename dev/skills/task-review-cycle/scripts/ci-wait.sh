@@ -144,6 +144,16 @@ if [ -z "$WATCH_SHA" ]; then
   WATCH_SHA=$(git rev-parse --verify -q HEAD 2>/dev/null || true)
 fi
 
+# One measurement per invocation, regardless of the number of status polls.
+CI_OUTCOME=incomplete
+if [ -n "${DISPATCH_TIMING_RUN:-}" ] && [ -n "$WATCH_SHA" ]; then
+  TIMING=(python3 -I "$SCRIPT_DIR/../../dispatch/scripts/dispatch.py" timing "$DISPATCH_TIMING_RUN")
+  CI_ATTEMPT=$("${TIMING[@]}" start ci "$WATCH_SHA") || CI_ATTEMPT=""
+  if [ -n "$CI_ATTEMPT" ]; then
+    trap '"${TIMING[@]}" finish ci "$CI_ATTEMPT" "$CI_OUTCOME" || true' EXIT
+  fi
+fi
+
 fail_verification() {
   jq -n --arg reason "$1" --arg expected "$EXPECTED_HEAD" --arg actual "$STATUS_SHA" \
     '{passed: false, reason: $reason, expected_head: $expected, head_sha: ($actual | select(length > 0) // null)}'
@@ -174,10 +184,16 @@ while true; do
   case "$STATUS" in
     success)
       clear_strikes
+      if [ -n "$WATCH_SHA" ] && [ "$STATUS_SHA" = "$WATCH_SHA" ]; then
+        CI_OUTCOME=passed
+      fi
       jq -n '{passed: true}'
       exit 0
       ;;
     failure)
+      if [ -n "$WATCH_SHA" ] && [ "$STATUS_SHA" = "$WATCH_SHA" ]; then
+        CI_OUTCOME=failed
+      fi
       STRIKES=$(read_strikes)
       STRIKES=$(( STRIKES + 1 ))
       [ -n "$STRIKE_FILE" ] && printf '%s\n' "$STRIKES" > "$STRIKE_FILE"
