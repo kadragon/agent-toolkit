@@ -155,6 +155,7 @@ CODEX_FAMILIES = ("luna", "terra", "sol")
 CODEX_SLUG = re.compile(r"gpt-(\d+(?:\.\d+)*)-([a-z]+)")
 QUOTA_SCRIPT = Path(__file__).resolve().with_name("quota.py")
 QUOTA_TIMEOUT_SECONDS = 10
+SHARED_CACHE_HOLD = "shared-cache hold"
 EXPIRING_PASS_EXCEPTIONS = ("production DB", "deploy")
 BIAS_EXCEPTIONS = ("unknown-cause debugging", "open grill/spec", "security", "auth", "data migration",
                    *EXPIRING_PASS_EXCEPTIONS)
@@ -267,18 +268,35 @@ def lock_shared_cache(home):
 def shared_cache_children(label):
     try:
         terminals = hc_json("ls", "--label", label, timeout=LAUNCH_LOOKUP_SECONDS)["terminals"]
-    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        if not isinstance(terminals, list) or any(not isinstance(terminal, dict) for terminal in terminals):
+            raise ValueError("invalid terminal list")
+        live_children = [terminal for terminal in terminals if terminal.get("state") == "live"]
+        for terminal in live_children:
+            address = terminal.get("address")
+            if not isinstance(address, str) or not address.strip():
+                raise ValueError("invalid live terminal address")
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
         raise SystemExit(f"cannot check the shared Codex cache for live waves: {error}") from None
-    return [terminal for terminal in terminals if terminal.get("state") == "live"]
+    return live_children
+
+
+def has_foreign_shared_cache_child(children, parent):
+    owners = (terminal.get("parent") for terminal in children)
+    return any(isinstance(owner, str) and owner.strip() and owner != parent for owner in owners)
 
 
 def require_shared_cache_available(children, *, parent=None, preparing=False):
     others = [terminal["address"] for terminal in children
               if preparing or parent is None or terminal.get("parent") != parent]
     if others:
+        guidance = ""
+        if not preparing:
+            if parent is None:
+                guidance = "; use --parent to associate siblings with a home session"
+            elif has_foreign_shared_cache_child(children, parent):
+                guidance = f"; for Claude use --bias-exception '{SHARED_CACHE_HOLD}'"
         raise SystemExit("shared-cache Codex startup withheld: a live wave uses this cache "
-                         f"({', '.join(others)}); wait for it to finish or use a pinned wave"
-                         + ("; use --parent to associate siblings with a home session" if not preparing and parent is None else ""))
+                         f"({', '.join(others)}); wait for it to finish or use a pinned wave{guidance}")
 
 
 def verify_shared_cache_versions(home, installed):
@@ -857,7 +875,7 @@ def read_quota_snapshot():
     return snapshot
 
 
-def launch_quota(args, model):
+def launch_quota(args, model, parent):
     snapshot = read_quota_snapshot()
     pinned = getattr(args, "user_pinned", False)
     approved = getattr(args, "approve_critical", False)
@@ -869,12 +887,23 @@ def launch_quota(args, model):
         audit["critical_approved"] = True
     if reason is not None:
         audit["bias_exception"] = reason
-    if snapshot is None:
+    quota = snapshot[args.cli] if snapshot is not None else None
+    if quota is not None and quota.get("raw_state", quota["state"]) == "critical" and not approved:
+        raise SystemExit(f"{args.cli} quota is critical; --approve-critical requires explicit user approval")
+
+    category = (reason or "").partition(":")[0].strip().casefold()
+    if category == SHARED_CACHE_HOLD:
+        if args.cli != "claude":
+            raise SystemExit("shared-cache hold is only supported for Claude launches")
+        if not parent:
+            raise SystemExit("shared-cache hold requires a home session address; pass --parent")
+        children = shared_cache_children(shared_codex.cache_label(codex_home()))
+        if not has_foreign_shared_cache_child(children, parent):
+            raise SystemExit("shared-cache hold could not be verified: no live child from another home session")
         return audit
 
-    quota = snapshot[args.cli]
-    if quota.get("raw_state", quota["state"]) == "critical" and not approved:
-        raise SystemExit(f"{args.cli} quota is critical; --approve-critical requires explicit user approval")
+    if snapshot is None:
+        return audit
     preferred = snapshot["effective_bias"]
     if pinned or quota["state"] == "unknown" or preferred in ("none", args.cli):
         return audit
@@ -893,7 +922,6 @@ def launch_quota(args, model):
                          "use the preferred CLI or --user-pinned for an explicit user choice")
 
     allowed = EXPIRING_PASS_EXCEPTIONS if strong else BIAS_EXCEPTIONS
-    category = (reason or "").partition(":")[0].strip().casefold()
     if category not in {item.casefold() for item in allowed}:
         raise SystemExit(f"quota bias {preferred} requires --bias-exception with one of: {', '.join(allowed)}")
     return audit
@@ -1084,8 +1112,8 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
         message = first_prompt(args.cli, message, handoff)
     if args.task is not None and not args.task.strip():
         raise SystemExit("first message is empty")
-    quota = launch_quota(args, model)
     home = args.parent or os.environ.get("HC_TERMINAL_ID") or None
+    quota = launch_quota(args, model, home)
     result_path = None
     child = None
     previous = getattr(args, "relaunch_from", None)
@@ -2620,7 +2648,9 @@ def main(argv):
     wait_parser.add_argument("--timeout", type=int, default=WAIT_TIMEOUT_SECONDS, metavar="SECONDS")
     wait_parser.add_argument("--stall-minutes", type=int, default=STALL_MINUTES)
     wait_parser.set_defaults(func=wait)
-    launch_parser.add_argument("--bias-exception", help="routing exception category, optionally followed by ': detail'")
+    launch_parser.add_argument("--bias-exception",
+                               help=f"routing exception category (including '{SHARED_CACHE_HOLD}' for Claude), "
+                               "optionally followed by ': detail'")
     launch_parser.add_argument("--user-pinned", action="store_true",
                                help="the user explicitly selected this CLI, model or effort")
     launch_parser.add_argument("--approve-critical", action="store_true",
