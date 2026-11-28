@@ -40,11 +40,14 @@ from dispatch import (
     main,
     peek,
     pick,
+    pre_merge_resume,
+    pre_merge_stop,
     prepare_codex,
     release,
     report_instruction,
     requires_review_sources,
     resolve_codex_model,
+    resumes_pre_merge_stop,
     send,
     send_wave,
     terminal_name,
@@ -187,6 +190,35 @@ class DispatchReceiptTests(DispatchTestCase):
         ):
             with self.subTest(message=message):
                 self.assertEqual(first_prompt("codex", message, self.HANDOFF), message + self.BLOCK)
+
+    def test_pre_merge_stop_requires_parallel_worktree_task(self):
+        for cli, prefix in (("claude", "/dev:"), ("codex", "$")):
+            for kind, command in (("queue", "task-next"), ("new", "task-new")):
+                with self.subTest(cli=cli, kind=kind):
+                    handoff = {"work_kind": kind}
+                    task = f"{prefix}{command} --tree unit"
+                    mode = "\nDispatch mode: parallel-worktree"
+                    self.assertTrue(pre_merge_stop(cli, task + mode, handoff))
+                    self.assertTrue(pre_merge_stop(cli, task + mode + ". Work only on unit.", handoff))
+                    self.assertFalse(pre_merge_stop(cli, task, handoff))
+                    self.assertFalse(pre_merge_stop(cli, task.replace("--tree", "--all") + mode, handoff))
+
+    def test_relaunch_preserves_pre_merge_stop_for_same_worktree(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cwd = Path(directory)
+            receipt = cwd / "run.json"
+            run = {**self.RECEIPT, "cwd": str(cwd), "pre_merge_stop": True}
+            write_json(receipt.with_name("result.json"), {
+                "status": "working", "phase": "review", "summary": "Review in progress",
+                "worktree": str(cwd / ".worktrees" / "unit"),
+            })
+            resume = pre_merge_resume(receipt, run, cwd)
+            self.assertTrue(resumes_pre_merge_stop(resume, cwd, "claude", "/dev:task-next --resume unit"))
+            self.assertFalse(resumes_pre_merge_stop(resume, cwd, "claude", "/dev:task-next --resume another"))
+            receipt.with_name("result.json").unlink()
+            resume = pre_merge_resume(receipt, run, cwd)
+            self.assertTrue(resumes_pre_merge_stop(resume, cwd, "claude", "/dev:task-next --resume unit"))
+            self.assertFalse(resumes_pre_merge_stop(resume, cwd, "claude", "/dev:task-next --resume ../another"))
 
     def launch_args(self, cwd, **overrides):
         args = dict(cwd=str(cwd), name="repo", parent="t6", cli="codex", model="gpt-6.1-terra",
@@ -855,6 +887,110 @@ class DispatchReceiptTests(DispatchTestCase):
                 with self.assertRaisesRegex(SystemExit, "terminal identity changed"):
                     collect(args)
                 hc.assert_called_once_with("get", "t7")
+
+    def test_collect_closes_ready_child_with_recorded_pre_merge_stop(self):
+        terminal = {**self.TERMINAL, "status": {"state": "idle"}}
+        finished = {**terminal, "state": "finished"}
+        head = "a" * 40
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            write_json(receipt, {**self.RECEIPT, "cli": "claude", "pre_merge_stop": True})
+            write_json(receipt.with_name("result.json"), {
+                "status": "ready", "phase": "review", "summary": "CI passed", "head": head,
+                "review": {"head": head, "status": "passed", "sources": ["claude"]},
+            })
+            with (
+                patch("dispatch.hc_json", side_effect=[terminal, terminal, {}, finished, {}]) as hc,
+                redirect_stdout(StringIO()) as output,
+            ):
+                collect(SimpleNamespace(run=receipt, close=True))
+            report = json.loads(output.getvalue())
+            self.assertEqual(report["closed_reason"], "final_result")
+            self.assertIsNone(report["timing"]["merge"])
+            self.assertEqual(hc.call_args_list, [
+                call("get", "t7"), call("get", "t7"), call("kill", "t7"),
+                call("get", "t7", timeout=ANY), call("rm", "t7"),
+            ])
+
+    def test_collect_closes_ready_child_after_same_head_merge(self):
+        terminal = {**self.TERMINAL, "turn": 1, "status": {"state": "idle"}}
+        finished = {**terminal, "state": "finished"}
+        head = "a" * 40
+        pr = "https://github.com/acme/widget/pull/595"
+        merged = {"state": "MERGED", "headRefOid": head, "mergeCommit": {"oid": "b" * 40}}
+        for outcome in ("merged", "recorded", "open", "different_head", "pre_merge_head_changed",
+                        "active", "resumed", "replaced_result", "reviews_missing", "lookup_failed"):
+            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "run.json"
+                write_json(receipt, {
+                    **self.RECEIPT, "cli": "claude", "require_review_sources": outcome == "reviews_missing",
+                    "pre_merge_stop": outcome == "pre_merge_head_changed",
+                })
+                result = {
+                    "status": "ready", "phase": "review", "summary": "CI passed", "head": head, "pr": pr,
+                    "review": {"head": head, "status": "passed", "sources": ["claude"]},
+                }
+                write_json(receipt.with_name("result.json"), result)
+                data = phase_timing.new_launch(phase_timing.empty_history(), 1000)
+                if outcome == "recorded":
+                    phase_timing.merged(data, head, 1500)
+                timing_path = receipt.with_name("timing.json")
+                write_json(timing_path, data)
+                reply = {
+                    "open": {**merged, "state": "OPEN", "mergeCommit": None},
+                    "different_head": {**merged, "headRefOid": "c" * 40},
+                    "pre_merge_head_changed": {"state": "OPEN", "mergeCommit": None, "headRefOid": "c" * 40},
+                }.get(outcome, merged)
+                active = {**terminal, "turn": 2, "status": {"state": "working"}}
+                terminal_reply = active if outcome == "active" else terminal
+                responses = [terminal_reply]
+                if outcome in {"merged", "recorded", "replaced_result"}:
+                    responses.append(terminal)
+                elif outcome == "resumed":
+                    responses.append(active)
+                responses += [{}, finished, {}]
+                query_error = FileNotFoundError("gh") if outcome == "lookup_failed" else None
+
+                def lookup(*args, **kwargs):
+                    if query_error:
+                        raise query_error
+                    if outcome == "replaced_result":
+                        write_json(receipt.with_name("result.json"), {**result, "status": "blocked"})
+                    return SimpleNamespace(stdout=json.dumps(reply))
+
+                with (
+                    patch("dispatch.hc_json", side_effect=responses) as hc,
+                    patch("dispatch.subprocess.run", side_effect=lookup) as gh,
+                    patch("dispatch.phase_timing.now_ms", return_value=2000),
+                    redirect_stdout(StringIO()) as output,
+                ):
+                    args = SimpleNamespace(run=receipt, close=True)
+                    if outcome in {"merged", "recorded"}:
+                        collect(args)
+                    else:
+                        with self.assertRaisesRegex(SystemExit, "left intact"):
+                            collect(args)
+                if outcome in {"merged", "recorded"}:
+                    report = json.loads(output.getvalue())
+                    confirmed = 1500 if outcome == "recorded" else 2000
+                    self.assertEqual(report["closed_reason"], "final_result")
+                    self.assertEqual(report["result"], result)
+                    self.assertEqual(report["timing"]["merge"], {
+                        "head": head, "confirmed_ms": confirmed, "elapsed_ms": confirmed - 1000,
+                    })
+                    self.assertEqual(phase_timing.read(timing_path)["merge"]["confirmed_ms"], confirmed)
+                    self.assertIn(call("kill", "t7"), hc.call_args_list)
+                elif outcome in {"resumed", "replaced_result"}:
+                    self.assertEqual(phase_timing.read(timing_path)["merge"]["head"], head)
+                    self.assertEqual(hc.call_args_list, [call("get", "t7")] * 2)
+                else:
+                    self.assertIsNone(phase_timing.read(timing_path)["merge"])
+                    hc.assert_called_once_with("get", "t7")
+                if outcome in {"recorded", "active", "reviews_missing"}:
+                    gh.assert_not_called()
+                else:
+                    gh.assert_called_once()
+                    self.assertEqual(gh.call_args.args[0][:4], ["gh", "pr", "view", pr])
 
     def test_collect_accepts_and_closes_legacy_pr_completion_reports(self):
         terminal = {**self.TERMINAL, "status": {"state": "done"}}
@@ -3246,6 +3382,31 @@ class CodexSendTests(DispatchTestCase):
                 phase_timing.finish(started, "review", saved_attempt, "complete", 4000)
             self.assertNotEqual(saved_attempt, current_attempt)
             self.assertIsNone(started["launches"][0]["review"][0]["finished_ms"])
+
+    def test_idle_codex_relaunch_carries_pre_merge_stop_until_first_send(self):
+        terminal = DispatchReceiptTests.TERMINAL
+        sent = False
+
+        def respond(command, *args):
+            nonlocal sent
+            if command == "get":
+                return {**terminal, **(self.WORKING if sent else self.IDLE)}
+            if command == "read":
+                return self.screen(self.READY)
+            self.assertEqual(command, "send")
+            sent = True
+            return {"started": True}
+
+        with tempfile.TemporaryDirectory() as directory:
+            first = Path(directory) / "previous.json"
+            write_json(first, {**terminal, "cwd": directory, "pre_merge_stop": True})
+            self.launch_codex(directory, respond, relaunch_from=first, task=None)
+            receipt = Path(directory) / "run.json"
+            first.unlink()
+            args = SimpleNamespace(address="t7", message="$task-next --resume unit", run=receipt)
+            with patch("dispatch.hc_json", side_effect=respond), patch("dispatch.time.sleep"), redirect_stdout(StringIO()):
+                send(args)
+            self.assertTrue(json.loads(receipt.read_text(encoding="utf-8"))["pre_merge_stop"])
 
     def test_phase_timing_survives_retry_relaunch_and_repeated_collection(self):
         terminal = DispatchReceiptTests.TERMINAL

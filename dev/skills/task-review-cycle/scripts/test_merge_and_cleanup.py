@@ -213,63 +213,129 @@ def case_base_checkout_fails(tmp):
     print("ok base_checkout_fails")
 
 
-# Stub gh for the real hub.sh: `pr merge` exits 0, `pr view` prints $GH_VIEW, `api` logs its args
-# to $GH_LOG and exits $GH_API_RC (printing $GH_API_ERR on failure).
 GH_STUB = """#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$GH_LOG"
 case "$1 $2" in
-  "pr merge") echo "merged or enqueued"; exit 0 ;;
-  "pr view") [ "$GH_VIEW" = "null" ] && exit 1; echo "$GH_VIEW"; exit 0 ;;
+  "pr merge") exit 0 ;;
+  "pr view")
+    [ "$GH_VIEW" != null ] || exit 1
+    if [ "$ADVANCE" = true ]; then
+      git push -q "$REMOTE" "HEAD:$FEATURE_REF" || exit 1
+    fi
+    echo "$GH_VIEW"
+    ;;
+  *) exit 1 ;;
 esac
-if [ "$1" = "api" ]; then
-  printf '%s\\n' "$*" >> "$GH_LOG"
-  [ "${GH_API_RC:-0}" = 0 ] || { echo "$GH_API_ERR" >&2; exit "$GH_API_RC"; }
-  exit 0
-fi
-exit 1
 """
 
 
-def run_hub_merge(tmp, view, api_rc=0, api_err=""):
-    """Run the real hub.sh merge against a stub gh; return (json, api calls)."""
+def run_hub_merge(tmp, state="MERGED", *, fork=False, advance=False, deny_delete=False,
+                  present=True, pr_repo="o/r", push_url=None, redirect_push=False, follow_tags=False):
     repo = make_repo(tmp)
-    git(repo, "remote", "add", "origin", "git@github.com:o/r.git")
+    remote = Path(tempfile.mkdtemp(dir=tmp)) / "origin.git"
+    git(repo, "init", "-q", "--bare", str(remote))
+    origin = "git@github.com:o/r.git" if push_url is None else "https://github.com/o/r.git"
+    git(repo, "remote", "add", "origin", origin)
+    if push_url is not None:
+        git(repo, "remote", "set-url", "--push", "origin", push_url)
+    if redirect_push:
+        git(repo, "config", f"url.{remote.as_posix()}.pushInsteadOf", origin)
+    branch = "feat/a#b%c"
+    ref = f"refs/heads/{branch}"
+    merged = git(repo, "rev-parse", "HEAD").stdout.strip()
+    if present:
+        git(repo, "push", str(remote), f"HEAD:{ref}")
+    if follow_tags:
+        git(repo, "-c", "tag.gpgSign=false", "tag", "-a", "unpublished", "-m", "unpublished")
+        git(repo, "config", "push.followTags", "true")
+    if advance:
+        git(repo, "commit", "--allow-empty", "-qm", "[TEST] newer feature commit")
+    if deny_delete:
+        git(remote, "config", "receive.denyDeletes", "true")
+    expected_tip = git(repo, "rev-parse", "HEAD").stdout.strip()
+    view = {"state": state, "headRefName": branch, "isCrossRepository": fork, "headRefOid": merged,
+            "url": f"https://github.com/{pr_repo}/pull/1"}
     bindir = Path(tempfile.mkdtemp(dir=tmp))
-    (bindir / "gh").write_text(GH_STUB, newline="\n")
-    (bindir / "gh").chmod(0o755)
-    log = bindir / "api.log"
+    gh = bindir / "gh"
+    gh.write_text(GH_STUB, newline="\n")
+    gh.chmod(0o755)
+    ssh = bindir / "ssh"
+    ssh.write_text(r"""#!/usr/bin/env bash
+case "$2" in
+  git-receive-pack\ *) exec git receive-pack "$REMOTE" ;;
+  git-upload-pack\ *) exec git upload-pack "$REMOTE" ;;
+  *) exit 1 ;;
+esac
+""", newline="\n")
+    ssh.chmod(0o755)
+    gh_log = bindir / "gh.log"
     env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}",
-               GH_VIEW=json.dumps(view), GH_LOG=str(log),
-               GH_API_RC=str(api_rc), GH_API_ERR=api_err)
+               FEATURE_REF=ref, REMOTE=str(remote), ADVANCE=str(advance).lower(),
+               GH_VIEW=json.dumps(view if state is not None else None), GH_LOG=str(gh_log),
+               GIT_SSH_COMMAND=f'"{ssh.as_posix()}"', GIT_SSH_VARIANT="simple")
     proc = subprocess.run(["bash", str(HUB), "merge", "1", "squash"], cwd=repo, env=env,
                           check=False, capture_output=True, text=True)
     if proc.returncode != 0:
         fail("hub_merge", f"exit {proc.returncode}: {proc.stderr.strip()!r}")
-    calls = log.read_text().splitlines() if log.exists() else []
-    return json.loads(proc.stdout), calls
+    calls = gh_log.read_text(encoding="utf-8").splitlines()
+    if any("--repo" in call for call in calls):
+        fail("hub_merge", f"merge and view must use the same gh default repository as PR creation: {calls}")
+    tip = subprocess.run(["git", "-C", str(remote), "rev-parse", "--verify", ref],
+                         capture_output=True, text=True, check=False).stdout.strip()
+    if follow_tags and git(remote, "tag", "--list").stdout.strip():
+        fail("hub_only_deletes_merged_ref", "remote cleanup published an annotated tag")
+    return json.loads(proc.stdout), tip, expected_tip
 
 
 def case_hub_remote_delete_when(tmp):
-    # The remote head is deleted only once the PR is MERGED from a same-repo branch.
-    merged = {"state": "MERGED", "headRefName": "feat/x", "isCrossRepository": False, "headRefOid": "a" * 40}
-    out, calls = run_hub_merge(tmp, merged)
-    if out["merge_ok"] is not True or out.get("queued") is not False:
-        fail("hub_remote_delete_when", f"MERGED: got {out!r}")
-    if out.get("head_sha") != merged["headRefOid"]:
-        fail("hub_remote_delete_when", f"MERGED head not returned: {out!r}")
-    if calls != ["api -X DELETE repos/{owner}/{repo}/git/refs/heads/feat/x"]:
-        fail("hub_remote_delete_when", f"MERGED: api calls {calls!r}")
-    _, calls = run_hub_merge(tmp, dict(merged, isCrossRepository=True))
-    if calls:
-        fail("hub_remote_delete_when", f"cross-repository head was deleted: {calls!r}")
-    print("ok hub_remote_delete_when")
+    case = "hub_remote_delete_when"
+    out, tip, merged = run_hub_merge(tmp)
+    if not out["merge_ok"] or out["queued"] or out.get("head_sha") != merged or tip:
+        fail(case, f"same-repository branch with special characters was not deleted: {out!r}, tip={tip}")
+    out, tip, merged = run_hub_merge(tmp, fork=True)
+    if not out["merge_ok"] or tip != merged:
+        fail(case, f"cross-repository branch should be kept: {out!r}, tip={tip}")
+    out, tip, _ = run_hub_merge(tmp, present=False)
+    if not out["merge_ok"] or tip or out["merge_output"]:
+        fail(case, f"an already deleted ref should be accepted: {out!r}, tip={tip}")
+    print(f"ok {case}")
+
+
+def case_hub_preserves_advanced_remote_head(tmp):
+    case = "hub_preserves_advanced_remote_head"
+    out, tip, advanced = run_hub_merge(tmp, advance=True)
+    if not out["merge_ok"] or tip != advanced or "Remote head delete failed" not in out["merge_output"]:
+        fail(case, f"expected remote {advanced}, got {tip!r}: {out!r}")
+    print(f"ok {case}")
+
+
+def case_hub_push_target_matches_pr(tmp):
+    case = "hub_push_target_matches_pr"
+    out, tip, merged = run_hub_merge(tmp, pr_repo="upstream/r")
+    if not out["merge_ok"] or tip != merged or "Remote head kept" not in out["merge_output"]:
+        fail(case, f"origin's fork ref should stay when gh merges upstream: {out!r}, tip={tip}")
+    out, tip, merged = run_hub_merge(tmp, redirect_push=True)
+    if not out["merge_ok"] or tip != merged or "Remote head kept" not in out["merge_output"]:
+        fail(case, f"the mirror ref should stay when pushInsteadOf redirects origin: {out!r}, tip={tip}")
+    out, tip, _ = run_hub_merge(tmp, push_url="git@github.com:o/r.git")
+    if not out["merge_ok"] or tip:
+        fail(case, f"the same repository's configured SSH pushurl should be used: {out!r}, tip={tip}")
+    print(f"ok {case}")
+
+
+def case_hub_only_deletes_merged_ref(tmp):
+    case = "hub_only_deletes_merged_ref"
+    out, tip, _ = run_hub_merge(tmp, follow_tags=True)
+    if not out["merge_ok"] or tip:
+        fail(case, f"expected remote branch deletion: {out!r}, tip={tip}")
+    print(f"ok {case}")
 
 
 def case_hub_merge_queue_is_not_merged(tmp):
     # Under a merge queue gh exits 0 on enqueue; the PR is still OPEN, so nothing merged yet.
-    out, calls = run_hub_merge(tmp, {"state": "OPEN", "headRefName": "feat/x",
-                                     "isCrossRepository": False})
-    if out["merge_ok"] is not False or out.get("queued") is not True or calls:
-        fail("hub_merge_queue_is_not_merged", f"got {out!r}, api calls {calls!r}")
+    out, tip, merged = run_hub_merge(tmp, "OPEN")
+    if out["merge_ok"] is not False or out.get("queued") is not True or tip != merged:
+        fail("hub_merge_queue_is_not_merged", f"got {out!r}, tip={tip}")
     print("ok hub_merge_queue_is_not_merged")
 
 
@@ -347,15 +413,11 @@ def case_forgejo_expected_head_is_rejected(tmp):
     print("ok Forgejo keeps its existing merge and rejects an explicit GitHub-only SHA pin")
 
 
-def case_hub_ref_is_encoded_and_failure_reported(tmp):
-    # A raw `#` or `%` in the ref would target a different path; `/` separates segments.
-    view = {"state": "MERGED", "headRefName": "feat/a#b%c", "isCrossRepository": False}
-    out, calls = run_hub_merge(tmp, view, api_rc=1, api_err="HTTP 403: forbidden")
-    if calls != ["api -X DELETE repos/{owner}/{repo}/git/refs/heads/feat/a%23b%25c"]:
-        fail("hub_ref_is_encoded", f"api calls {calls!r}")
-    if out["merge_ok"] is not True or "HTTP 403: forbidden" not in out["merge_output"]:
-        fail("hub_delete_failure_reported", f"got {out!r}")
-    print("ok hub_ref_is_encoded_and_failure_reported")
+def case_hub_delete_failure_reported(tmp):
+    out, tip, merged = run_hub_merge(tmp, deny_delete=True)
+    if not out["merge_ok"] or tip != merged or "deletion prohibited" not in out["merge_output"]:
+        fail("hub_delete_failure_reported", f"got {out!r}, tip={tip}")
+    print("ok hub_delete_failure_reported")
 
 
 def case_cleanup_reports_queued(tmp):
@@ -433,10 +495,10 @@ def case_linked_worktree_without_path_stays(tmp):
 
 def case_hub_merge_state_unconfirmed(tmp):
     # gh pr view failing after a successful merge is an unknown state, not a failed merge.
-    out, calls = run_hub_merge(tmp, None)
+    out, tip, merged = run_hub_merge(tmp, None)
     if out["merge_ok"] is not False or out.get("unconfirmed") is not True \
-            or out.get("queued") is not False or calls:
-        fail("hub_merge_state_unconfirmed", f"got {out!r}, api calls {calls!r}")
+            or out.get("queued") is not False or tip != merged:
+        fail("hub_merge_state_unconfirmed", f"got {out!r}, tip={tip}")
     print("ok hub_merge_state_unconfirmed")
 
 
@@ -505,6 +567,30 @@ def _merge_stderr(repo, d, env=None, script=None):
                            '{"squash":true}'], cwd=repo, check=False, capture_output=True,
                           text=True, env=env)
     return proc
+
+
+def case_failed_fetch_does_not_merge_stale_fetch_head(tmp):
+    case = "failed_fetch_does_not_merge_stale_fetch_head"
+    repo, d = _repo_behind_origin(tmp)
+    head = git(repo, "rev-parse", "HEAD").stdout.strip()
+    git(repo, "fetch", "origin", "main")
+    stale = git(repo, "rev-parse", "FETCH_HEAD").stdout.strip()
+    # A failure before the transport starts leaves FETCH_HEAD intact on some Git
+    # versions. Pin that condition so the test exercises cleanup on every version.
+    bindir = Path(tempfile.mkdtemp(dir=tmp))
+    shim = bindir / "git"
+    shim.write_text(
+        '#!/usr/bin/env bash\nif [[ "$*" == "fetch origin main" ]]; then exit 1; fi\n'
+        'exec "$REAL_GIT" "$@"\n', newline="\n",
+    )
+    shim.chmod(0o755)
+    env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}", REAL_GIT=shutil.which("git"))
+    proc = _merge_stderr(repo, d, env=env)
+    out = json.loads(proc.stdout)
+    if (head == stale or proc.returncode != 0 or git(repo, "rev-parse", "HEAD").stdout.strip() != head
+            or out["merge_ok"] is not True or branch_exists(repo)):
+        fail(case, f"base should stay at {head} instead of {stale}: {out!r}")
+    print(f"ok {case}")
 
 
 def case_dirty_main_checkout_not_fast_forwarded(tmp):
@@ -587,17 +673,21 @@ def main():
         case_unknown_branch_warns(tmp)
         case_worktree_holding_branch(tmp)
         case_base_checkout_fails(tmp)
+        case_hub_preserves_advanced_remote_head(tmp)
+        case_hub_push_target_matches_pr(tmp)
+        case_hub_only_deletes_merged_ref(tmp)
         case_hub_remote_delete_when(tmp)
         case_hub_merge_queue_is_not_merged(tmp)
         case_merge_matches_reviewed_head(tmp)
         case_forgejo_expected_head_is_rejected(tmp)
-        case_hub_ref_is_encoded_and_failure_reported(tmp)
+        case_hub_delete_failure_reported(tmp)
         case_cleanup_reports_queued(tmp)
         case_run_from_inside_worktree(tmp)
         case_already_removed_worktree_does_not_keep_branch(tmp)
         case_inside_worktree_keeps_main_branch(tmp)
         case_linked_worktree_without_path_stays(tmp)
         case_hub_merge_state_unconfirmed(tmp)
+        case_failed_fetch_does_not_merge_stale_fetch_head(tmp)
         case_dirty_main_checkout_not_fast_forwarded(tmp)
         case_script_dir_ignores_cdpath(tmp)
         case_dispatch_records_only_confirmed_merge(tmp)

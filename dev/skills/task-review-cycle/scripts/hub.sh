@@ -105,6 +105,17 @@ require_forgejo_token() {
 
 current_branch() { git branch --show-current; }
 
+github_push_url_for_pr() (
+  local pr_url="$1" pr_number="$2" push_url repo_path
+  local url_pattern='^(git@github\.com:|ssh://git@github\.com(:22)?/|https://([^/@[:space:]]+@)?github\.com(:443)?/)([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)$'
+  push_url=$(git remote get-url --push --all origin) || return 1
+  shopt -s nocasematch
+  [[ "$push_url" =~ $url_pattern ]] || return 1
+  repo_path="${BASH_REMATCH[5]}"
+  [[ "$pr_url" == "https://github.com/${repo_path%.git}/pull/$pr_number" ]] || return 1
+  printf '%s\n' "$push_url"
+)
+
 # head_sha (ci-status only) names the commit the checks describe; omitted when unknown.
 emit_status() {
   jq -n --arg s "$1" --argjson n "${2:-0}" --arg sha "${HEAD_SHA:-}" \
@@ -392,7 +403,8 @@ case "$SUBCOMMAND" in
       if [ "$MERGE_OK" = "true" ]; then
         HEAD_INFO='{}'
         for attempt in 1 2 3; do
-          HEAD_INFO=$(gh pr view "$PR_NUMBER" --json state,headRefName,isCrossRepository,headRefOid 2>/dev/null) && break
+          HEAD_INFO=$(gh pr view "$PR_NUMBER" \
+            --json state,headRefName,isCrossRepository,headRefOid,url 2>/dev/null) && break
           HEAD_INFO='{}'
           [ "$attempt" -lt 3 ] && sleep 1
         done
@@ -408,18 +420,29 @@ case "$SUBCOMMAND" in
           fi
         fi
       fi
-      # Remote head only, matching the Forgejo branch below: gh's delete-branch flag also deletes
-      # the local branch, and local cleanup belongs to merge-and-cleanup.sh alone. Never a fork
-      # head, and only once MERGED: deleting a queued PR's head closes it unmerged. Each ref
-      # segment is URL-encoded (a raw `#`/`%` targets another path). A failure is reported, except
-      # a ref already gone — the repo's auto-delete setting may have removed it first.
+      # Delete only the merged tip of a same-repository branch. The explicit
+      # lease makes the deletion conditional on that tip at the remote, even
+      # when another push lands between confirming the merge and cleanup.
       if [ "$MERGE_OK" = "true" ]; then
         MERGED_HEAD=$(jq -r '.headRefOid // empty' <<<"$HEAD_INFO")
-        HEAD_REF=$(jq -r 'if .isCrossRepository | not then (.headRefName // "" | split("/") | map(@uri) | join("/")) else "" end' <<<"$HEAD_INFO")
-        if [ -n "$HEAD_REF" ] \
-          && ! DELETE_ERR=$(gh api -X DELETE "repos/{owner}/{repo}/git/refs/heads/${HEAD_REF}" 2>&1 >/dev/null) \
-          && [[ "$DELETE_ERR" != *"Reference does not exist"* ]]; then
-          MERGE_OUTPUT="${MERGE_OUTPUT}"$'\n'"Remote head delete failed: ${DELETE_ERR}"
+        HEAD_BRANCH=$(jq -r 'select(.isCrossRepository == false) | .headRefName // empty' <<<"$HEAD_INFO")
+        HEAD_REF="refs/heads/$HEAD_BRANCH"
+        PR_URL=$(jq -r '.url // empty' <<<"$HEAD_INFO")
+        if [ -n "$HEAD_BRANCH" ] \
+          && [[ "$MERGED_HEAD" =~ ^[0-9a-f]{40}$ ]] \
+          && [[ -z "$EXPECTED_HEAD" || "$EXPECTED_HEAD" == "$MERGED_HEAD" ]]; then
+          if ! PUSH_URL=$(github_push_url_for_pr "$PR_URL" "$PR_NUMBER"); then
+            MERGE_OUTPUT="${MERGE_OUTPUT}"$'\n'"Remote head kept: origin's push target does not match the merged PR repository"
+          elif ! DELETE_ERR=$(GIT_TERMINAL_PROMPT=0 git push --porcelain --no-follow-tags \
+            --force-with-lease="$HEAD_REF:$MERGED_HEAD" \
+            -- origin ":$HEAD_REF" 2>&1); then
+            # A repository's auto-delete setting can remove the ref first.
+            REF_STATUS=0
+            GIT_TERMINAL_PROMPT=0 git ls-remote --exit-code --refs -- "$PUSH_URL" "$HEAD_REF" >/dev/null 2>&1 || REF_STATUS=$?
+            if [ "$REF_STATUS" -ne 2 ]; then
+              MERGE_OUTPUT="${MERGE_OUTPUT}"$'\n'"Remote head delete failed: ${DELETE_ERR}"
+            fi
+          fi
         fi
       fi
       jq -n --argjson ok "$MERGE_OK" --argjson queued "$QUEUED" --argjson unconfirmed "$UNCONFIRMED" \

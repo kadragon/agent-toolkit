@@ -135,6 +135,7 @@ RESULT_LIMIT = 8192
 REVIEW_SOURCES = ("claude", "agy", "codex")
 TIMING_DATA_ERRORS = (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError)
 PR_REFERENCE = re.compile(r"\b(?:PR|pull request)\s*[#-]?\d+\b|/pulls?/\d+\b", re.IGNORECASE | re.ASCII)
+GITHUB_PR_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/[1-9][0-9]*", re.ASCII)
 NO_WORK_PREFIX = re.compile(
     r"^\s*(?:no (?:eligible )?(?:work|changes)\b|작업 없음|처리할 (?:작업|이슈)(?:이|가)? 없)",
     re.IGNORECASE,
@@ -754,6 +755,40 @@ def configured_handoff_lines(launch_dir, cwd):
     return extra_lines
 
 
+def pre_merge_stop(cli, message, handoff):
+    kind = handoff.get("work_kind")
+    if not message or not message.strip() or kind not in {"queue", "new"}:
+        return False
+    queue_command, new_command = TASK_COMMANDS[cli]
+    command = queue_command if kind == "queue" else new_command
+    invocation, *body = message.lstrip().splitlines()
+    return (invocation.split()[:2] == [command, "--tree"]
+            and any(line.startswith("Dispatch mode: parallel-worktree") for line in body))
+
+
+def pre_merge_resume(path, run, cwd):
+    reservation = (run.get("handoff") or {}).get("queue_reservation") or {}
+    if run.get("cwd") != str(cwd) or not (run.get("pre_merge_stop") is True or reservation):
+        return None
+    worktree = reservation.get("worktree")
+    with suppress(SystemExit):
+        result, _ = current_result(path, run)
+        worktree = (result or {}).get("worktree") or worktree
+    return {"worktree": worktree if isinstance(worktree, str) else None}
+
+
+def resumes_pre_merge_stop(resume, cwd, cli, message):
+    invocation = (message or "").splitlines()
+    command = invocation[0].split() if invocation else []
+    if resume is None or len(command) != 3 or command[:2] != [TASK_COMMANDS[cli][0], "--resume"]:
+        return False
+    slug = command[2]
+    if slug in {".", ".."} or Path(slug).name != slug:
+        return False
+    worktree = resume["worktree"]
+    return worktree is None or Path(worktree).resolve() == (cwd / ".worktrees" / slug).resolve()
+
+
 def first_prompt(cli, message, handoff):
     if not message.strip():
         raise SystemExit("first message is empty")
@@ -787,9 +822,7 @@ def first_prompt(cli, message, handoff):
             "Quote them in a separate section of the Sprint Contract for handoff and resume. "
             "Keep the Git limits field set to implementation-only."
         )
-    invocation, *body = message.lstrip().splitlines()
-    if (handoff["work_kind"] == "queue" and invocation.split()[:2] == [commands[0], "--tree"]
-            and any(line.startswith("Dispatch mode: parallel-worktree") for line in body)):
+    if handoff["work_kind"] == "queue" and pre_merge_stop(cli, message, handoff):
         prompt += (
             "\n\nRead the installed task-next SKILL.md sections listed in Phase index as each phase starts. "
             "Locate Markdown headings outside code fences with rg -n '^#{2,3} ' and read the current ranges. "
@@ -1152,9 +1185,11 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
     result_path = None
     child = None
     previous = getattr(args, "relaunch_from", None)
+    resume = None
     if previous:
         previous = Path(previous).expanduser().resolve()
-        load_run(previous)
+        previous_run = load_run(previous)
+        resume = pre_merge_resume(previous, previous_run, cwd.resolve())
         try:
             history = phase_timing.read(timing_path(previous))
         except TIMING_DATA_ERRORS as error:
@@ -1310,6 +1345,13 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
     run["review_policy"] = "three-source" if three_source else "head-bound"
     if three_source:
         run["require_review_sources"] = True
+    if args.cli == "claude":
+        if pre_merge_stop("claude", args.message, handoff) or resumes_pre_merge_stop(
+            resume, cwd.resolve(), "claude", args.message,
+        ):
+            run["pre_merge_stop"] = True
+    elif resume is not None:
+        run["pre_merge_resume"] = resume
     if args.cli != "claude":
         save_launch_timing()
     try:
@@ -1950,6 +1992,11 @@ def send_task(args, run_path):
             run["sent_continuation"] = continuation
             run["send_acknowledged"] = False
             run.pop("send_acknowledged_ms", None)
+            if not continuation and (
+                pre_merge_stop("codex", args.message, run.get("handoff", {}))
+                or resumes_pre_merge_stop(run.get("pre_merge_resume"), Path(run.get("cwd", ".")), "codex", args.message)
+            ):
+                run["pre_merge_stop"] = True
             write_json(run_path, run)
         else:
             print("warning: no dispatch receipt. Use --run to carry handoff metadata", file=sys.stderr)
@@ -2364,6 +2411,36 @@ def recent_missing_codex_hook(address):
     return False
 
 
+def confirm_ready_merge(path, result):
+    head = result["head"]
+    merge = timing_report(path, result)["merge"]
+    if merge and merge["head"] == head:
+        return "merged"
+    pr = result.get("pr")
+    if not isinstance(pr, str) or not GITHUB_PR_URL.fullmatch(pr):
+        return None
+    try:
+        reply = subprocess.run(
+            ["gh", "pr", "view", pr, "--json", "state,headRefOid,mergeCommit"],
+            capture_output=True, encoding="utf-8", check=True, timeout=5,
+        )
+        info = json.loads(reply.stdout)
+        live_head = info["headRefOid"]
+        if isinstance(live_head, str) and phase_timing.HEAD.fullmatch(live_head) and live_head != head:
+            return "head-mismatch"
+        oid = (info["mergeCommit"] or {}).get("oid")
+        if (info["state"] != "MERGED" or live_head != head
+                or not isinstance(oid, str) or not phase_timing.HEAD.fullmatch(oid)):
+            return None
+    except (subprocess.SubprocessError, OSError, ValueError, TypeError, KeyError, AttributeError):
+        return None
+    try:
+        record_timing(path, phase_timing.merged, head)
+    except (*TIMING_DATA_ERRORS, SystemExit) as error:
+        print(f"dispatch timing unavailable: {error}", file=sys.stderr)
+    return "merged"
+
+
 def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadline=None):
     run = load_run(path)
     try:
@@ -2412,13 +2489,30 @@ def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadli
         print(f"{run['address']}: Codex plugin changed since launch ({', '.join(changed)}); "
               "stop the child before its next Git write", file=sys.stderr)
     if close:
+        ready = False
+        if not force and result and result["status"] == "ready" and (finished or status in {"idle", "done"}):
+            merge_status = confirm_ready_merge(path, result)
+            reserved = (run.get("handoff") or {}).get("queue_reservation")
+            pre_merge = run.get("pre_merge_stop") is True or bool(reserved)
+            ready = merge_status == "merged" or (merge_status is None and pre_merge)
+            if ready and not finished:
+                current = hc_json("get", run["address"])
+                verify_terminal(run, current)
+                finished = current["state"] == "finished"
+                status = (current.get("status") or {}).get("state")
+                if not finished and (status not in {"idle", "done"}
+                                     or current.get("turn") != terminal.get("turn")
+                                     or current.get("status_ms") != terminal.get("status_ms")
+                                     or current_result(path, run) != (result, written)):
+                    raise SystemExit("terminal changed while checking the final result; left intact")
+                terminal = current
         if force:
             closed_reason = "forced"
         elif finished:
             closed_reason = "finished"
         else:
             result_status = result["status"] if result else None
-            final = result_status in {"done", "merged"} and status == "done"
+            final = ready or (result_status in {"done", "merged"} and status == "done")
             closed_reason = "final_result" if final else None
             if status in {"idle", "done"} and result_status in {"done", "merged", "ready"} and run["cli"] == "codex":
                 if cache_drift:

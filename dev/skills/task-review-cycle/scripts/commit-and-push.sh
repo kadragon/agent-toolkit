@@ -191,15 +191,30 @@ if [ "$VERIFY_HEAD" = "true" ]; then
 fi
 
 # --- Resolve file list ---
-# --no-commit leaves FILES empty, so the clean-tree branch below publishes HEAD as-is;
-# a staged-only commit never stages, so it skips detection too.
-if [ "$EXPLICIT_FILES" != "true" ] && [ "$NO_COMMIT" != "true" ] && [ "$STAGED_ONLY" != "true" ]; then
-  FILES=$(bash "$SCRIPT_DIR/changed-files.sh" | tr '\n' ' ')
-fi
-FILES=$(echo "$FILES" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')
-if [ "$EXPLICIT_FILES" = "true" ] && [ -z "$FILES" ]; then
-  echo '{"error": "--files requires at least one path"}' >&2
-  exit 1
+REQUESTED=()
+GIT_PATH_OPTIONS=()
+if [ "$EXPLICIT_FILES" = "true" ]; then
+  FILES=$(echo "$FILES" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')
+  if [ -z "$FILES" ]; then
+    echo '{"error": "--files requires at least one path"}' >&2
+    exit 1
+  fi
+  # shellcheck disable=SC2206
+  REQUESTED=($FILES)
+elif [ "$NO_COMMIT" != "true" ] && [ "$STAGED_ONLY" != "true" ]; then
+  REPO_ROOT=$(git rev-parse --show-toplevel)
+  cd -- "$REPO_ROOT"
+  GIT_PATH_OPTIONS=(--literal-pathspecs)
+  PATH_LIST=$(mktemp)
+  if ! bash "$SCRIPT_DIR/changed-files.sh" --null > "$PATH_LIST"; then
+    rm -f -- "$PATH_LIST"
+    echo '{"error": "could not detect changed paths"}' >&2
+    exit 1
+  fi
+  while IFS= read -r -d '' f; do
+    REQUESTED+=("$f")
+  done < "$PATH_LIST"
+  rm -f -- "$PATH_LIST"
 fi
 
 # Check requested PR authority before any push in a combined publish/PR call.
@@ -222,7 +237,7 @@ if [ "$STAGED_ONLY" = "true" ]; then
   COMMITTED=true
   # Report what stayed out, so a partial index cannot silently drop reviewed work.
   UNSTAGED_LEFT=$(bash "$SCRIPT_DIR/changed-files.sh")
-elif [ -n "$FILES" ]; then
+elif [ "${#REQUESTED[@]}" -gt 0 ]; then
   require_git_authority --action commit
   run_commit_guard "$MESSAGE" "committing"
   # `git add` treats a pathspec matching neither the worktree nor the index as
@@ -246,16 +261,11 @@ elif [ -n "$FILES" ]; then
   # still fires. Dropping those too would turn a loud abort into a quietly
   # incomplete commit that then goes to review and merge.
   STAGE=()
-  REQUESTED=()
-  # Word-split is intentional here: FILES is a space-separated list of paths.
-  # shellcheck disable=SC2086
-  for f in $FILES; do
-    if [ "$EXPLICIT_FILES" = "true" ]; then
-      REQUESTED+=("$f")
-    fi
-    if [ -e "$f" ] || [ -L "$f" ] || git ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then
+  for f in "${REQUESTED[@]}"; do
+    if [ -e "$f" ] || [ -L "$f" ] \
+      || git ${GIT_PATH_OPTIONS[@]+"${GIT_PATH_OPTIONS[@]}"} ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then
       STAGE+=("$f")
-    elif [ -z "$(git diff --cached --name-only --diff-filter=D -- "$f")" ]; then
+    elif [ -z "$(git ${GIT_PATH_OPTIONS[@]+"${GIT_PATH_OPTIONS[@]}"} diff --cached --name-only --diff-filter=D -- "$f")" ]; then
       STAGE+=("$f")
     fi
   done
@@ -273,7 +283,7 @@ elif [ -n "$FILES" ]; then
   # Guard the expansion: bash 3.2 (macOS system bash) errors on "${arr[@]}" for
   # an empty array under `set -u`.
   if [ "${#STAGE[@]}" -gt 0 ]; then
-    git add -- "${STAGE[@]}"
+    git ${GIT_PATH_OPTIONS[@]+"${GIT_PATH_OPTIONS[@]}"} add -- "${STAGE[@]}"
   fi
   # `git commit` prints its summary ("[branch hash] msg\n N files changed…") to
   # STDOUT, which would pollute the pure-JSON contract exactly like the new-branch
