@@ -132,6 +132,25 @@ fi
 CLEANUP_MSG=""
 WORKTREE_MSG=""
 
+branch_worktree() {
+  local repo_git_dir checked_out git_dir
+  checked_out=$(git branch --list --format='%(worktreepath)' -- "$FEATURE_BRANCH") || return 1
+  if [ -n "$checked_out" ]; then
+    printf '%s\n' "$checked_out"
+    return
+  fi
+  # A detached worktree can still own a branch during rebase or bisect.
+  repo_git_dir=$(git rev-parse --path-format=absolute --git-common-dir) || return 1
+  for git_dir in "$repo_git_dir" "$repo_git_dir"/worktrees/*; do
+    if grep -Fxq -e "$FEATURE_REF" -e "$FEATURE_BRANCH" -- \
+      "$git_dir/rebase-merge/head-name" "$git_dir/rebase-apply/head-name" \
+      "$git_dir/rebase-merge/update-refs" "$git_dir/BISECT_START" 2>/dev/null; then
+      printf '%s\n' "$git_dir"
+      return
+    fi
+  done
+}
+
 # hub.sh merge deletes the remote head only (both hubs); this block is the sole owner of the
 # local branch and worktree.
 if [ "$MERGE_OK" = "true" ]; then
@@ -215,7 +234,7 @@ if [ "$MERGE_OK" = "true" ]; then
       CLEANUP_MSG="WARNING: Local branch '${FEATURE_BRANCH}' kept because the merged head is unknown"
     elif [ "$LOCAL_HEAD" != "$MERGED_HEAD" ]; then
       CLEANUP_MSG="WARNING: Local branch '${FEATURE_BRANCH}' kept because its tip does not match the merged head"
-    elif ! CHECKED_OUT=$(git branch --list --format='%(worktreepath)' -- "$FEATURE_BRANCH"); then
+    elif ! CHECKED_OUT=$(branch_worktree); then
       CLEANUP_MSG="WARNING: Could not check whether local branch '${FEATURE_BRANCH}' is in use"
     elif [ -n "$CHECKED_OUT" ]; then
       CLEANUP_MSG="WARNING: Local branch '${FEATURE_BRANCH}' is checked out at '${CHECKED_OUT}'"

@@ -13,7 +13,8 @@
 #                      and report. For a clean resumed branch, where there is no
 #                      new commit to guard but HEAD is still about to be pushed
 #                      or merged.
-#   --files <list>     Space-separated paths to stage and commit (default: auto-detect via changed-files.sh)
+#   --files <list>     Space-separated paths to stage and commit; refuse other staged paths
+#                      (default: auto-detect via changed-files.sh).
 #   --prefer-staged    A non-empty index is committed exactly as staged, staging
 #                      nothing more. An empty index on a branch ahead of --base
 #                      commits nothing (dirt in unstaged_left): --verify-head
@@ -245,16 +246,13 @@ elif [ -n "$FILES" ]; then
   # still fires. Dropping those too would turn a loud abort into a quietly
   # incomplete commit that then goes to review and merge.
   STAGE=()
-  COMMIT_ARGS=(-m "$MESSAGE")
-  if [ "$EXPLICIT_FILES" = "true" ]; then
-    COMMIT_ARGS+=(--)
-  fi
+  REQUESTED=()
   # Word-split is intentional here: FILES is a space-separated list of paths.
   # shellcheck disable=SC2086
   for f in $FILES; do
     # A listed staged deletion still belongs in the commit pathspec.
     if [ "$EXPLICIT_FILES" = "true" ]; then
-      COMMIT_ARGS+=("$f")
+      REQUESTED+=("$f")
     fi
     if [ -e "$f" ] || [ -L "$f" ] || git ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then
       STAGE+=("$f")
@@ -267,6 +265,17 @@ elif [ -n "$FILES" ]; then
   if [ "${#STAGE[@]}" -gt 0 ]; then
     git add -- "${STAGE[@]}"
   fi
+  if [ "$EXPLICIT_FILES" = "true" ]; then
+    # Compare path sets without rename detection so a rename counts as both
+    # its deletion and addition. Git requires a whole-index merge commit.
+    DIFF_ARGS=(--cached --name-only --no-renames --no-relative --ignore-submodules=none)
+    ALL_STAGED=$(git diff "${DIFF_ARGS[@]}")
+    LISTED_STAGED=$(git diff "${DIFF_ARGS[@]}" -- "${REQUESTED[@]}")
+    if [ "$ALL_STAGED" != "$LISTED_STAGED" ]; then
+      echo '{"error": "--files excludes staged paths; list them explicitly or unstage them"}' >&2
+      exit 1
+    fi
+  fi
   # `git commit` prints its summary ("[branch hash] msg\n N files changed…") to
   # STDOUT, which would pollute the pure-JSON contract exactly like the new-branch
   # push tracking line did (see Push below). Command substitution already keeps
@@ -276,7 +285,7 @@ elif [ -n "$FILES" ]; then
   # goes to stdout, so discarding stdout would blank out COMMIT_OUT on that exact
   # failure. set -e would otherwise abort on a failed commit with a raw non-zero
   # exit; this guard turns it into a structured JSON error, mirroring push.
-  if ! COMMIT_OUT=$(git commit "${COMMIT_ARGS[@]}" 2>&1); then
+  if ! COMMIT_OUT=$(git commit -m "$MESSAGE" 2>&1); then
     jq -n --arg e "commit failed: $COMMIT_OUT" '{error: $e}' >&2
     exit 1
   fi

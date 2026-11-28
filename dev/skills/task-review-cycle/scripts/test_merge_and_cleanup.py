@@ -138,6 +138,28 @@ def case_unreported_merged_head_keeps_local_branch(tmp):
     print("ok unreported_merged_head_keeps_local_branch")
 
 
+def case_branch_in_a_detached_rebase_is_kept(tmp):
+    repo, d = make_repo(tmp), make_script_dir(tmp)
+    (repo / "a.md").write_text("feature edit\n")
+    git(repo, "commit", "-qam", "[TEST] feature work")
+    merged_head = git(repo, "rev-parse", "HEAD").stdout.strip()
+    (d / "hub.sh").write_text(
+        f"echo '{json.dumps({'merge_ok': True, 'head_sha': merged_head})}'\n", encoding="utf-8")
+    git(repo, "checkout", "-q", "main")
+    (repo / "a.md").write_text("base edit\n")
+    git(repo, "commit", "-qam", "[TEST] divergent base")
+    wt = Path(tempfile.mkdtemp(dir=tmp)) / "wt"
+    git(repo, "worktree", "add", "-q", str(wt), FEATURE)
+    rebase = subprocess.run(["git", "rebase", "main"], cwd=wt, capture_output=True, text=True)
+    if not rebase.returncode or git(wt, "branch", "--show-current").stdout.strip():
+        fail("branch_in_a_detached_rebase_is_kept", f"rebase did not detach: {rebase.stderr}")
+    out = run("branch_in_a_detached_rebase_is_kept", repo, d)
+    if not branch_exists(repo) or "checked out" not in out["cleanup_message"]:
+        fail("branch_in_a_detached_rebase_is_kept", f"got {out!r}")
+    git(wt, "rebase", "--abort")
+    print("ok branch_in_a_detached_rebase_is_kept")
+
+
 def case_real_failure_still_warns(tmp):
     repo, d = make_repo(tmp), make_script_dir(tmp)
     # A branch checked out in another worktree cannot be deleted -- a genuine cleanup failure.
@@ -555,6 +577,7 @@ def main():
         case_deleted_by_script(tmp)
         case_branch_ahead_of_merged_head_is_kept(tmp)
         case_unreported_merged_head_keeps_local_branch(tmp)
+        case_branch_in_a_detached_rebase_is_kept(tmp)
         case_real_failure_still_warns(tmp)
         case_unknown_branch_warns(tmp)
         case_worktree_holding_branch(tmp)

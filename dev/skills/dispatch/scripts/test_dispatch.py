@@ -1944,43 +1944,37 @@ class SharedGuardMigrationTests(unittest.TestCase):
         self.manifest.write_text("{}", encoding="utf-8")
         self.run = {"cwd": str(self.home), "plugin_versions": {"dev": "5.0.1", "guard": "1.0.0"}}
 
-    def install_guard(self):
-        root = self.cache / "guard/1.0.0"
-        (root / pinned_wave.MANIFEST).parent.mkdir(parents=True)
-        (root / pinned_wave.MANIFEST).write_text('{"hooks": "./hooks.json"}', encoding="utf-8")
-        source = root / "hooks.json"
-        source.write_text("{}", encoding="utf-8")
-        return {"pluginId": "guard@kadragon", "source": "plugin", "sourcePath": str(source),
-                "enabled": True, "trustStatus": "trusted"}
-
-    def hook_inventory(self, *hooks):
-        return patch("shared_codex.request", return_value={
-            "data": [{"cwd": str(self.home), "hooks": list(hooks), "errors": [], "warnings": []}],
-        })
-
     def test_send_holds_when_dev_has_moved_its_hooks_but_guard_is_missing(self):
         self.manifest.write_text('{"hooks": "./hooks.json"}', encoding="utf-8")
         verify_delivery_turn(None, {})
         self.manifest.write_text("{}", encoding="utf-8")
         with self.assertRaisesRegex(SystemExit, "install guard@kadragon"):
             verify_delivery_turn(None, {})
-        self.install_guard()
+        (self.cache / "guard/1.0.0").mkdir(parents=True)
         with self.assertRaisesRegex(SystemExit, "restart the idle Codex child"):
             verify_delivery_turn({"plugin_versions": {"dev": "5.0.1"}}, {})
 
-    def test_send_requires_effective_guard_hooks_from_the_target_directory(self):
-        hook = self.install_guard()
-        with patch("dispatch.shutil.which", return_value="codex"):
-            for hooks in ([], [dict(hook, enabled=False)]):
-                with self.subTest(hooks=hooks), self.hook_inventory(*hooks):
-                    with self.assertRaisesRegex(SystemExit, "guard@kadragon hook"):
-                        verify_delivery_turn(self.run, {})
-            with self.hook_inventory(hook) as request:
-                verify_delivery_turn(self.run, {})
-                request.assert_called_once_with(
-                    "codex", self.home, "hooks/list", {"cwds": [str(self.home)]},
-                    timeout=pinned_wave.TIMEOUT, cwd=self.home, experimental=True,
-                )
+    def test_send_reads_guard_activation_without_starting_codex(self):
+        (self.cache / "guard/1.0.0").mkdir(parents=True)
+        user_config = self.home / "config.toml"
+        project_config = self.home / "project/.codex/config.toml"
+        project_config.parent.mkdir(parents=True)
+        terminal = {"foreground": {"cwd": str(project_config.parent.parent)}}
+        enabled = '[plugins."guard@kadragon"]\nenabled = true\n'
+        disabled = enabled.replace("true", "false")
+        with patch("shared_codex.request") as request:
+            user_config.write_text(disabled, encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "enable guard@kadragon"):
+                verify_delivery_turn(self.run, terminal)
+            user_config.write_text(enabled, encoding="utf-8")
+            verify_delivery_turn(self.run, terminal)
+            project_config.write_text(disabled, encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "enable guard@kadragon"):
+                verify_delivery_turn(self.run, terminal)
+            project_config.unlink()
+            with self.assertRaisesRegex(SystemExit, "restart the idle Codex child"):
+                verify_delivery_turn(dict(self.run, shared_guard_enabled_at_launch=False), terminal)
+            request.assert_not_called()
 
 
 class SharedCodexPreparationTests(unittest.TestCase):
@@ -4772,7 +4766,26 @@ class ReservedQueueWaveTest(unittest.TestCase):
     def test_claim_rejects_a_nested_file_item_example_edit_after_binding(self):
         self.assert_rejects_nested_item_edit("Original example")
 
-    def assert_rejects_nested_item_edit(self, old):
+    def test_legacy_reservation_can_bind_after_the_helper_is_updated(self):
+        wave = self.reserve("First group")
+        [unit] = wave["reservations"]
+        self.remove_body_digest(unit["reservation"])
+        ref = unit["candidate"]["ref"]
+        delivery = {"reservation": unit["reservation"], "ref": ref, "delivery": str(self.receipt("first", ref))}
+        self.result("bind-wave", assignments=[delivery])
+        self.result("claim-reservation", **delivery, base=wave["base"])
+        self.assertTrue(Path(unit["worktree"]).is_dir())
+
+    def test_legacy_bound_reservation_checks_the_original_body(self):
+        self.assert_rejects_nested_item_edit("Nested detail", legacy=True)
+
+    def remove_body_digest(self, reservation):
+        store = self.repo / ".git/agent-queue/reservations.json"
+        records = json.loads(store.read_text(encoding="utf-8"))
+        del records["units"][reservation]["candidate"]["body_digest"]
+        write_json(store, records)
+
+    def assert_rejects_nested_item_edit(self, old, *, legacy=False):
         original = self.backlog.read_text(encoding="utf-8").replace(
             "First item\n", "First item\n  - Nested detail\n\n  ```text\n  Original example\n  ```\n")
         self.backlog.write_text(original, encoding="utf-8")
@@ -4783,6 +4796,8 @@ class ReservedQueueWaveTest(unittest.TestCase):
         ref = unit["candidate"]["ref"]
         delivery = {"reservation": unit["reservation"], "ref": ref, "delivery": str(self.receipt("first", ref))}
         self.result("bind-wave", assignments=[delivery])
+        if legacy:
+            self.remove_body_digest(unit["reservation"])
         self.backlog.write_text(original.replace(old, "Changed scope"), encoding="utf-8")
         self.git("commit", "-qam", "Edit the nested item body after binding")
         self.git("update-ref", "refs/remotes/origin/HEAD", "HEAD")

@@ -383,12 +383,13 @@ def _strip_marker(m: re.Match) -> str:
 
 def _backlog_item_body(lines: list[str], line: int) -> str:
     """Read the checkbox and its indented Markdown, including interior blank lines."""
+    indent = len(lines[line - 1]) - len(lines[line - 1].lstrip())
     end = line
     for index in range(line, len(lines)):
         content = lines[index]
         if not content.strip():
             continue
-        if not content[0].isspace():
+        if len(content) - len(content.lstrip()) <= indent:
             break
         end = index + 1
     return "\n".join(lines[line - 1:end])
@@ -1460,6 +1461,10 @@ def _claim_reservation(req, env, runner, token, unit):
         snapshot = _wave_snapshot(repo, base, env, runner, exclude=(token,))
         if snapshot["backend"] != unit["backend"]:
             raise QueueError("the reserved queue backend changed")
+        if _legacy_file_reservation(candidate):
+            pinned = snapshot if base == unit["base"] else _wave_snapshot(
+                repo, unit["base"], env, runner, exclude=(token,))
+            candidate = _restore_file_body_digest(pinned, candidate)
         if unit["backend"] == "backlog" and base != unit["base"]:
             _match_shifted_file_unit(snapshot, candidate)
         else:
@@ -1473,6 +1478,22 @@ def _claim_reservation(req, env, runner, token, unit):
             _write_queue_json(_reservation_store(repo), {"version": 1, "units": units})
     if owned and _git(repo, "worktree", "unlock", unit["worktree"]) is None:
         raise QueueError(f"cannot unlock reserved worktree {unit['worktree']}; retry the claim")
+
+
+def _legacy_file_reservation(candidate):
+    return "covers" in candidate and "body_digest" not in candidate
+
+
+def _restore_file_body_digest(pinned, candidate):
+    """Recover an older reservation's digest only from its original base."""
+    if _legacy_file_reservation(candidate):
+        for current in pinned["candidates"]:
+            if current["ref"] == candidate["ref"]:
+                legacy = {key: value for key, value in current.items() if key != "body_digest"}
+                if legacy == candidate:
+                    return current
+                break
+    return candidate
 
 
 def _match_shifted_file_unit(snapshot, candidate):
@@ -1561,6 +1582,8 @@ def _bind_wave(req, env, runner, units, store):
     snapshot = _wave_snapshot(req["repo"], base, env, runner, exclude=bound)
     if any(unit["backend"] != snapshot["backend"] for unit in bound.values()):
         raise QueueError("the reserved queue backend changed")
+    for unit in bound.values():
+        unit["candidate"] = _restore_file_body_digest(snapshot, unit["candidate"])
     _match_wave_units(snapshot, [unit["candidate"] for unit in bound.values()])
     for unit in bound.values():
         if _wave_worktree(req["repo"], unit["candidate"]) != (unit["worktree"], unit["branch"]):

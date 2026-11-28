@@ -130,14 +130,26 @@ def case_explicit_paths_preserve_unrelated_staged_changes(tmp):
     git(repo, "add", "unrelated.md")
     git(repo, "rm", "-q", "tasks.md")
 
-    proc, payload = run_script(repo, "keep.md tasks.md")
-    if proc.returncode or not payload or not payload["committed"]:
-        fail("explicit paths", f"commit failed: {proc.stderr.strip()}")
-    if name_status(repo) != ["D\ttasks.md", "M\tkeep.md"]:
-        fail("explicit paths", f"commit contains {name_status(repo)}")
-    if git(repo, "diff", "--cached", "--name-only").stdout.strip() != "unrelated.md":
+    before = head(repo)
+    proc, _ = run_script(repo, "keep.md tasks.md")
+    if not proc.returncode or "--files excludes staged paths" not in proc.stderr or head(repo) != before:
+        fail("explicit paths", f"expected refusal before committing: {proc.stdout} {proc.stderr}")
+    if "unrelated.md" not in git(repo, "diff", "--cached", "--name-only").stdout.splitlines():
         fail("explicit paths", "unrelated change disappeared from the index")
-    print("OK: explicit paths commit a listed staged deletion and leave unrelated entries staged")
+    print("OK: explicit paths refuse to commit unrelated staged entries")
+
+
+def case_explicit_paths_allow_merge_commit(tmp):
+    repo = make_repo(tmp)
+    git(repo, "checkout", "-qb", "feature/to-merge")
+    (repo / "keep.md").write_text("merged edit\n")
+    git(repo, "commit", "-qam", "[TEST] merge source")
+    git(repo, "checkout", "-q", "feature/test")
+    git(repo, "merge", "--no-commit", "--no-ff", "feature/to-merge")
+    proc, _ = run_script(repo, "keep.md")
+    if proc.returncode or len(git(repo, "rev-list", "--parents", "-n1", "HEAD").stdout.split()) != 3:
+        fail("explicit merge paths", f"expected merge commit: {proc.stdout} {proc.stderr}")
+    print("OK: explicit paths allow the merge commit when they cover the staged changes")
 
 
 def case_deletion_only(tmp):
@@ -675,6 +687,7 @@ def main():
         case_implementation_only_blocks_before_commit(tmp)
         case_staged_deletion(tmp)
         case_explicit_paths_preserve_unrelated_staged_changes(tmp)
+        case_explicit_paths_allow_merge_commit(tmp)
         case_deletion_only(tmp)
         case_unstaged_deletion(tmp)
         case_unknown_path(tmp)
