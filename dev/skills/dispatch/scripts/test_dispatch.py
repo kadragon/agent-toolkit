@@ -630,7 +630,9 @@ class DispatchReceiptTests(DispatchTestCase):
                     if status == "ready":
                         with self.assertRaisesRegex(SystemExit, "left intact"):
                             collect(args)
-                        hc.assert_called_once_with("get", "t7")
+                        self.assertEqual(hc.call_args_list, [
+                            call("get", "t7"), call("read", "--lines", "0", "t7", timeout=ANY),
+                        ])
                     else:
                         collect(args)
                         self.assertEqual(hc.call_args_list, [
@@ -644,6 +646,55 @@ class DispatchReceiptTests(DispatchTestCase):
                 with self.assertRaisesRegex(SystemExit, "terminal identity changed"):
                     collect(args)
                 hc.assert_called_once_with("get", "t7")
+
+    def test_collect_close_after_drift(self):
+        change = ["dev 5.0.1 -> 5.0.4"]
+        hook_failure = {"how": "screen", "text": "• Hook failed\n  └ failed to spawn hook (os error 2)"
+                                                "\n\n› Ask Codex to do anything"}
+        cases = (
+            ("idle", "ready", change, ["dev"], None, "hooks_broken"),
+            ("idle", "ready", change, [], None, "plugin_drift"),
+            ("idle", "ready", [], [], hook_failure, "hooks_broken"),
+            ("done", "merged", change, ["dev"], None, "hooks_broken"),
+            ("working", "ready", change, ["dev"], None, None),
+            ("idle", "working", change, ["dev"], None, None),
+            ("idle", None, change, ["dev"], None, None),
+        )
+        for state, status, changed, removed, screen, reason in cases:
+            with self.subTest(state=state, result=status, reason=reason), tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "run.json"
+                write_json(receipt, self.RECEIPT)
+                if status:
+                    write_json(receipt.with_name("result.json"), {
+                        "status": status, "phase": "review", "summary": "Review result",
+                    })
+                terminal = {**self.TERMINAL, "status": {"state": state}}
+                replies = [terminal]
+                calls = [call("get", "t7")]
+                if screen:
+                    replies.append(screen)
+                    calls.append(call("read", "--lines", "0", "t7", timeout=ANY))
+                if reason:
+                    replies.extend([{}, {**terminal, "state": "finished"}, {}])
+                    calls.extend([call("kill", "t7"), call("get", "t7", timeout=ANY), call("rm", "t7")])
+                output = StringIO()
+                with (
+                    patch("dispatch.plugin_drift", return_value=(changed, removed)),
+                    patch("dispatch.hc_json", side_effect=replies) as hc,
+                    redirect_stderr(StringIO()),
+                    redirect_stdout(output),
+                ):
+                    if reason:
+                        try:
+                            collect(SimpleNamespace(run=receipt, close=True))
+                        except SystemExit as error:
+                            self.fail(str(error))
+                        self.assertEqual(json.loads(output.getvalue())["closed_reason"], reason)
+                    else:
+                        with self.assertRaisesRegex(SystemExit, "left intact"):
+                            collect(SimpleNamespace(run=receipt, close=True))
+                    self.assertEqual(hc.call_args_list, calls)
+                self.assertEqual(json.loads(receipt.read_text(encoding="utf-8")).get("closed_reason"), reason)
 
     def test_collect_gates_ready_and_warns_on_completed_reports(self):
         terminal = {**self.TERMINAL, "status": {"state": "done"}}
@@ -795,10 +846,13 @@ class DispatchReceiptTests(DispatchTestCase):
                 collect(SimpleNamespace(run=receipt, close=True))
             self.assertEqual(hc.call_args_list, [call("get", "t7"), call("rm", "t7")])
             live = {**self.TERMINAL, "status": {"state": "idle"}}
-            with patch("dispatch.hc_json", return_value=live) as hc:
+            screen = {"how": "screen", "text": "› Ask Codex to do anything"}
+            with patch("dispatch.hc_json", side_effect=[live, screen]) as hc:
                 with self.assertRaisesRegex(SystemExit, "left intact"):
                     collect(SimpleNamespace(run=receipt, close=True))
-                hc.assert_called_once_with("get", "t7")
+                self.assertEqual(hc.call_args_list, [
+                    call("get", "t7"), call("read", "--lines", "0", "t7", timeout=ANY),
+                ])
 
     def test_collect_reads_a_result_without_status_as_working(self):
         done = {**self.TERMINAL, "status": {"state": "done"}}

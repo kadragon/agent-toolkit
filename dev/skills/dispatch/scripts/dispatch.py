@@ -1642,14 +1642,31 @@ def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadli
         print(f"{run['address']}: Codex plugin changed since launch ({', '.join(changed)}); "
               "stop the child before its next Git write", file=sys.stderr)
     if close:
-        final = bool(result) and result["status"] in {"done", "merged"} and status == "done"
-        if not (force or finished or final):
+        if force:
+            closed_reason = "forced"
+        elif finished:
+            closed_reason = "finished"
+        else:
+            result_status = result["status"] if result else None
+            final = result_status in {"done", "merged"} and status == "done"
+            drift_reason = None
+            if status in {"idle", "done"} and result_status in {"done", "merged", "ready"} and run["cli"] == "codex":
+                if removed:
+                    drift_reason = STOP_HOOKS
+                elif changed:
+                    drift_reason = "plugin_drift"
+                elif not final:
+                    detected, reads = child_stop_reason(terminal, run, result, written, stall_minutes,
+                                                        deadline=deadline)
+                    if detected == STOP_HOOKS:
+                        drift_reason = detected
+            closed_reason = drift_reason or ("final_result" if final else None)
+        if not closed_reason:
             raise SystemExit("terminal has no final result or is still running; left intact")
         if not finished:
             hc_json("kill", run["address"])
             wait_for_terminal_exit(run)
         hc_json("rm", run["address"])
-        closed_reason = "forced" if force else ("finished" if finished else "final_result")
         closed = {"closed_reason": closed_reason}
         write_json(path, {**run, **closed})
     else:
