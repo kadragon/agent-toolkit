@@ -106,7 +106,14 @@ CODEX_STATUS_LINE = re.compile(
     r"^ {2,}(?:gpt-\S+|(?:~|…|[a-z]:)?[/\\]\S)",
     re.IGNORECASE,
 )
-CODEX_SHORTCUT_LINE = re.compile(r"^ {2,}(?:← for agents · )?\? for shortcuts\b", re.IGNORECASE)
+CODEX_BRANCH_STATUS_LINE = re.compile(
+    r"^ {2,}\S+ · (?:[^·]+ · )*Context \d+% used(?: · |$)",
+    re.IGNORECASE,
+)
+CODEX_SHORTCUT_LINE = re.compile(
+    rf"^ {{2,}}(?:← for agents · )?\? for shortcuts\b(?: {{2,}}(?:IDE context\b|{WARNING_FOOTER.pattern}))*",
+    re.IGNORECASE,
+)
 CODEX_OUTPUT_MARKERS = ("•", "■", "─ Worked for")
 CODEX_PROGRESS = re.compile(r"^\s*(?:[•◦] )?.+ \(\d[\d hms]* • esc to interrupt\)(?:\s.*)?$")
 CLAUDE_PROGRESS = re.compile(r"^[✢✳✶✻✽] .+… \(\d[\d hms]*(?: · [^)]*)?\)$")
@@ -1451,7 +1458,8 @@ def transcript_echoed(text, message):
 def footer_boundary(lines, composer, *, placeholder=False):
     match_hint = CODEX_SHORTCUT_LINE.match if placeholder else CODEX_SHORTCUT_LINE.fullmatch
     if (len(lines) >= composer + 4 and not lines[-3] and match_hint(lines[-1])
-            and (CODEX_STATUS_LINE.match(lines[-2]) or (placeholder and lines[-2].startswith("  ")))):
+            and (CODEX_STATUS_LINE.match(lines[-2]) or CODEX_BRANCH_STATUS_LINE.match(lines[-2])
+                 or (placeholder and lines[-2].startswith("  ")))):
         return len(lines) - 3
 
     # A visible placeholder distinguishes arbitrary footer text from an indented draft.
@@ -2194,7 +2202,9 @@ def brief_report(report, *, outcome=None):
         return lines[0].strip() if lines else ""
 
     status = result.get("status")
-    if outcome == "idle" and status == "working":
+    if status == "working" and report["state"] == "finished":
+        status = "finished"
+    elif outcome == "idle" and status == "working":
         status = outcome
     elif not status or (status == "done" and report["status"] == "working"):
         status = "finished" if report["state"] == "finished" else report["status"]
@@ -2343,8 +2353,10 @@ def screen_stop_reason(snapshot, cli):
         composer = next((i for i in reversed(range(len(lines))) if lines[i].strip() == "❯"), None)
         if composer is not None:
             lines = lines[:composer]
-    for row in reversed(lines):
+    for index in reversed(range(len(lines))):
+        row = lines[index]
         if row.startswith(("›", "❯")):
+            lines = lines[index + 1:]
             break
         line = row.lstrip()
         notice = line.lstrip("ⓘℹ■⚠⎿•\ufe0f ")
@@ -2352,6 +2364,8 @@ def screen_stop_reason(snapshot, cli):
             continue
         if reason := notice_reason(notice):
             return reason
+    if cli == "codex" and CODEX_HOOK_FAILED.search("\n".join(lines)):
+        return STOP_HOOKS
     return None
 
 
@@ -2407,12 +2421,9 @@ def child_stop_reason(terminal, run, result, written, stall_minutes, drift=((), 
         snapshot = hc_json("read", "--lines", "0", run["address"], timeout=timeout)
         notice = screen_stop_reason(snapshot, run["cli"])
     except (OSError, ValueError, subprocess.SubprocessError):
-        snapshot, notice = {}, None
+        notice = None
     if notice:
         return notice, 1
-    if (run["cli"] == "codex" and snapshot.get("how") == "screen"
-            and CODEX_HOOK_FAILED.search(snapshot.get("text") or "")):
-        return STOP_HOOKS, 1
     if state == "blocked":
         return "Waiting for a dialog", 1
     if state == "error":
