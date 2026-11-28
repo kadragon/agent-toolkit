@@ -421,6 +421,9 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version-file: .python-version
+      - name: Test commit guard self-checks
+        shell: bash
+        run: python guard/hooks/commit-guard/guard.py --test
       - name: Test broker shutdown and locked worktrees
         shell: bash
         run: |
