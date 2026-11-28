@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 2.23.0
+version: 2.23.1
 description: >-
   Pull the next queued item from the repo's queue (backlog.md/tasks.md, or GitHub issues)
   and run the full code cycle: branch,
@@ -34,11 +34,11 @@ for Bash blocks in this skill and its references. For a dispatched `--tree` cycl
 | Start review | *Step 4 — Hand off* and `references/cycle.md` → *Hand off*. Follow its direct call to `dev:task-review-cycle` and start at *Caller gate* |
 
 Open *Step 2* for manual selection or parked entries and `references/edge-cases.md` when applicable.
-With a `Queue reservation`, use `references/tree.md` → *Reserved dispatch intake*.
+With a `Queue reservation`, go directly to [Reserved dispatch intake](references/tree.md#reserved-dispatch-intake), skipping the generic prerequisites and candidate selection.
 
 ## Prerequisites
 
-**Pin the worktree base.** For `--tree`, pin the remote base before resolving the queue or
+**Pin the worktree base.** For other `--tree` runs, pin the remote base before resolving the queue or
 applying the working-tree gate:
 
 ```bash
