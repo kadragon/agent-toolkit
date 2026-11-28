@@ -125,6 +125,7 @@ WARMUP_SETTLE_SECONDS = 2
 MARKETPLACE_UPGRADE_SECONDS = 180
 DRAFT_CLEARS = 5
 DRAFT_CLEAR_SETTLE_SECONDS = 1
+WARNING_CLOSE_SETTLE_SECONDS = 1
 LOST_SETTLE_SECONDS = 2
 RESULT_STATES = {"done", "ready", "blocked", "merged", "working"}
 RESULT_LIMIT = 8192
@@ -1657,6 +1658,7 @@ def send_task(args, run_path):
     warning_withheld = f"{address}: task withheld; inspect the Codex warning with F2"
     dismissed_startup_warnings = False
     closing_warning = None
+    closing_warning_until = 0
     try:
         deadline = time.monotonic() + 30
         while True:
@@ -1669,11 +1671,11 @@ def send_task(args, run_path):
             if screen == "hooks":
                 raise SystemExit(f"{address}: task withheld; inspect the Codex hook status with /hooks")
             if closing_warning is not None and screen != "waiting":
-                stale_view = screen == "warning-view" and text == closing_warning
-                closing_warning = None
-                if stale_view and time.monotonic() < deadline:
+                if (screen == "warning-view" and " ".join(text.split()) == closing_warning
+                        and time.monotonic() < closing_warning_until):
                     time.sleep(SCREEN_POLL_SECONDS)
                     continue
+                closing_warning = None
             if screen in {"warning", "warning-view"}:
                 if (not run or run.get("wave") or run.get("trust_hooks") is not True or run["sent"] is not False
                         or dismissed_startup_warnings):
@@ -1709,7 +1711,8 @@ def send_task(args, run_path):
                             hc_json("keys", address, "esc")
                             warning_turn = None
                             dismissed_startup_warnings = True
-                            closing_warning = text
+                            closing_warning = " ".join(text.split())
+                            closing_warning_until = min(deadline, time.monotonic() + WARNING_CLOSE_SETTLE_SECONDS)
                             time.sleep(SCREEN_POLL_SECONDS)
                             continue
                         else:

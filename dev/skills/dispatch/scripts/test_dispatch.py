@@ -3105,8 +3105,14 @@ class CodexSendTests(DispatchTestCase):
                 receipt.write_text(json.dumps({**DispatchReceiptTests.RECEIPT, "trust_hooks": True}),
                                    encoding="utf-8")
                 after_redraw = self.READY if closes else self.BYPASS_NOTICE
-                frames = iter([self.BYPASS_NOTICE, self.BYPASS_NOTICE, after_redraw])
+                reflowed_notice = self.BYPASS_NOTICE.replace("may run\n  without", "may run without")
+                frames = iter([self.BYPASS_NOTICE, self.BYPASS_NOTICE, reflowed_notice])
                 operations = []
+                now = 0
+
+                def sleep(seconds):
+                    nonlocal now
+                    now += seconds
 
                 def respond(command, *args):
                     if command == "get":
@@ -3116,7 +3122,8 @@ class CodexSendTests(DispatchTestCase):
                     operations.append(args[-1] if command == "keys" else command)
                     return {}
 
-                with patch("dispatch.hc_json", side_effect=respond), patch("dispatch.time.sleep"), \
+                with patch("dispatch.hc_json", side_effect=respond), patch("dispatch.time.sleep", side_effect=sleep), \
+                        patch("dispatch.time.monotonic", side_effect=lambda: now), \
                         redirect_stdout(StringIO()):
                     args = SimpleNamespace(address="t7", message="a task", run=receipt)
                     if closes:
@@ -3127,6 +3134,7 @@ class CodexSendTests(DispatchTestCase):
                     else:
                         with self.assertRaisesRegex(SystemExit, "task withheld.*F2"):
                             send(args)
+                        self.assertEqual(now, 1)
                 self.assertEqual(operations, ["esc", "send"] if closes else ["esc"])
                 self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], closes)
 
