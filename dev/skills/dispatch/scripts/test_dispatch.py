@@ -4878,7 +4878,7 @@ class ReservedQueueWaveTest(unittest.TestCase):
 
     def assert_rejects_nested_item_edit(self, old, *, legacy=False):
         original = self.backlog.read_text(encoding="utf-8").replace(
-            "First item\n", "First item\n  - Nested detail\n\n  ```text\n  Original example\n  ```\n")
+            "First item\n", "First item\n  - Nested detail\n\n  ```text\nOriginal example\n  ```\n")
         self.backlog.write_text(original, encoding="utf-8")
         self.git("commit", "-qam", "Add a nested item body")
         self.git("update-ref", "refs/remotes/origin/HEAD", "HEAD")

@@ -131,11 +131,12 @@ def case_explicit_paths_preserve_unrelated_staged_changes(tmp):
     git(repo, "rm", "-q", "tasks.md")
 
     before = head(repo)
+    before_index = git(repo, "write-tree").stdout
     proc, _ = run_script(repo, "keep.md tasks.md")
     if not proc.returncode or "--files excludes staged paths" not in proc.stderr or head(repo) != before:
         fail("explicit paths", f"expected refusal before committing: {proc.stdout} {proc.stderr}")
-    if "unrelated.md" not in git(repo, "diff", "--cached", "--name-only").stdout.splitlines():
-        fail("explicit paths", "unrelated change disappeared from the index")
+    if git(repo, "write-tree").stdout != before_index:
+        fail("explicit paths", "refused commit changed the index")
     print("OK: explicit paths refuse to commit unrelated staged entries")
 
 

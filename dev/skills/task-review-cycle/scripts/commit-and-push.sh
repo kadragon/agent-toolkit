@@ -259,11 +259,6 @@ elif [ -n "$FILES" ]; then
       STAGE+=("$f")
     fi
   done
-  # Guard the expansion: bash 3.2 (macOS system bash) errors on "${arr[@]}" for
-  # an empty array under `set -u`.
-  if [ "${#STAGE[@]}" -gt 0 ]; then
-    git add -- "${STAGE[@]}"
-  fi
   if [ "$EXPLICIT_FILES" = "true" ]; then
     # Compare path sets without rename detection so a rename counts as both
     # its deletion and addition. Git requires a whole-index merge commit.
@@ -274,6 +269,11 @@ elif [ -n "$FILES" ]; then
       echo '{"error": "--files excludes staged paths; list them explicitly or unstage them"}' >&2
       exit 1
     fi
+  fi
+  # Guard the expansion: bash 3.2 (macOS system bash) errors on "${arr[@]}" for
+  # an empty array under `set -u`.
+  if [ "${#STAGE[@]}" -gt 0 ]; then
+    git add -- "${STAGE[@]}"
   fi
   # `git commit` prints its summary ("[branch hash] msg\n N files changed…") to
   # STDOUT, which would pollute the pure-JSON contract exactly like the new-branch
