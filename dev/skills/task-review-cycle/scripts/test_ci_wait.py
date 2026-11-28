@@ -531,6 +531,10 @@ def main() -> int:
                 env["GH_VIEW"] = "\n".join(json.dumps(page_data) for page_data in pages)
             if command == "ci-logs":
                 args = [str(SCRIPT.parent / "ci-failure-logs.sh"), "7"]
+            elif command == "ci-wait":
+                args = [str(SCRIPT), "7"]
+                env.update(CI_WAIT_NO_CHECKS_GRACE_SECS="0", CI_WAIT_TIMEOUT_SECS="0",
+                           CI_WAIT_CONFIGURED_GRACE_SECS="1", DISPATCH_TIMING_RUN="")
             else:
                 args = [str(SCRIPT.parent / "hub.sh"), command, "7"]
             if expected_head:
@@ -663,22 +667,40 @@ def main() -> int:
         check("an empty rollup reports none with the head",
               status.get("status") == "none" and status.get("head_sha") == "a" * 40,
               f"got {status}")
-        status = hub_output(None)
-        check("a failed view reports none without a head",
-              status.get("status") == "none" and "head_sha" not in status, f"got {status}")
-        status = hub_output([run_ctx("SUCCESS")], GH_PR_VIEW_ERROR="yes")
-        check("a temporary PR lookup failure leaves CI eligible for another poll",
-              status.get("status") == "pending" and "head_sha" not in status, f"got {status}")
-        logs = hub_output([failure], command="ci-logs", expected_head="a" * 40, GH_PR_VIEW_ERROR="yes")
-        check("a temporary PR lookup failure returns a diagnostic retry reason",
+        result = hub_output(None, pages=[page(None)], command="ci-wait")
+        check("legacy CI wait accepts a successful empty snapshot in a repository without CI",
+              result.get("passed") is True and result.get("reason") == "no CI checks found",
+              f"got {result}")
+        logs = hub_output([], command="ci-logs")
+        check("a successful empty snapshot has no failure diagnostics",
+              logs.get("logs_available") is True and logs.get("count") == 0
+              and logs.get("message") == "No failed checks found", f"got {logs}")
+
+        for lookup, gh_env in (
+            ("failed GraphQL command", {}),
+            ("failed PR lookup", {"GH_PR_VIEW_ERROR": "yes"}),
+            ("malformed GraphQL response", {"GH_VIEW": "not JSON"}),
+            ("missing PR commit", {"GH_VIEW": '{"data":{"repository":{"pullRequest":null}}}'}),
+            ("partial GraphQL response", {
+                "GH_VIEW": json.dumps(dict(page([]), errors=[{"message": "unavailable"}])),
+            }),
+        ):
+            status = hub_output(None, **gh_env)
+            check(f"{lookup} leaves CI eligible for another poll",
+                  status.get("status") == "pending" and "head_sha" not in status,
+                  f"got {status}")
+            result = hub_output(None, command="ci-wait", **gh_env)
+            check(f"{lookup} cannot pass legacy CI wait",
+                  result.get("passed") is False and result.get("reason") == "timeout",
+                  f"got {result}")
+            logs = hub_output(None, command="ci-logs", **gh_env)
+            check(f"{lookup} returns a diagnostic retry reason",
+                  logs.get("reason") == "head-unavailable" and logs.get("logs_available") is False
+                  and logs.get("count") == 0, f"got {logs}")
+
+        logs = hub_output(None, command="ci-logs", expected_head="a" * 40)
+        check("failure diagnostics without a snapshot also retry on the reviewed-head path",
               logs.get("reason") == "head-unavailable" and logs.get("count") == 0, f"got {logs}")
-        env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}", GH_PR_VIEW_ERROR="yes",
-                   CI_WAIT_NO_CHECKS_GRACE_SECS="0", CI_WAIT_TIMEOUT_SECS="0", DISPATCH_TIMING_RUN="")
-        proc = subprocess.run(["bash", str(SCRIPT), "7"], cwd=hub_repo, env=env,
-                              capture_output=True, text=True, timeout=30, check=True)
-        result = json.loads(proc.stdout)
-        check("legacy CI wait cannot pass when the PR lookup was unavailable",
-              result.get("passed") is False and result.get("reason") == "timeout", f"got {result}")
 
     print("\n-- the default deadline fires inside the Bash tool's 600s ceiling --")
     # The orchestrator runs ci-wait.sh in the foreground; a deadline past 600s is killed first and
