@@ -33,28 +33,8 @@ this skill. For a dispatched `--tree` cycle, use this order:
 | Implement and prepare the candidate | *Step 3 — Run the cycle* and `references/cycle.md` → *Implement*. After implementation, open *Version bump*, *Cleanup*, *Validation evidence* there |
 | Start review | *Step 4 — Hand off* and `references/cycle.md` → *Hand off*. Follow its direct call to `dev:task-review-cycle` and start at *Caller gate* |
 
-Open *Step 2* for manual selection or parked entries, and open `references/edge-cases.md` when
-an edge case applies. A `Queue reservation` in the dispatch handoff selects *Reserved dispatch
-intake* in place of the ordinary selection and worktree claim.
-
-## Reserved dispatch intake
-
-For a dispatched `--tree` task with a `Queue reservation`, verify the original request and per-unit
-Git limits first. Check that the handoff's `ref` matches the invocation and assigned unit. From
-the launch repository, send the following JSON to the installed `scripts/queue_backend.py
-claim-reservation` using the values from the handoff:
-
-```json
-{"contract":1,"repo":"/abs/repo","reservation":"<id>","delivery":"/abs/run.json","base":"<pinned commit>","ref":"<unit ref>"}
-```
-
-The helper validates the reserved snapshot, creates its pinned worktree, and writes the normal
-active claim to `tasks.md`. On a mismatch or any error, report blocked and stop. On success, use
-the returned `worktree`, `branch`, `base`, `candidate`, and `covers`. Continue in that worktree
-at Step 3 after reading the selected bodies with `show`. Read the Phase index's Branch, Plan gate
-and Sprint Contract sections, then archive the contract as usual. The helper already performed
-the worktree creation and claim checks. Set the Herdr worktree label as described under
-Branch. For issues use the returned `covers` when archiving and closing. The dispatched pre-merge stop and all authorization and review gates still apply.
+Open *Step 2* for manual selection or parked entries and `references/edge-cases.md` when applicable.
+With a `Queue reservation`, use `references/tree.md` → *Reserved dispatch intake*.
 
 ## Prerequisites
 

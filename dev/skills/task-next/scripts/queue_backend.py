@@ -268,7 +268,7 @@ def _read_queue(path: str, rev: str | None, optional: bool = False) -> str:
         raise QueueError(f"cannot read {path}: {e}") from e
 
 
-def backlog_list(req: dict, reservations=()) -> dict:
+def backlog_list(req: dict, reservations=(), *, snapshot=False) -> dict:
     """`backlog_candidates.py --json --counts` mapped onto contract v1 `list`."""
     backlog, tasks = _paths(req)
     rev = _resolve_rev(req, "ref")  # pinned to one SHA, so both reads below see the same commit
@@ -282,32 +282,14 @@ def backlog_list(req: dict, reservations=()) -> dict:
     tokens = bc.tokenize(backlog_raw)
     claims = bc.collect_claims(backlog, tasks, rev or "HEAD", include_self=rev is not None)
     claimed_lines = bc.mark_claimed(backlog_raw, tokens, claims)
-    task_tokens = bc.tokenize(_read_queue(tasks, rev, optional=True))
+    tasks_raw = _read_queue(tasks, rev, optional=True)
+    task_tokens = bc.tokenize(tasks_raw)
     block_lines = bc.mark_claimed_blocks(
         task_tokens,
         bc.collect_block_claims(backlog, tasks, include_self=rev is not None, ref=rev or "HEAD"),
     )
     headings = bc._headings(tokens)
     by_line = {h["line"]: h for h in headings}
-
-    candidates = []
-    for c in raw:
-        label = c["source"]
-        if c["kind"] == "h1":
-            items: list[str] = []
-        else:
-            heading = by_line.get(c["line"])
-            items = [t["text"] for t in bc._direct_open_items(tokens, heading, headings)] if heading else []
-            if heading is None or heading["title"] != c["title"] or len(items) != c["items"]:
-                # The working-tree queue changed between the two reads: never pair one group's
-                # title with another group's items.
-                raise QueueError(f"{label} changed while listing ({label}:{c['line']}); retry")
-        ref = _ref(label, c["line"])
-        candidates.append({
-            "id": ref, "ref": ref, "title": c["title"], "tag": _tag(items), "labels": [],
-            "items": items, "url": "",
-            "counts": {"open": c.get("open", 0), "deferred": c.get("deferred", 0), "blocked": c.get("blocked", 0)},
-        })
 
     if reservations:
         reserved_blocks = {}
@@ -322,19 +304,49 @@ def backlog_list(req: dict, reservations=()) -> dict:
                 keys.update(bc._qkey(candidate["title"], item) for item in bc.item_keys("\n".join(reservation["covers"])))
         item_lines = bc.mark_claimed(backlog_raw, tokens, reserved_items)
         sprint_lines = bc.mark_claimed_blocks(task_tokens, reserved_blocks)
-        for by, lines in item_lines.items():
-            claimed_lines.setdefault(by, []).extend(lines)
-        for by, lines in sprint_lines.items():
-            block_lines.setdefault(by, []).extend(lines)
-        for label, counts in (("backlog.md", item_lines), ("tasks.md", sprint_lines)):
-            note = bc.claimed_skip_note(counts, label=label)
-            if note:
+        for label, extra, claims_by_line in (
+            ("backlog.md", item_lines, claimed_lines), ("tasks.md", sprint_lines, block_lines),
+        ):
+            if note := bc.claimed_skip_note(extra, label=label):
                 warnings.append(note)
-        held_sprints = {line for lines in sprint_lines.values() for line in lines}
-        held_items = {line for lines in item_lines.values() for line in lines}
-        candidates = [c for c in candidates if not _reserved_file_candidate(c, held_sprints, held_items, headings, by_line)]
-        if not full_scan:
-            candidates = candidates[:bc.FAST_PATH_CAP]
+            for by, lines in extra.items():
+                claims_by_line.setdefault(by, []).extend(lines)
+        eligible = bc.full_scan(task_tokens, tokens)
+        raw = eligible if full_scan else bc.fast_path(task_tokens, tokens)
+        bc.add_candidate_counts(raw, task_tokens, tokens)
+        if not full_scan and (note := bc.truncation_note(len(raw), len(eligible))):
+            warnings.append(note)
+
+    backlog_lines = backlog_raw.splitlines()
+    tasks_lines = tasks_raw.splitlines()
+    task_headings = bc._headings(task_tokens, (1,))
+    task_by_line = {h["line"]: h for h in task_headings}
+    candidates = []
+    for c in raw:
+        label = c["source"]
+        line = c["line"]
+        selection = []
+        if c["kind"] != "h1":
+            heading = by_line.get(line)
+            selection = bc._direct_open_items(tokens, heading, headings) if heading else []
+            if heading is None or heading["title"] != c["title"] or len(selection) != c["items"]:
+                # The working-tree queue changed between the two reads.
+                raise QueueError(f"{label} changed while listing ({label}:{line}); retry")
+        items = [item["text"] for item in selection]
+        ref = _ref(label, line)
+        candidate = {
+            "id": ref, "ref": ref, "title": c["title"], "tag": _tag(items), "labels": [],
+            "items": items, "url": "",
+            "counts": {"open": c.get("open", 0), "deferred": c.get("deferred", 0), "blocked": c.get("blocked", 0)},
+        }
+        if snapshot:
+            if c["kind"] == "h1":
+                end = min(len(tasks_lines), bc._region_end(task_by_line[line], task_headings) - 1)
+                body = "\n".join(tasks_lines[line - 1:end])
+                candidate["body_digest"] = hashlib.sha256(body.encode("utf-8")).hexdigest()
+            else:
+                candidate["covers"] = [backlog_lines[item["line"] - 1] for item in selection]
+        candidates.append(candidate)
 
     parked = []
     if req.get("parked"):
@@ -351,14 +363,6 @@ def backlog_list(req: dict, reservations=()) -> dict:
         for wt, lines in found.items() for line in lines
     ]
     return {"candidates": candidates, "parked": parked, "claimed": claimed, "warnings": warnings, "rev": rev}
-
-
-
-def _reserved_file_candidate(candidate, held_sprints, held_items, headings, by_line):
-    label, line = _parse_ref(candidate["ref"])
-    if label == "tasks.md":
-        return line in held_sprints
-    return any(line < item < bc._region_end(by_line[line], headings) for item in held_items)
 
 
 _FILE_REF_RE = re.compile(r"(backlog\.md|tasks\.md):(\d+)")
@@ -1178,9 +1182,9 @@ QUEUE_LOCK_TIMEOUT = 10
 
 
 @contextmanager
-def _queue_write_lock(repo: str):
+def _queue_write_lock(repo: str, name: str = "write.lock"):
     """Serialize queue writes and reservation transitions across linked worktrees."""
-    path = os.path.join(os.path.dirname(pending_path(repo)), "write.lock")
+    path = os.path.join(os.path.dirname(pending_path(repo)), name)
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         lock = open(path, "a+b")
@@ -1273,7 +1277,7 @@ def _wave_snapshot(repo, base, env, runner, *, exclude=()):
     if backend == "github":
         listed = github_list(req, runner, reservations=reservations, snapshot=True)
     elif backend == "backlog":
-        listed = backlog_list(req, reservations)
+        listed = backlog_list(req, reservations, snapshot=True)
     else:
         raise QueueError("queue wave reservations require a built-in queue backend")
     if listed.get("incomplete") or any("unbalanced fence" in warning for warning in listed["warnings"]):
@@ -1324,81 +1328,157 @@ def _wave_worktree(repo, candidate):
     return str(path), branch
 
 
+def _unit_covers(candidate, backend):
+    if backend == "backlog":
+        return candidate.get("covers", [])
+    covered = dict(zip(candidate["item_refs"], candidate["items"], strict=True))
+    if not candidate["excluded"]:
+        covered.setdefault(candidate["ref"], candidate["title"])
+    return [f"- {ref} {item}" for ref, item in covered.items()]
+
+
 def _claim_tasks(repo, unit):
-    """Compose the ordinary task-next claim before creating the reserved worktree."""
+    """Compose the ordinary task-next claim at the pinned base."""
     candidate = unit["candidate"]
-    base = unit["base"]
-    tasks = _read_queue(os.path.join(repo, "tasks.md"), base, optional=True)
-    title = candidate["title"]
-    covers = []
-    if unit["backend"] == "github":
-        covered = dict(zip(candidate["item_refs"], candidate["items"], strict=True))
-        if not candidate["excluded"]:
-            covered.setdefault(candidate["ref"], title)
-        covers = [f"- {ref} {item}" for ref, item in covered.items()]
-    else:
-        source, line = _parse_ref(candidate["ref"])
-        if source == "tasks.md":
-            tokens = bc.tokenize(tasks)
-            headings = bc._headings(tokens)
-            heading = next(h for h in headings if h["line"] == line)
-            status = next(t for t in tokens
-                          if t["type"] == "status" and line < t["line"] < bc._region_end(heading, headings))
-            lines = tasks.splitlines(keepends=True)
-            lines[status["line"] - 1] = lines[status["line"] - 1].replace("open", "active", 1)
-            return "".join(lines), covers
-        backlog = _read_queue(os.path.join(repo, "backlog.md"), base)
-        tokens = bc.tokenize(backlog)
-        headings = bc._headings(tokens)
+    tasks = _read_queue(os.path.join(repo, "tasks.md"), unit["base"], optional=True)
+    if candidate["ref"].startswith("tasks.md:"):
+        _, line = _parse_ref(candidate["ref"])
+        tokens = bc.tokenize(tasks)
+        headings = bc._headings(tokens, (1,))
         heading = next(h for h in headings if h["line"] == line)
-        lines = backlog.splitlines()
-        covers = [lines[t["line"] - 1] for t in bc._direct_open_items(tokens, heading, headings)
-                  if t["text"] in candidate["items"]]
-        if len(covers) != len(candidate["items"]):
-            raise QueueError(f"{candidate['ref']}: could not reproduce the covered backlog lines")
-    claim = "\n".join([f"# {title}", "status: active", "", "## Covers", *covers]) + "\n"
-    return (tasks.rstrip("\n") + "\n\n" if tasks else "") + claim, covers
+        end = bc._region_end(heading, headings)
+        status = next(t for t in tokens if t["type"] == "status" and line < t["line"] < end)
+        lines = tasks.splitlines(keepends=True)
+        lines[status["line"] - 1] = lines[status["line"] - 1].replace("open", "active", 1)
+        return "".join(lines)
+    claim = "\n".join([f"# {candidate['title']}", "status: active", "", "## Covers", *unit["covers"]]) + "\n"
+    return (tasks.rstrip("\n") + "\n\n" if tasks else "") + claim
 
 
-def _materialize_claim(repo, unit):
-    path, branch = _wave_worktree(repo, unit["candidate"])
-    if (path, branch) != (unit["worktree"], unit["branch"]):
+def _worktree_record(repo, path):
+    listing = _git(repo, "worktree", "list", "--porcelain", "-z") or ""
+    for record in listing.split("\x00\x00"):
+        fields = dict(field.partition(" ")[::2] for field in record.split("\x00") if field)
+        if Path(fields.get("worktree", "")).resolve() == Path(path).resolve():
+            return fields
+    return {}
+
+
+def _claim_status(repo, unit, token, content):
+    """Recognize only worktrees created for this reservation, including interrupted publication."""
+    record = _worktree_record(repo, unit["worktree"])
+    owned = record.get("locked") == f"dispatch reservation {token}"
+    if not (owned or unit.get("published")):
+        return False, False
+    if record.get("branch") != f"refs/heads/{unit['branch']}" or record.get("HEAD") != unit["base"]:
+        raise QueueError(f"reserved worktree changed: {unit['worktree']}")
+    tasks = Path(unit["worktree"]) / "tasks.md"
+    actual = tasks.read_text(encoding="utf-8") if tasks.exists() else ""
+    if actual == content:
+        return owned, True
+    original = _read_queue(os.path.join(repo, "tasks.md"), unit["base"], optional=True)
+    if actual != original or unit.get("published"):
+        raise QueueError(f"reserved task claim changed: {tasks}")
+    return owned, False
+
+
+def _materialize_claim(repo, unit, token, content, owned):
+    path, branch = unit["worktree"], unit["branch"]
+    if not owned and _wave_worktree(repo, unit["candidate"]) != (path, branch):
         raise QueueError("reserved worktree location changed")
-    content, covers = _claim_tasks(repo, unit)
-    exclude = Path(pending_path(repo)).parent.parent / "info" / "exclude"
-    exclude.parent.mkdir(parents=True, exist_ok=True)
-    existing = exclude.read_bytes().splitlines() if exclude.exists() else []
-    if b".worktrees/" not in existing:
-        with exclude.open("ab") as fh:
-            fh.write(b"\n.worktrees/\n")
-    result = subprocess.run(["git", "-C", repo, "worktree", "add", "-b", branch, path, unit["base"]],
-                            capture_output=True, encoding="utf-8", errors="replace", check=False)
-    if result.returncode:
-        raise QueueError(f"cannot create reserved worktree {path}: {result.stderr.strip()}")
-    tasks = Path(path) / "tasks.md"
-    fd, temp = tempfile.mkstemp(dir=tasks.parent, prefix="tasks.", suffix=".tmp")
+    destination = Path(path) / "tasks.md"
+    destination.parent.parent.mkdir(parents=True, exist_ok=True)
+    # Prepare the complete claim before creating a branch. Publication is a same-filesystem rename.
+    fd, temp = tempfile.mkstemp(dir=destination.parent.parent, prefix="tasks.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
             fh.write(content)
-        os.replace(temp, tasks)
+        if not owned:
+            result = subprocess.run(
+                ["git", "-C", repo, "worktree", "add", "--lock", "--reason", f"dispatch reservation {token}",
+                 "-b", branch, path, unit["base"]],
+                capture_output=True, encoding="utf-8", errors="replace", check=False,
+            )
+            if result.returncode:
+                raise QueueError(f"cannot create reserved worktree {path}: {result.stderr.strip()}")
+        os.replace(temp, destination)
     finally:
         Path(temp).unlink(missing_ok=True)
-    return {**unit, "covers": covers}
+
+
+def _finish_reservation(op, req, env, runner):
+    repo = req["repo"]
+    token = _reservation_token(req.get("reservation"))
+    release = op == "release-reservation"
+    with _queue_write_lock(repo, f"reservation-{token}.lock"):
+        unit = _read_reservations(repo).get(token)
+        if release:
+            if unit is None:
+                return {"released": False}
+            record = _worktree_record(repo, unit["worktree"])
+            if unit.get("published") or record.get("locked") == f"dispatch reservation {token}":
+                return {"released": False, "reason": "worktree creation already started; resume the claim"}
+        else:
+            _claim_reservation(req, env, runner, token, unit)
+        with _queue_write_lock(repo):
+            units = _read_reservations(repo)
+            del units[token]
+            _write_queue_json(_reservation_store(repo), {"version": 1, "units": units})
+    return {"released": True} if release else unit
+
+
+def _claim_reservation(req, env, runner, token, unit):
+    if not unit or not unit.get("delivery") or req.get("delivery") != unit["delivery"]:
+        raise QueueError("reservation is missing or assigned to another delivery receipt")
+    candidate = unit["candidate"]
+    if req.get("base") != unit["base"] or req.get("ref") != candidate["ref"]:
+        raise QueueError("handoff does not match the reserved unit and base")
+    repo = req["repo"]
+    content = _claim_tasks(repo, unit)
+    owned, published = _claim_status(repo, unit, token, content)
+    if not published:
+        base = _origin_base(repo)
+        snapshot = _wave_snapshot(repo, base, env, runner, exclude=(token,))
+        if snapshot["backend"] != unit["backend"]:
+            raise QueueError("the reserved queue backend changed")
+        if unit["backend"] == "backlog" and base != unit["base"]:
+            _match_shifted_file_unit(snapshot, candidate)
+        else:
+            _match_wave_units(snapshot, [candidate])
+        _materialize_claim(repo, unit, token, content, owned)
+        owned = True
+    if not unit.get("published"):
+        # Keep proof of ownership across a failure between unlocking and retiring the reservation.
+        with _queue_write_lock(repo):
+            units = _read_reservations(repo)
+            units[token]["published"] = True
+            _write_queue_json(_reservation_store(repo), {"version": 1, "units": units})
+    if owned and _git(repo, "worktree", "unlock", unit["worktree"]) is None:
+        raise QueueError(f"cannot unlock reserved worktree {unit['worktree']}; retry the claim")
+
+
+def _match_shifted_file_unit(snapshot, candidate):
+    # In the current queue, unrelated edits can move line numbers without changing this scope.
+    def content(unit):
+        return {k: v for k, v in unit.items() if k not in ("id", "ref")}
+
+    source, _ = _parse_ref(candidate["ref"])
+    expected = content(candidate)
+    matches = [unit for unit in snapshot["candidates"]
+               if unit["ref"].startswith(source + ":") and content(unit) == expected]
+    if len(matches) != 1:
+        raise QueueError(f"{candidate['ref']}: selection changed or is no longer eligible on origin/HEAD")
 
 
 def _wave_op(op, req, env, runner):
     repo = req["repo"]
     if op == "prepare-wave":
         return _wave_snapshot(repo, _origin_base(repo), env, runner)
+    if op in ("release-reservation", "claim-reservation"):
+        return _finish_reservation(op, req, env, runner)
     with _queue_write_lock(repo):
         store = _reservation_store(repo)
         units = _read_reservations(repo)
-        if op == "release-reservation":
-            token = _reservation_token(req.get("reservation"))
-            removed = units.pop(token, None) is not None
-            if removed:
-                _write_queue_json(store, {"version": 1, "units": units})
-            return {"released": removed}
         if op == "reserve-wave":
             base = _origin_base(repo)
             if req.get("base") != base:
@@ -1415,27 +1495,17 @@ def _wave_op(op, req, env, runner):
                 paths.add(path)
                 unit = {"candidate": candidate, "base": base, "backend": snapshot["backend"],
                         "worktree": path, "branch": branch}
-                _, unit["covers"] = _claim_tasks(repo, unit)
+                unit["covers"] = _unit_covers(candidate, snapshot["backend"])
                 reserved[uuid4().hex] = unit
+            exclude = store.parent.parent / "info" / "exclude"
+            exclude.parent.mkdir(parents=True, exist_ok=True)
+            existing = exclude.read_bytes().splitlines() if exclude.exists() else []
+            if b".worktrees/" not in existing:
+                with exclude.open("ab") as fh:
+                    fh.write(b"\n.worktrees/\n")
             _write_queue_json(store, {"version": 1, "units": units | reserved})
             return {"base": base, "reservations": [dict(unit, reservation=token) for token, unit in reserved.items()]}
-        if op == "bind-wave":
-            return _bind_wave(req, env, runner, units, store)
-
-        token = _reservation_token(req.get("reservation"))
-        unit = units.get(token)
-        if not unit or not unit.get("delivery") or req.get("delivery") != unit["delivery"]:
-            raise QueueError("reservation is missing or assigned to another delivery receipt")
-        if req.get("base") != unit["base"] or req.get("ref") != unit["candidate"]["ref"]:
-            raise QueueError("handoff does not match the reserved unit and base")
-        snapshot = _wave_snapshot(repo, unit["base"], env, runner, exclude=(token,))
-        if snapshot["backend"] != unit["backend"]:
-            raise QueueError("the reserved queue backend changed")
-        _match_wave_units(snapshot, [unit["candidate"]])
-        claim = _materialize_claim(repo, unit)
-        del units[token]
-        _write_queue_json(store, {"version": 1, "units": units})
-        return claim
+        return _bind_wave(req, env, runner, units, store)
 
 
 def _reservation_token(value):

@@ -86,9 +86,10 @@ write side effects. The generic adapter contract is unchanged.
 | `release-reservation` | `reservation` | `released` (false if already released or claimed) |
 
 Prepare and reserve use the locally fetched `origin/HEAD`. Binding rechecks that base and
-the selection before delivery. Claim uses the reserved commit and revalidates eligibility,
-including live issue state, before creating the worktree. Release changes only the local
-reservation store.
+the selection before delivery. Claim checks current eligibility and creates the worktree at
+the reserved commit. If claim publication is interrupted, retry with the same reservation
+and receipt. Release changes only the local reservation store and leaves a started worktree
+intact.
 
 ## Filing findings
 

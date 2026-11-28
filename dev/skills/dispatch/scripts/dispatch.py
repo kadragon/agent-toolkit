@@ -530,7 +530,7 @@ def first_prompt(cli, message, handoff):
             "and Validation evidence, then Step 4 and cycle.md → Hand off into task-review-cycle → Caller gate."
         )
     if reservation:
-        prompt += ("\n\nUse task-next → Reserved dispatch intake. Claim the reservation with the installed "
+        prompt += ("\n\nUse task-next's references/tree.md → Reserved dispatch intake. Claim it with the installed "
                    "queue_backend.py before creating or selecting a worktree. Stop on a claim mismatch.")
     extra_lines = handoff.get("extra_lines")
     if extra_lines:
@@ -1886,23 +1886,31 @@ def release_reservation(args):
     print(json.dumps(result, ensure_ascii=False))
 
 
-def deliver_reserved(path, unit):
+def deliver_reserved(path, unit, address):
     command = TASK_COMMANDS["codex"][0]
     prompt = (f"{command} --tree {unit['ref']}\n"
               "Dispatch mode: parallel-worktree\n"
               f"Assigned unit: {unit['ref']} only. --tree was added for isolation only.")
-    run = load_run(path)
-    args = [sys.executable, "-I", "-X", "utf8", __file__, "send", "--run", str(path), "--", run["address"], prompt]
+    outcome = {"address": address, "prompt": prompt}
+    args = [sys.executable, "-I", "-X", "utf8", __file__, "send", "--run", str(path), "--", address, prompt]
     try:
         result = subprocess.run(args, capture_output=True, encoding="utf-8", check=False)
         if not result.returncode:
-            return {**json.loads(result.stdout), "delivery": "submitted", "diagnostics": result.stderr.strip()}
+            return {**outcome, **json.loads(result.stdout), "delivery": "submitted", "diagnostics": result.stderr.strip()}
         error = result.stderr.strip() or f"send exited {result.returncode}"
     except (OSError, ValueError) as exc:
         error = str(exc)
-    sent = load_run(path)["sent"]
+    try:
+        with lock_run(path):
+            run = load_run(path)
+            sent = run["sent"]
+            if sent is False and run.get("handoff", {}).get("queue_reservation") == unit:
+                del run["handoff"]["queue_reservation"]
+                write_json(path, run)
+    except (SystemExit, OSError, KeyError) as exc:
+        return {**outcome, "delivery": "unconfirmed", "diagnostics": f"{error}; receipt check: {exc}"}
     delivery = "submitted" if sent is True else "unconfirmed" if sent == "unconfirmed" else "withheld"
-    return {"address": run["address"], "delivery": delivery, "diagnostics": error}
+    return {**outcome, "delivery": delivery, "diagnostics": error}
 
 
 def send_wave(args):
@@ -1945,7 +1953,8 @@ def send_wave(args):
             write_json(path, runs[path])
             units[path] = metadata
     with ThreadPoolExecutor(max_workers=len(units)) as pool:
-        futures = {path: pool.submit(deliver_reserved, path, unit) for path, unit in units.items()}
+        futures = {path: pool.submit(deliver_reserved, path, unit, runs[path]["address"])
+                   for path, unit in units.items()}
         outcomes = [{"run": str(path), "reservation": paths[path], **future.result()}
                     for path, future in futures.items()]
     print(json.dumps({"deliveries": outcomes}, ensure_ascii=False))

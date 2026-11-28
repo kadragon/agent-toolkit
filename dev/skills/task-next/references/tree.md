@@ -1,3 +1,23 @@
+## Reserved dispatch intake
+
+For a dispatched `--tree` task with a `Queue reservation`, verify the original request and per-unit
+Git limits first. Check that the handoff's `ref` matches the invocation and assigned unit. From
+the launch repository, send the following JSON to the installed `scripts/queue_backend.py
+claim-reservation` using the values from the handoff:
+
+```json
+{"contract":1,"repo":"/abs/repo","reservation":"<id>","delivery":"/abs/run.json","base":"<pinned commit>","ref":"<unit ref>"}
+```
+
+The helper validates the reserved snapshot, creates its pinned worktree, and writes the normal
+active claim to `tasks.md`. On a mismatch or any error, report blocked and stop. On success, use
+the returned `worktree`, `branch`, `base`, `candidate`, and `covers`. Continue in that worktree
+at Step 3 after reading the selected bodies with `show`. Read the Phase index's Branch, Plan gate
+and Sprint Contract sections, then archive the contract as usual. The helper already performed
+the worktree creation and claim checks. Set the Herdr worktree label as described under
+Branch. Treat the returned `covers` as the initial claim. Recompute the issue closing refs under
+*Covered refs* if the approved plan narrows its scope. The dispatched pre-merge stop and all authorization and review gates still apply.
+
 ## `--tree` mode (single task, worktree isolation)
 
 Triggered by `--tree`. Runs Steps 1–2 as default single-pick does, but from the base (`SKILL.md`

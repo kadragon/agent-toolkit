@@ -54,8 +54,9 @@ the dispatcher and all children. Run `dispatch.py send-wave <repo>` with a JSON 
 
 The command validates and binds the entire set before sending. Each delivery uses its own
 receipt, and later deliveries proceed while earlier children are in intake. The output includes
-each run's delivery outcome. For an unconfirmed send, follow the normal checked resend flow
-using the same first task text and receipt. For a canceled or undelivered assignment, use
+each run's delivery outcome and exact first-task prompt. For an unconfirmed send, follow the
+normal checked resend flow using that prompt and receipt. Retry a withheld delivery through
+`send-wave`. For a canceled or undelivered assignment, use
 `dispatch.py release-reservation <repo> <id>`. The release only removes an unconsumed
 reservation. A child's completed claim remains visible through its ordinary worktree claim.
 Use `wait --first` after delivery and keep merges into the base sequential.
