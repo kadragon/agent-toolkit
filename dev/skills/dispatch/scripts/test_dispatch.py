@@ -5503,7 +5503,13 @@ class ReservedQueueWaveTest(unittest.TestCase):
 
         def fail_checkout(args, **kwargs):
             if args[:4] == ["git", "-C", str(worktree), "read-tree"]:
+                (worktree / "backlog.md").write_text(self.backlog.read_text(encoding="utf-8"), encoding="utf-8")
                 return subprocess.CompletedProcess(args, 1, "", "injected checkout failure")
+            return git_run(args, **kwargs)
+
+        def fail_hook(args, **kwargs):
+            if args[:6] == ["git", "-C", str(worktree), "hook", "run", "--ignore-missing"]:
+                return subprocess.CompletedProcess(args, 1, "", "injected hook failure")
             return git_run(args, **kwargs)
 
         def fail_tasks(source, destination):
@@ -5516,7 +5522,18 @@ class ReservedQueueWaveTest(unittest.TestCase):
         ):
             queue_backend.handle("claim-reservation", request, {"AGENT_QUEUE_BACKEND": "backlog"})
         self.assertFalse((worktree / "tasks.md").exists())
+        self.assertTrue((worktree / "backlog.md").is_file())
         self.assertFalse(self.result("release-reservation", reservation=unit["reservation"])["released"])
+
+        with patch.object(queue_backend.subprocess, "run", side_effect=fail_hook), self.assertRaisesRegex(
+            queue_backend.QueueError, "injected hook failure",
+        ):
+            queue_backend.handle("claim-reservation", request, {"AGENT_QUEUE_BACKEND": "backlog"})
+
+        with patch.object(queue_backend.subprocess, "run", side_effect=fail_hook), self.assertRaisesRegex(
+            queue_backend.QueueError, "injected hook failure",
+        ):
+            queue_backend.handle("claim-reservation", request, {"AGENT_QUEUE_BACKEND": "backlog"})
 
         with patch.object(queue_backend.os, "replace", side_effect=fail_tasks), self.assertRaisesRegex(
             OSError, "injected publication failure",
@@ -5557,6 +5574,26 @@ class ReservedQueueWaveTest(unittest.TestCase):
         self.assertEqual(self.result("release-reservation", reservation=token), {"released": True})
         self.assertIn("- [ ] [FEAT] First item", (Path(unit["worktree"]) / "tasks.md").read_text(encoding="utf-8"))
         self.assertNotIn("First group", self.prepare()["by_title"])
+
+    def test_ordinary_claim_scan_accepts_legacy_worktree_listing(self):
+        sys.path.insert(0, str(QUEUE_BACKEND.parent))
+        import queue_backend
+
+        path = self.repo / ".worktrees" / "legacy"
+        self.git("worktree", "add", "-qb", "legacy", str(path))
+        (path / "tasks.md").write_text(
+            "# First group\n\n## Covers\n- [ ] [FEAT] First item\n", encoding="utf-8",
+        )
+        git_run = subprocess.run
+
+        def legacy_git(args, **kwargs):
+            if args[3:] == ["worktree", "list", "--porcelain", "-z"]:
+                return subprocess.CompletedProcess(args, 129, "", "unsupported -z")
+            return git_run(args, **kwargs)
+
+        with patch.object(queue_backend.subprocess, "run", side_effect=legacy_git):
+            claims = queue_backend.bc.collect_claims(str(self.backlog), None)
+        self.assertIn(str(path), claims)
 
     def test_independent_claims_can_prepare_worktrees_concurrently(self):
         sys.path.insert(0, str(QUEUE_BACKEND.parent))

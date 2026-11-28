@@ -1059,15 +1059,19 @@ def _repo_rel(path: str, top: str) -> str:
 RESERVATION_LOCK_REASON = "dispatch reservation "
 
 
+def _worktree_listing(repo: str) -> str | None:
+    return _git(repo, "worktree", "list", "--porcelain", "-z") or _git(repo, "worktree", "list", "--porcelain")
+
+
 def _claimants(listing: str, top: str, include_self: bool) -> list[str]:
     """Worktrees whose claims count: every other `.worktrees/` one, plus (include_self) this
     checkout and the main worktree. `top` is the realpath of this checkout's top level."""
-    records = [dict(field.partition(" ")[::2] for field in record.split("\0") if field)
-               for record in listing.split("\0\0")]
+    separator = "\0" if "\0" in listing else "\n"
+    records = [dict(field.partition(" ")[::2] for field in record.split(separator) if field)
+               for record in listing.split(separator * 2)]
     claimants = []
     for record in records:
         wt = record.get("worktree", "")
-        # The reservation holds this unit until checkout and claim publication finish.
         if record.get("locked", "").startswith(RESERVATION_LOCK_REASON):
             continue
         if "/.worktrees/" in wt and os.path.isdir(wt) and os.path.realpath(wt) != top:
@@ -1088,7 +1092,7 @@ def collect_block_claims(
     `collect_claims`: same claimant set, repo-relative tasks.md path and merge-base against `ref`."""
     repo = os.path.dirname(os.path.abspath(backlog_path))
     top = _git(repo, "rev-parse", "--show-toplevel")
-    listing = _git(repo, "worktree", "list", "--porcelain", "-z")
+    listing = _worktree_listing(repo)
     if top is None or listing is None:
         return {}
     top = os.path.realpath(top.strip())
@@ -1146,7 +1150,7 @@ def collect_claims(
     """
     repo = os.path.dirname(os.path.abspath(backlog_path))
     top = _git(repo, "rev-parse", "--show-toplevel")
-    listing = _git(repo, "worktree", "list", "--porcelain", "-z")
+    listing = _worktree_listing(repo)
     if top is None or listing is None:
         return {}
     top = os.path.realpath(top.strip())

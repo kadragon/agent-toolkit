@@ -721,7 +721,7 @@ def github_claims(repo: str, slug: str, issues: list[dict], include_self: bool,
     """
     claims: dict[int, str] = {}
     top = _git(repo, "rev-parse", "--show-toplevel")
-    listing = _git(repo, "worktree", "list", "--porcelain", "-z")
+    listing = bc._worktree_listing(repo)
     if top is not None and listing is not None:
         common = _git(repo, "rev-parse", "--git-common-dir")
         for wt in bc._claimants(listing, os.path.realpath(top), include_self):
@@ -1406,7 +1406,7 @@ def _claim_status(repo, unit, token, content):
     if actual == content:
         return owned, True
     original = _read_queue(os.path.join(repo, "tasks.md"), unit["base"], optional=True)
-    pending_checkout = owned and not tasks.exists() and not _worktree_has_index(unit["worktree"])
+    pending_checkout = owned and unit.get("checkout_complete") is False and not tasks.exists()
     if unit.get("published") or (actual != original and not pending_checkout):
         raise QueueError(f"reserved task claim changed: {tasks}")
     return owned, False
@@ -1421,15 +1421,23 @@ def _worktree_has_index(path):
 
 def _checkout_reserved_worktree(path, base):
     # `worktree add --no-checkout` skips post-checkout as well as materializing files.
-    for args in (
-        ["read-tree", "-m", "-u", "--no-recurse-submodules", base],
-        ["hook", "run", "--ignore-missing", "post-checkout", "--", "0" * len(base), base, "1"],
-    ):
+    commands = []
+    if not _worktree_has_index(path):
+        commands.append(["read-tree", "--reset", "-u", "--no-recurse-submodules", base])
+    commands.append(["hook", "run", "--ignore-missing", "post-checkout", "--", "0" * len(base), base, "1"])
+    for args in commands:
         result = subprocess.run(
             ["git", "-C", path, *args], capture_output=True, encoding="utf-8", errors="replace", check=False,
         )
         if result.returncode:
             raise QueueError(f"cannot check out reserved worktree {path}: {result.stderr.strip()}")
+
+
+def _record_reservation_progress(repo, token, **progress):
+    with _queue_write_lock(repo, RESERVATION_STORE_LOCK, RESERVATION_STORE_TIMEOUT):
+        units = _read_reservations(repo)
+        units[token].update(progress)
+        _write_queue_json(_reservation_store(repo), {"version": 1, "units": units})
 
 
 def _materialize_claim(repo, unit, token, content, owned):
@@ -1443,6 +1451,7 @@ def _materialize_claim(repo, unit, token, content, owned):
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
             fh.write(content)
         if not owned:
+            _record_reservation_progress(repo, token, checkout_complete=False)
             with _reservation_worktree_lock(repo):
                 result = subprocess.run(
                     ["git", "-C", repo, "worktree", "add", "--no-checkout", "--lock", "--reason",
@@ -1451,8 +1460,9 @@ def _materialize_claim(repo, unit, token, content, owned):
                 )
             if result.returncode:
                 raise QueueError(f"cannot create reserved worktree {path}: {result.stderr.strip()}")
-        if not owned or not _worktree_has_index(path):
+        if not owned or unit.get("checkout_complete") is False:
             _checkout_reserved_worktree(path, unit["base"])
+            _record_reservation_progress(repo, token, checkout_complete=True)
         os.replace(temp, destination)
     finally:
         Path(temp).unlink(missing_ok=True)
@@ -1512,10 +1522,7 @@ def _claim_reservation(req, env, runner, token, unit):
         _materialize_claim(repo, unit, token, content, owned)
         owned = True
     if not unit.get("published"):
-        with _queue_write_lock(repo, RESERVATION_STORE_LOCK, RESERVATION_STORE_TIMEOUT):
-            units = _read_reservations(repo)
-            units[token]["published"] = True
-            _write_queue_json(_reservation_store(repo), {"version": 1, "units": units})
+        _record_reservation_progress(repo, token, published=True)
     if owned:
         with _reservation_worktree_lock(repo):
             if _git(repo, "worktree", "unlock", unit["worktree"]) is None:
