@@ -199,10 +199,11 @@ if [ "$EXPLICIT_FILES" = "true" ]; then
     echo '{"error": "--files requires at least one path"}' >&2
     exit 1
   fi
-  # Preserve the space-separated pathspec syntax of --files.
   # shellcheck disable=SC2206
   REQUESTED=($FILES)
 elif [ "$NO_COMMIT" != "true" ] && [ "$STAGED_ONLY" != "true" ]; then
+  REPO_ROOT=$(git rev-parse --show-toplevel)
+  cd -- "$REPO_ROOT"
   GIT_PATH_OPTIONS=(--literal-pathspecs)
   PATH_LIST=$(mktemp)
   if ! bash "$SCRIPT_DIR/changed-files.sh" --null > "$PATH_LIST"; then

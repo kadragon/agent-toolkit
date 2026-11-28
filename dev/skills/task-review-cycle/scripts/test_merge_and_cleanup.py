@@ -213,8 +213,8 @@ def case_base_checkout_fails(tmp):
     print("ok base_checkout_fails")
 
 
-# Stub GitHub's API, then use real Git against a local bare repository for ref cleanup.
 GH_STUB = """#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$GH_LOG"
 case "$1 $2" in
   "pr merge") exit 0 ;;
   "pr view")
@@ -229,11 +229,17 @@ esac
 """
 
 
-def run_hub_merge(tmp, state="MERGED", *, fork=False, advance=False, deny_delete=False, present=True):
+def run_hub_merge(tmp, state="MERGED", *, fork=False, advance=False, deny_delete=False,
+                  present=True, pr_repo="o/r", push_url=None, redirect_push=False):
     repo = make_repo(tmp)
     remote = Path(tempfile.mkdtemp(dir=tmp)) / "origin.git"
     git(repo, "init", "-q", "--bare", str(remote))
-    git(repo, "remote", "add", "origin", "git@github.com:o/r.git")
+    origin = "git@github.com:o/r.git" if push_url is None else "https://github.com/o/r.git"
+    git(repo, "remote", "add", "origin", origin)
+    if push_url is not None:
+        git(repo, "remote", "set-url", "--push", "origin", push_url)
+    if redirect_push:
+        git(repo, "config", f"url.{remote.as_posix()}.pushInsteadOf", origin)
     branch = "feat/a#b%c"
     ref = f"refs/heads/{branch}"
     merged = git(repo, "rev-parse", "HEAD").stdout.strip()
@@ -244,7 +250,8 @@ def run_hub_merge(tmp, state="MERGED", *, fork=False, advance=False, deny_delete
     if deny_delete:
         git(remote, "config", "receive.denyDeletes", "true")
     expected_tip = git(repo, "rev-parse", "HEAD").stdout.strip()
-    view = {"state": state, "headRefName": branch, "isCrossRepository": fork, "headRefOid": merged}
+    view = {"state": state, "headRefName": branch, "isCrossRepository": fork, "headRefOid": merged,
+            "url": f"https://github.com/{pr_repo}/pull/1"}
     bindir = Path(tempfile.mkdtemp(dir=tmp))
     gh = bindir / "gh"
     gh.write_text(GH_STUB, newline="\n")
@@ -258,14 +265,18 @@ case "$2" in
 esac
 """, newline="\n")
     ssh.chmod(0o755)
+    gh_log = bindir / "gh.log"
     env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}",
                FEATURE_REF=ref, REMOTE=str(remote), ADVANCE=str(advance).lower(),
-               GH_VIEW=json.dumps(view if state is not None else None),
+               GH_VIEW=json.dumps(view if state is not None else None), GH_LOG=str(gh_log),
                GIT_SSH_COMMAND=f'"{ssh.as_posix()}"', GIT_SSH_VARIANT="simple")
     proc = subprocess.run(["bash", str(HUB), "merge", "1", "squash"], cwd=repo, env=env,
                           check=False, capture_output=True, text=True)
     if proc.returncode != 0:
         fail("hub_merge", f"exit {proc.returncode}: {proc.stderr.strip()!r}")
+    calls = gh_log.read_text(encoding="utf-8").splitlines()
+    if any("--repo" in call for call in calls):
+        fail("hub_merge", f"merge and view must use the same gh default repository as PR creation: {calls}")
     tip = subprocess.run(["git", "-C", str(remote), "rev-parse", "--verify", ref],
                          capture_output=True, text=True, check=False).stdout.strip()
     return json.loads(proc.stdout), tip, expected_tip
@@ -290,6 +301,20 @@ def case_hub_preserves_advanced_remote_head(tmp):
     out, tip, advanced = run_hub_merge(tmp, advance=True)
     if not out["merge_ok"] or tip != advanced or "Remote head delete failed" not in out["merge_output"]:
         fail(case, f"expected remote {advanced}, got {tip!r}: {out!r}")
+    print(f"ok {case}")
+
+
+def case_hub_push_target_matches_pr(tmp):
+    case = "hub_push_target_matches_pr"
+    out, tip, merged = run_hub_merge(tmp, pr_repo="upstream/r")
+    if not out["merge_ok"] or tip != merged or "Remote head kept" not in out["merge_output"]:
+        fail(case, f"origin's fork ref should stay when gh merges upstream: {out!r}, tip={tip}")
+    out, tip, merged = run_hub_merge(tmp, redirect_push=True)
+    if not out["merge_ok"] or tip != merged or "Remote head kept" not in out["merge_output"]:
+        fail(case, f"the mirror ref should stay when pushInsteadOf redirects origin: {out!r}, tip={tip}")
+    out, tip, _ = run_hub_merge(tmp, push_url="git@github.com:o/r.git")
+    if not out["merge_ok"] or tip:
+        fail(case, f"the same repository's configured SSH pushurl should be used: {out!r}, tip={tip}")
     print(f"ok {case}")
 
 
@@ -343,7 +368,7 @@ esac
                 fail(case, f"the remote changed after CI but merge or cleanup proceeded: {out!r}, {calls!r}")
         elif not out["merge_ok"] or worktree.exists() or branch_exists(repo):
             fail(case, f"matching head should merge and clean up: {out!r}, {calls!r}")
-        if calls[0] != f"pr merge 1 --squash --match-head-commit {reviewed} --repo github.com/o/r":
+        if calls[0] != f"pr merge 1 --squash --match-head-commit {reviewed}":
             fail(case, f"the reviewed SHA did not reach the merge command: {calls!r}")
     print("ok merge matches the reviewed head and preserves recovery when it moves")
 
@@ -636,6 +661,7 @@ def main():
         case_worktree_holding_branch(tmp)
         case_base_checkout_fails(tmp)
         case_hub_preserves_advanced_remote_head(tmp)
+        case_hub_push_target_matches_pr(tmp)
         case_hub_remote_delete_when(tmp)
         case_hub_merge_queue_is_not_merged(tmp)
         case_merge_matches_reviewed_head(tmp)
