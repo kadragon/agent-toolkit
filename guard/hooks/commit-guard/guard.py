@@ -2337,13 +2337,16 @@ def _test():
     check("a function body takes no branch from where it is defined → blocked",
           on_main("git checkout -b feat; f() { git commit -m '[FIX] x'; }; git checkout main; f") == 2)
 
+    # The branch override receives a native absolute path after cd.
+    other_cwd = os.path.abspath("/other")
+
     # third review: a case arm or function definition changes no cwd
     check("a cd in a function never called moves no cwd → blocked",
           run("f() { cd /other; }; git commit -m '[FIX] x'",
-              branch=lambda cwd: "feature/y" if cwd == "/other" else "main") == 2)
+              branch=lambda cwd: "feature/y" if cwd == other_cwd else "main") == 2)
     check("a cd in a case arm that may not match moves no cwd → blocked",
           run("case x in y) cd /other;; esac; git commit -m '[FIX] x'",
-              branch=lambda cwd: "feature/y" if cwd == "/other" else "main") == 2)
+              branch=lambda cwd: "feature/y" if cwd == other_cwd else "main") == 2)
     check("an empty one-line case closes, so '|' still pipes → blocked",
           on_main("case x in esac; echo x | git commit -m wip") == 2)
     check("a long run of reserved words does not overflow the scanner → blocked",
@@ -2395,27 +2398,27 @@ def _test():
     check("a quoted '$x' before git is text → passes", run("'$x'git commit -m wip") == 0)
     check("a cd behind an expansion may run: both cwds are checked → blocked",
           run("$x cd /other && git commit -m '[FIX] x'",
-              branch=lambda cwd: "main" if cwd == "/other" else "feature/y") == 2)
+              branch=lambda cwd: "main" if cwd == other_cwd else "feature/y") == 2)
     check("a cd behind an expansion may not run: both cwds are checked → blocked",
           run("$x cd /other && git commit -m '[FIX] x'",
-              branch=lambda cwd: "feature/y" if cwd == "/other" else "main") == 2)
+              branch=lambda cwd: "feature/y" if cwd == other_cwd else "main") == 2)
     check("'$( (true) )' may be empty: the command is git → blocked",
           on_main("$( (true) )git commit -m wip") == 2)
     check("a later cd in a function body moves no cwd → blocked",
           run("f() { true; cd /other; }; git commit -m '[FIX] x'",
-              branch=lambda cwd: "feature/y" if cwd == "/other" else "main") == 2)
+              branch=lambda cwd: "feature/y" if cwd == other_cwd else "main") == 2)
     check("a cd in a multi-line function body moves no cwd → blocked",
           run("f() {\n  cd /other\n}\ngit commit -m '[FIX] x'",
-              branch=lambda cwd: "feature/y" if cwd == "/other" else "main") == 2)
+              branch=lambda cwd: "feature/y" if cwd == other_cwd else "main") == 2)
     check("a later cd in a case arm moves no cwd → blocked",
           run("case x in y) true; cd /other;; esac; git commit -m '[FIX] x'",
-              branch=lambda cwd: "feature/y" if cwd == "/other" else "main") == 2)
+              branch=lambda cwd: "feature/y" if cwd == other_cwd else "main") == 2)
     check("a case arm that runs its cd is checked in both cwds → blocked",
           run("case x in x) cd /other;; esac; git commit -m '[FIX] x'",
-              branch=lambda cwd: "main" if cwd == "/other" else "feature/y") == 2)
+              branch=lambda cwd: "main" if cwd == other_cwd else "feature/y") == 2)
     check("a cd after a function body still moves the cwd → passes",
           run("f() { true; }; cd /other; git commit -m '[FIX] x'",
-              branch=lambda cwd: "feature/y" if cwd == "/other" else "main") == 0)
+              branch=lambda cwd: "feature/y" if cwd == other_cwd else "main") == 0)
     check("an expansion before git on the shlex path with differing word counts → blocked",
           on_main("$x git commit -m\"$(cat <<'EOF'\nit's\nEOF\n)\"") == 2)
     check("'x=$(true)git' is one assignment; the command is 'commit' → passes",
@@ -2473,9 +2476,10 @@ def _test():
         check(f"a case arm running {arm!r} drops the chain's branch → blocked",
               on_main(f"git checkout -b feat && case a in a) {arm};; esac && git commit -m '[FIX] x'")
               == 2)
+    heredoc_cd_cwd = os.path.abspath("/x")
     check("a heredoc body's commit runs in the cwd before a later cd → blocked",
           run("cat <<EOF && cd /x\n$(git commit -m '[FIX] y')\nEOF",
-              branch=lambda cwd: "feature/y" if cwd == "/x" else "main") == 2)
+              branch=lambda cwd: "feature/y" if cwd == heredoc_cd_cwd else "main") == 2)
     check("a nested escaped backtick in a quoted backtick runs → blocked",
           on_main('echo "`echo \\`git commit -m wip\\``"') == 2)
     check("a nested escaped backtick in a heredoc body runs → blocked",
