@@ -297,9 +297,12 @@ case "$SUBCOMMAND" in
     PR_NUMBER="${1:?Usage: hub.sh ci-logs <pr_number>}"
     if [ "$HUB_TYPE" = "github" ]; then
       SNAPSHOT=$(github_ci_snapshot "$PR_NUMBER")
-      FAILED_CHECKS=$(jq -c 'if (.oids | length) == 1 then [.checks[] | select(.bucket == "fail")]
-                            else [] end' <<<"$SNAPSHOT")
-      if [ "$FAILED_CHECKS" = "[]" ] || [ -z "$FAILED_CHECKS" ]; then
+      if [ "$(jq '.oids | length' <<<"$SNAPSHOT")" -gt 1 ]; then
+        echo '{"failed_checks": [], "count": 0, "logs_available": false, "message": "PR head changed while fetching checks; retry."}'
+        exit 0
+      fi
+      FAILED_CHECKS=$(jq -c '[.checks[] | select(.bucket == "fail")]' <<<"$SNAPSHOT")
+      if [ "$FAILED_CHECKS" = "[]" ]; then
         echo '{"failed_checks": [], "count": 0, "logs_available": true, "message": "No failed checks found"}'
         exit 0
       fi
@@ -308,11 +311,15 @@ case "$SUBCOMMAND" in
         NAME=$(jq -r '.name' <<<"$check")
         LINK=$(jq -r '.link // empty' <<<"$check")
         CHECK_STATE=$(jq -r '.state' <<<"$check")
-        RUN_ID=$(printf '%s' "$LINK" | grep -oE '/runs/[0-9]+' | grep -oE '[0-9]+' | head -1 || true)
+        RUN_ID=$(jq -r --arg prefix "https://github.com/${OWNER_REPO}/actions/runs/" '
+          (.link // "" | ascii_downcase)
+          | select(startswith($prefix | ascii_downcase))
+          | ltrimstr($prefix | ascii_downcase)
+          | capture("^(?<id>[0-9]+)([/?#]|$)").id' <<<"$check")
         LOGS=""
         if [ -n "$RUN_ID" ]; then
           # Limit to last 200 lines per job to avoid context/memory overflow
-          LOGS=$(gh run view "$RUN_ID" --log-failed 2>&1 | tail -200 || echo "Failed to fetch logs for run $RUN_ID")
+          LOGS=$(gh run view "$RUN_ID" --repo "$OWNER_REPO" --log-failed 2>&1 | tail -200 || echo "Failed to fetch logs for run $RUN_ID")
         else
           LOGS="Could not extract run ID from link: $LINK"
         fi

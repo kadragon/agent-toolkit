@@ -500,6 +500,7 @@ def main() -> int:
             '    done\n'
             '    [ -n "${GH_VIEW:-}" ] || exit 1\n'
             '    printf \'%s\' "$GH_VIEW"; exit 0 ;;\n'
+            '  "run view") echo "Actions job log"; exit 0 ;;\n'
             '  "pr view") echo "' + "b" * 40 + '"; exit 0 ;;\n'
             "  \"pr checks\") echo '[{\"bucket\": \"fail\"}]'; exit 1 ;;\n"
             "esac\n"
@@ -581,6 +582,21 @@ def main() -> int:
               logs.get("count") == 1 and logs["failed_checks"][0].get("state") == "FAILURE"
               and "https://example.test/checks/first" in logs["failed_checks"][0].get("logs", ""),
               f"got {logs}")
+        failure = run_ctx("FAILURE")
+        logs = hub_output(None, pages=[page([failure]), page([], oid="c" * 40)], command="ci-logs")
+        check("failure diagnostics report that a moving head requires a retry",
+              logs.get("logs_available") is False and "retry" in logs.get("message", ""), f"got {logs}")
+        external = {"__typename": "StatusContext", "context": "external", "state": "ERROR",
+                    "link": "https://external.test/runs/123"}
+        logs = hub_output([external], command="ci-logs")
+        check("a third-party run link is reported without fetching unrelated Actions logs",
+              logs.get("count") == 1 and "https://external.test/runs/123" in logs["failed_checks"][0]["logs"]
+              and "Actions job log" not in logs["failed_checks"][0]["logs"], f"got {logs}")
+        failure["link"] = "https://github.com/O/r/actions/runs/123/job/456"
+        logs = hub_output([failure], command="ci-logs")
+        check("a GitHub Actions link in the target repository still fetches its log",
+              logs.get("count") == 1 and logs["failed_checks"][0].get("run_id") == "123"
+              and logs["failed_checks"][0].get("logs") == "Actions job log", f"got {logs}")
         status = hub_output(None, pages=[page([run_ctx("SUCCESS")]),
                                          page([run_ctx("FAILURE", name="lint")])])
         check("older gh reports the head and includes a failure on a later page",
