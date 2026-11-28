@@ -1422,24 +1422,25 @@ def wait(args):
     pending = list(dict.fromkeys(Path(receipt).resolve() for receipt in args.runs))
     deadline = time.monotonic() + args.timeout
     previous = {}
+    progress = sys.stderr if args.first else sys.stdout
     try:
         while pending:
             next_pending = []
             working = None
             for path in pending:
                 report = collect_result(path, False, False, args.stall_minutes, warn_drift=False, deadline=deadline)
-                if not reached_outcome(report, args.until):
+                outcome = reached_outcome(report, args.until)
+                line = brief_report(report)
+                if args.first and outcome:
+                    print(f"{path} · {line}", flush=True)
+                    return
+                if previous.get(path) != line:
+                    print(line, file=progress, flush=True)
+                    previous[path] = line
+                if not outcome:
                     next_pending.append(path)
                     if working is None and report["state"] == "live" and report["status"] == "working":
                         working = report["address"]
-                    if args.first:
-                        continue
-                line = brief_report(report)
-                if previous.get(path) != line:
-                    print(line, flush=True)
-                    previous[path] = line
-                if args.first:
-                    return
             pending = next_pending
             if not pending:
                 return

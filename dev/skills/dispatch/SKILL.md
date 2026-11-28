@@ -187,9 +187,10 @@ More than one session:
 Tell the user each terminal's name, address and repo. Watch in the background and keep context small:
 
 - After confirming task delivery to every new child, watch in the background. For multiple
-  children, run `dispatch.py wait --first <receipt>...`. It prints the first receipt observed at a
-  selected outcome and returns. Handle that outcome, then restart the watch with the remaining
-  receipts. For one child, run `dispatch.py wait <receipt>` to also see initial status and changes.
+  children, run `dispatch.py wait --first <receipt>...`. It prints progress on stderr and returns
+  as soon as it prints a selected outcome on stdout, with the matching receipt's absolute path.
+  Handle that outcome, then watch the other receipts. Include the reported receipt again if you
+  continue that child into a new phase. For one child, run `dispatch.py wait <receipt>`.
   For task completion, use `--until ready,blocked,done,merged,stop` to wait through ordinary idle
   states. The default timeout is 1800 seconds. Keep it under the prompt-cache lifetime.
 - `dispatch.py collect <receipt> --brief` prints the same one-line status on demand. Use full

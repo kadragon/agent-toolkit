@@ -1775,16 +1775,21 @@ class DispatchWatchTests(unittest.TestCase):
         ready = {**idle, "address": "t8", "status": "done", "result": {"status": "ready", "pr": "#10"}}
         reports = [idle, ready, {**ready, "address": "t9"}, {**ready, "address": "t7"}]
         with TextIOWrapper(BytesIO(), encoding="utf-8") as output, redirect_stdout(output), \
+             TextIOWrapper(BytesIO(), encoding="utf-8") as progress, redirect_stderr(progress), \
              patch("dispatch.collect_result", side_effect=reports) as probe, \
              patch("dispatch.hc_rpc") as hc, patch("dispatch.time.sleep") as sleep:
             main(["wait", "--first", "--until", "ready", "a.json", "b.json", "c.json"])
             output.seek(0)
             printed = output.read()
+            progress.seek(0)
+            statuses = progress.read()
         self.assertEqual([invocation.args[0].name for invocation in probe.call_args_list], ["a.json", "b.json"])
         hc.assert_not_called()
         sleep.assert_not_called()
-        self.assertEqual(printed, "t8 · ready · - · - · #10 · -\n")
+        self.assertEqual(printed, f"{Path('b.json').resolve()} · t8 · ready · - · - · #10 · -\n")
+        self.assertEqual(statuses, "t7 · idle · - · - · - · -\n")
 
+    def test_wait_requires_all_receipts_and_a_stopped_terminal_for_done(self):
         working = {"address": "t7", "status": "working", "state": "live", "stop_reason": None,
                    "result": {"status": "done", "phase": "implement", "summary": "phase complete"}}
         stopped = {**working, "status": "done"}
