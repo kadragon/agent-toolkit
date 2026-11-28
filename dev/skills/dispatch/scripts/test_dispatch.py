@@ -25,11 +25,13 @@ from dispatch import (
     codex_screen,
     collect,
     composer_draft,
+    filtered_transcript,
     first_prompt,
     free_name,
     launch,
     lock_run,
     main,
+    peek,
     pick,
     prepare_codex,
     release,
@@ -38,6 +40,7 @@ from dispatch import (
     send,
     terminal_name,
     transcript_echoed,
+    transcript_offset,
     verify_delivery_turn,
     verify_pinned_delivery,
     verify_terminal,
@@ -1619,8 +1622,11 @@ class SharedCodexPreparationTests(unittest.TestCase):
                          "name": "dispatch-warmup-00112233", "created_ms": 2000}
         self.events = []
         self.screen = "  Hooks need review"
+        self.screen_updates = []
+        self.native_refresh = False
         self.guard_enabled = True
         self.fail_close_get = False
+        self.enterContext(patch("dispatch.WARMUP_SETTLE_SECONDS", 0))
         self.enterContext(patch("dispatch.secrets.token_hex", return_value="00112233"))
         self.enterContext(patch("dispatch.time.time_ns", return_value=2_000_000_000))
 
@@ -1657,6 +1663,10 @@ class SharedCodexPreparationTests(unittest.TestCase):
         self.assertTrue(kwargs["experimental"])
         version = next(self.cache.iterdir()).name
         self.events.append(f"hooks {version}")
+        if self.native_refresh and version == "1.0.0":
+            self.install("1.1.0", "new guard")
+            shutil.rmtree(self.cache / version)
+            raise ValueError("native inventory raced the old cache")
         hook = {"pluginId": "guard@kadragon", "source": "plugin", "key": "hook-key", "enabled": self.guard_enabled,
                 "eventName": "preToolUse", "matcher": "Bash", "command": "python guard.py",
                 "sourcePath": str(self.cache / version / "hooks.json"),
@@ -1681,7 +1691,8 @@ class SharedCodexPreparationTests(unittest.TestCase):
                 raise subprocess.TimeoutExpired(["hc", "get"], 10)
             return self.terminal
         if command == "read":
-            return {"text": self.screen, "how": "screen", "complete": True}
+            text = self.screen_updates.pop(0) if self.screen_updates else self.screen
+            return {"text": text, "how": "screen", "complete": True}
         self.events.append(f"hc {command}")
         if command == "kill":
             self.terminal["state"] = "finished"
@@ -1723,6 +1734,16 @@ class SharedCodexPreparationTests(unittest.TestCase):
         self.assertEqual(report["hook_content_diffs"]["guard"],
                          {"reason": "no locally recorded trusted hook contents"})
 
+    def test_native_refresh_reports_changed_versions_and_the_baseline_gap(self):
+        self.install("1.0.0", "trusted guard")
+        self.native_refresh = True
+        report = self.prepare("1.1.0")
+        self.assertTrue(report["upgraded"])
+        self.assertEqual(report["before"], {"guard": "1.0.0"})
+        self.assertEqual(report["hook_content_diffs"]["guard"],
+                         {"reason": "no locally recorded trusted hook contents"})
+        self.assertEqual(self.events, ["git fetch", "hooks 1.0.0", "hc run", "hc kill", "hc rm", "hooks 1.1.0"])
+
     def test_preparation_refuses_a_disabled_guard(self):
         self.install("1.1.0", "new guard")
         self.guard_enabled = False
@@ -1733,9 +1754,10 @@ class SharedCodexPreparationTests(unittest.TestCase):
 
     def test_preparation_refuses_a_failed_startup_hook_and_closes_the_child(self):
         self.install("1.1.0", "new guard")
-        self.screen = "• Hook failed\n  └ SessionStart command exited 1"
+        self.screen_updates = ["  Hooks need review", "• Hook failed\n  └ SessionStart command exited 1"]
         self.fail_close_get = True
-        with self.assertRaisesRegex(SystemExit, "warm-up startup hook failed"):
+        with (patch("dispatch.WARMUP_SETTLE_SECONDS", 2), patch("dispatch.time.sleep"),
+              self.assertRaisesRegex(SystemExit, "warm-up startup hook failed")):
             self.prepare("1.1.0")
         self.assertEqual(self.events[-2:], ["hc kill", "hc rm"])
         self.assertFalse(self.fail_close_get)
@@ -2166,6 +2188,163 @@ class WorkflowDocsTests(unittest.TestCase):
         for doc in docs:
             with self.subTest(doc=doc.name):
                 self.assertIsNone(re.search(r"gpt-\d", doc.read_text(encoding="utf-8"), re.IGNORECASE))
+
+
+class PeekTests(unittest.TestCase):
+    def test_codex_capture_keeps_work_and_followup(self):
+        screen = """
+  >_ OpenAI Codex (v0.172.0)
+     ~/Dev/agent-toolkit
+
+  Tip: Use /hooks to view and manage lifecycle hooks.
+
+› <hc from="t2t">$task-next --tree #512
+  Dispatch mode: parallel-worktree
+
+  Handoff metadata (JSON):
+  <dispatch-handoff>
+  {"Assigned unit": "issue #512"}
+  </dispatch-handoff>
+
+  Write progress at phase boundaries.
+
+• Ran git status --short --branch
+  └ ## main...origin/main [behind 60]
+
+› Continue to review
+
+• Checking evidence.
+
+› Ask Codex to do anything
+
+  GPT-6.2-Sol medium · ~/Dev/agent-toolkit · main · Context 10% used · weekly 45% left
+  ← for agents · ? for shortcuts
+"""
+        self.assertEqual(filtered_transcript(screen, "codex"), [
+            "• Ran git status --short --branch", "  └ ## main...origin/main [behind 60]",
+            "", "› Continue to review", "", "• Checking evidence.",
+        ])
+
+    def test_claude_capture_keeps_response(self):
+        screen = """
+ ▐▛███▛█   Claude Code v2.1.332
+▝▜██████▀  Opus 5.5 · Claude Team
+ ▝▝   ▝▝   /tmp/claude-fixture
+
+⚠ Code Mode (experimental) is on · this session can be resumed only with Code Mode on
+
+❯ Reply with the exact sentence: Fixture response.
+
+  Handoff metadata (JSON):
+  <dispatch-handoff>
+  {"Assigned unit": "fixture"}
+  </dispatch-handoff>
+
+● Fixture response.
+
+✻ Sautéed for 1s · done 오전 9:26
+
+                                                    [-]
+[Opus 5.5 ◔ medium] │ claude-fixture
+Context 3% │ 5h: 21% (1h 43m) │ 7d: 59% (4d 4h) │ cache 59m
+                                    ◐ medium · /effort
+───────────────────────────────────────────────────────
+❯
+───────────────────────────────────────────────────────
+
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+"""
+        self.assertEqual(filtered_transcript(screen, "claude"), [
+            "⚠ Code Mode (experimental) is on · this session can be resumed only with Code Mode on",
+            "", "● Fixture response.", "", "✻ Sautéed for 1s · done 오전 9:26",
+        ])
+
+    def test_hidden_codex_composer_preserves_indented_work(self):
+        screen = "› a task\n\n  • Completed\n\n  GPT-6.2-Sol medium · main\n  ← for agents · ? for shortcuts"
+        self.assertEqual(filtered_transcript(screen, "codex"), ["› a task", "", "  • Completed"])
+
+    def test_cropped_dispatch_echo_is_removed(self):
+        screen = '    "Assigned unit": "issue #512"\n  }\n  </dispatch-handoff>\n'
+        screen += "\n  Write progress at phase boundaries.\n\n• Checking evidence."
+        self.assertEqual(filtered_transcript(screen, "codex"), ["• Checking evidence."])
+
+    def test_handoff_filter_preserves_indented_claude_error(self):
+        screen = ("❯ /dev:task-next\n\n  Handoff metadata (JSON):\n  <dispatch-handoff>\n"
+                  "  {}\n  </dispatch-handoff>\n  ⎿  API Error: Usage Policy")
+        self.assertEqual(filtered_transcript(screen, "claude"), ["  ⎿  API Error: Usage Policy"])
+
+    def test_handoff_filter_preserves_indented_codex_hook_notice(self):
+        screen = ("› $task-next #512\n\n  Handoff metadata (JSON):\n  <dispatch-handoff>\n"
+                  "  {}\n  </dispatch-handoff>\n  Hooks need review")
+        self.assertEqual(filtered_transcript(screen, "codex"), ["  Hooks need review"])
+
+    def test_alternative_claude_status_and_codex_working_timer(self):
+        rule = "─" * 30
+        claude = f"● Fixture response.\n\n~/repo · main · 12%\n{rule}\n❯\n{rule}"
+        codex = "• Checking evidence.\n\nWorking (1m 59s • esc to interrupt)\n\n› Ask Codex to do anything"
+        self.assertEqual(filtered_transcript(claude, "claude"), ["● Fixture response."])
+        self.assertEqual(filtered_transcript(codex, "codex"), ["• Checking evidence."])
+
+    def test_progress_timers_do_not_move_the_cursor(self):
+        for seconds in (41, 42):
+            claude = f"● Checking evidence.\n\n✻ Thinking… ({seconds}s · ↑ 50 tokens)\n  ⎿  ☐ Run tests"
+            codex = f"• Checking evidence.\n\n◦ Exploring repository ({seconds}s • esc to interrupt)"
+            self.assertEqual(filtered_transcript(claude, "claude"), ["● Checking evidence.", "", "  ⎿  ☐ Run tests"])
+            self.assertEqual(filtered_transcript(codex, "codex"), ["• Checking evidence."])
+
+    def test_peek_cursor_survives_history_rollover_and_keeps_receipt_fields(self):
+        terminal = {"address": "t7", "parent": "t1", "created_ms": 42}
+        receipt = {**terminal, "cli": "codex", "sent": True}
+        screens = iter(("• Old\n• Retained", "• Retained\n• New", "• Retained\n• New"))
+
+        def hc(command, *_args, **_kwargs):
+            return terminal if command == "get" else {"text": next(screens), "how": "history", "complete": False}
+
+        with tempfile.TemporaryDirectory() as directory, patch("dispatch.hc_json", side_effect=hc):
+            path = Path(directory) / "run.json"
+            write_json(path, receipt)
+            for since_last, expected in ((False, "• Old\n• Retained\n"), (True, "• New\n"), (True, "")):
+                with redirect_stdout(StringIO()) as output:
+                    peek(SimpleNamespace(run=str(path), since_last=since_last))
+                self.assertEqual(output.getvalue(), expected)
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual({key: saved[key] for key in receipt}, receipt)
+            self.assertEqual(len(saved["peek_cursor"]), 2)
+            self.assertNotIn("• New", json.dumps(saved, ensure_ascii=False))
+
+    def test_peek_rejects_recycled_terminal_without_updating_cursor(self):
+        receipt = {"address": "t7", "parent": "t1", "created_ms": 42, "cli": "codex"}
+        responses = [receipt, {"text": "unrelated"}, {**receipt, "created_ms": 43}]
+        with tempfile.TemporaryDirectory() as directory, patch("dispatch.hc_json", side_effect=responses):
+            path = Path(directory) / "run.json"
+            write_json(path, receipt)
+            with self.assertRaisesRegex(SystemExit, "terminal identity changed"), redirect_stdout(StringIO()) as output:
+                peek(SimpleNamespace(run=str(path), since_last=True))
+            self.assertEqual(output.getvalue(), "")
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), receipt)
+
+    def test_peek_leaves_receipt_unlocked_during_read(self):
+        receipt = {"address": "t7", "parent": "t1", "created_ms": 42, "cli": "codex", "sent": False}
+
+        def hc(command, *_args, **_kwargs):
+            if command == "get":
+                return receipt
+            with lock_run(path):
+                write_json(path, {**receipt, "sent": True})
+            return {"text": "• Started"}
+
+        with tempfile.TemporaryDirectory() as directory, patch("dispatch.hc_json", side_effect=hc):
+            path = Path(directory) / "run.json"
+            write_json(path, receipt)
+            with redirect_stdout(StringIO()) as output:
+                peek(SimpleNamespace(run=str(path), since_last=True))
+            self.assertEqual(output.getvalue(), "• Started\n")
+            self.assertTrue(json.loads(path.read_text(encoding="utf-8"))["sent"])
+
+    def test_streamed_line_redraw_and_no_overlap(self):
+        self.assertEqual(transcript_offset(["ready", "stream"], ["ready", "streamed", "next"]), 1)
+        self.assertEqual(transcript_offset(["old", "ready", "stream"], ["ready", "streamed", "next"]), 1)
+        self.assertEqual(transcript_offset(["irrelevant"], ["new"]), 0)
 
 
 class CodexSendTests(DispatchTestCase):

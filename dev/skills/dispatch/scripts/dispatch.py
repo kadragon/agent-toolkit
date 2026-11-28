@@ -17,6 +17,8 @@
       $CODEX_HOME/models_cache.json; a full slug passes through. fable and astra are refused.
   dispatch.py send [--run RECEIPT] [--continue | --resend] ADDRESS MESSAGE
       Send to a clear Codex composer. A receipt allows startup, phase reuse, or recovery.
+  dispatch.py peek RECEIPT [--since-last]
+      Print the filtered transcript tail. Every successful peek updates the receipt cursor.
   dispatch.py report-review RESULT
       Read a Codex pre-merge report from stdin and atomically write ready or blocked.
   dispatch.py collect RECEIPT [--stall-minutes N] [--close [--force]]
@@ -34,6 +36,7 @@
 """
 import argparse
 import errno
+import hashlib
 import json
 import os
 import re
@@ -92,6 +95,8 @@ CODEX_STATUS_LINE = re.compile(
 )
 CODEX_SHORTCUT_LINE = re.compile(r"^ {2,}(?:← for agents · )?\? for shortcuts\b", re.IGNORECASE)
 CODEX_OUTPUT_MARKERS = ("•", "■", "─ Worked for")
+CODEX_PROGRESS = re.compile(r"^\s*(?:[•◦] )?.+ \(\d[\d hms]* • esc to interrupt\)(?:\s.*)?$")
+CLAUDE_PROGRESS = re.compile(r"^[✢✳✶✻✽] .+… \(\d[\d hms]*(?: · [^)]*)?\)$")
 USAGE_NOTICE = re.compile(
     r"(?:you(?:'ve|’ve| have)? (?:hit|reached) (?:your|the) (?:chatgpt )?(?:usage )?limit\b|"
     r"(?:(?:individual )?quota|usage limit|rate limit) (?:reached|exceeded)\b)", re.IGNORECASE)
@@ -106,6 +111,8 @@ SCREEN_POLL_SECONDS = 0.25
 POST_SEND_SETTLE_SECONDS = 2
 CLOSE_WAIT_SECONDS = 10
 LAUNCH_LOOKUP_SECONDS = 30
+WARMUP_SETTLE_SECONDS = 2
+MARKETPLACE_UPGRADE_SECONDS = 180
 DRAFT_CLEARS = 5
 DRAFT_CLEAR_SETTLE_SECONDS = 1
 LOST_SETTLE_SECONDS = 2
@@ -750,6 +757,7 @@ def warmup_codex(binary, cwd, parent, label):
         terminal = hc_json("get", address, timeout=LAUNCH_LOOKUP_SECONDS)
         verify_terminal(run, terminal)
         deadline = time.monotonic() + LAUNCH_LOOKUP_SECONDS
+        settled_after = None
         while (remaining := deadline - time.monotonic()) > 0:
             screen = hc_json("read", "--lines", "0", address, timeout=remaining)
             if screen["complete"] and screen["how"] == "screen":
@@ -759,7 +767,15 @@ def warmup_codex(binary, cwd, parent, label):
                 if failure:
                     raise ValueError(f"warm-up startup hook failed: {failure}")
                 if codex_screen(content) in {"ready", "warning", "hooks"}:
-                    return
+                    now = time.monotonic()
+                    if settled_after is None:
+                        settled_after = now + WARMUP_SETTLE_SECONDS
+                    if now >= settled_after:
+                        return
+                else:
+                    settled_after = None
+            else:
+                settled_after = None
             terminal = hc_json("get", address, timeout=max(0.01, deadline - time.monotonic()))
             verify_terminal(run, terminal)
             if terminal["state"] == "finished":
@@ -803,10 +819,9 @@ def prepare_codex(args):
             baseline.update({name: info for name, info in old_hooks.items() if info["trusted"]})
             write_json(baseline_path, baseline)
             current = installed_plugin_versions()
-            upgrade = any(current.get(name) != version for name, version in expected.items())
-            if upgrade:
+            if any(current.get(name) != version for name, version in expected.items()):
                 shared_codex.command([binary, "plugin", "marketplace", "upgrade", shared_codex.MARKET],
-                                     cwd=cwd, timeout=None)
+                                     cwd=cwd, timeout=MARKETPLACE_UPGRADE_SECONDS)
             warmup_codex(binary, cwd, parent, label)
             installed = installed_plugin_versions()
             if any(installed.get(name) != version for name, version in expected.items()):
@@ -820,7 +835,7 @@ def prepare_codex(args):
             write_json(home / "dispatch-prepared-cache.json", {"repo": str(repo), "versions": installed})
     except (OSError, ValueError, KeyError, TypeError, pinned_wave.PinError, subprocess.SubprocessError) as error:
         raise SystemExit(f"cannot prepare shared-cache Codex: {error}") from None
-    print(json.dumps({"before": before, "expected": expected, "installed": installed, "upgraded": upgrade,
+    print(json.dumps({"before": before, "expected": expected, "installed": installed, "upgraded": before != installed,
                       "pending_hooks": pending, "hook_content_diffs": diffs}, ensure_ascii=False))
 
 
@@ -1161,6 +1176,138 @@ def print_screen_tail(address, text, run):
         for row in rows:
             trimmed = row[:160] + "…" if len(row) > 160 else row
             print(f"  {trimmed!r}", file=sys.stderr)
+
+
+def transcript_end(lines, cli):
+    if cli == "codex":
+        footer = footer_boundary(lines, -1)
+        for index in reversed(range(len(lines))):
+            row = lines[index]
+            if row.lstrip().startswith(CODEX_OUTPUT_MARKERS) or row.startswith("  ›"):
+                break
+            if row.startswith("›"):
+                placeholder = row[1:].strip() == "Ask Codex to do anything"
+                if (footer_boundary(lines, index, placeholder=placeholder) is not None
+                        or (placeholder and index == len(lines) - 1)):
+                    return index
+                break
+        return footer if footer is not None else len(lines)
+    elif cli == "claude":
+        rules = [index for index, row in enumerate(lines) if re.fullmatch(r"─{10,}", row)]
+        if len(rules) >= 2:
+            top, bottom = rules[-2:]
+            if top + 1 < bottom and lines[top + 1].startswith("❯"):
+                start = top
+                if start and re.fullmatch(r"\s+\S+ \w+ · /effort", lines[start - 1]):
+                    start -= 1
+                if start >= 2 and lines[start - 1].startswith("Context ") and lines[start - 2].startswith("["):
+                    start -= 2
+                    if start and lines[start - 1].strip() in {"[-]", "[+]"}:
+                        start -= 1
+                elif (start and (start == 1 or not lines[start - 2])
+                      and re.match(r"^\s*(?:~|…|[A-Za-z]:)?[/\\]\S.* [·│].* \d+%", lines[start - 1])):
+                    start -= 1
+                return start
+    return len(lines)
+
+
+def prompt_block_end(lines, start, cli):
+    end = start + 1
+    while end < len(lines) and (not lines[end] or lines[end].startswith("  ")):
+        row = lines[end].lstrip()
+        if row.startswith("⎿" if cli == "claude" else "└") or HOOK_BLOCKER.match(row):
+            break
+        if cli == "codex" and not lines[end - 1] and row.startswith(CODEX_OUTPUT_MARKERS):
+            break
+        end += 1
+    return end
+
+
+def filtered_transcript(text, cli):
+    lines = [line.rstrip() for line in text.rstrip().splitlines()]
+    lines = lines[:transcript_end(lines, cli)]
+    filtered = []
+    index = 0
+    first = next((i for i, row in enumerate(lines) if row), len(lines))
+    if first < len(lines) and lines[first].startswith("  "):
+        end = prompt_block_end(lines, first, cli)
+        if any(line.strip() in {"<dispatch-handoff>", "</dispatch-handoff>"}
+               or line.strip().startswith("Write progress at phase boundaries and the final report as UTF-8 JSON to ")
+               for line in lines[first:end]):
+            index = end
+    progress = CODEX_PROGRESS if cli == "codex" else CLAUDE_PROGRESS
+    while index < len(lines):
+        row = lines[index]
+        if progress.fullmatch(row):
+            index += 1
+            continue
+        if cli == "codex" and not filtered and re.match(r"^\s*[╭│]?\s*>_ OpenAI Codex \(v", row):
+            index += 1
+            while index < len(lines) and lines[index].lstrip().startswith(("│", "╰")):
+                index += 1
+            if index < len(lines) and lines[index].startswith("     "):
+                index += 1
+            continue
+        if cli == "codex" and not filtered and row.startswith("  Tip:"):
+            index += 1
+            while index < len(lines) and lines[index].startswith("  "):
+                index += 1
+            continue
+        if cli == "claude" and not filtered and re.match(r"^\s*▐▛███▛█\s+Claude Code v", row):
+            index += 1
+            while index < len(lines) and lines[index].lstrip().startswith(("▝▜", "▝▝")):
+                index += 1
+            continue
+        if row.startswith("›" if cli == "codex" else "❯"):
+            end = prompt_block_end(lines, index, cli)
+            block = lines[index:end]
+            if (any(line.strip() == "<dispatch-handoff>" for line in block)
+                    and any(line.strip() == "Handoff metadata (JSON):" for line in block)):
+                index = end
+                continue
+        if row or (filtered and filtered[-1]):
+            filtered.append(row)
+        index += 1
+    if filtered and not filtered[-1]:
+        filtered.pop()
+    return filtered
+
+
+def transcript_offset(previous, current):
+    for size in range(min(len(previous), len(current)), 0, -1):
+        prefix = current[:size]
+        if previous[-size:] == prefix or previous[-size - 1:-1] == prefix:
+            return size
+    for index, (before, after) in enumerate(zip(previous, current)):
+        if before != after:
+            return index
+    return min(len(previous), len(current))
+
+
+def peek(args):
+    path = Path(args.run).resolve()
+    run = load_run(path)
+    address = run["address"]
+    previous = run.get("peek_cursor", [])
+    try:
+        verify_terminal(run, hc_json("get", address, timeout=LAUNCH_LOOKUP_SECONDS))
+        snapshot = hc_json("read", "--lines", "120", address, timeout=LAUNCH_LOOKUP_SECONDS)
+        terminal = hc_json("get", address, timeout=LAUNCH_LOOKUP_SECONDS)
+        verify_terminal(run, terminal)
+        lines = filtered_transcript(snapshot["text"], run["cli"])
+        row_fingerprints = [hashlib.sha256(row.encode("utf-8")).hexdigest() for row in lines]
+        start = transcript_offset(previous, row_fingerprints) if args.since_last else 0
+        with lock_run(path):
+            saved = load_run(path)
+            verify_terminal(saved, terminal)
+            if saved.get("closed_reason") != run.get("closed_reason") or saved.get("peek_cursor", []) != previous:
+                raise SystemExit(f"{address}: receipt changed during peek; try again")
+            saved["peek_cursor"] = row_fingerprints
+            write_json(path, saved)
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        raise SystemExit(f"{address}: could not peek at the terminal ({error})") from None
+    if new_lines := lines[start:]:
+        print("\n".join(new_lines).lstrip("\n"))
 
 
 def startup_composer(text, *, draft=False):
@@ -2081,6 +2228,10 @@ def main(argv):
     delivery.add_argument("--continue", dest="continuation", action="store_true")
     delivery.add_argument("--resend", action="store_true", help="retry an unconfirmed delivery to a clear idle composer")
     send_parser.set_defaults(func=send)
+    peek_parser = sub.add_parser("peek", help="print the filtered child transcript")
+    peek_parser.add_argument("run")
+    peek_parser.add_argument("--since-last", action="store_true", help="print only rows new since the preceding peek")
+    peek_parser.set_defaults(func=peek)
     report_parser = sub.add_parser("report-review", help="write a gated pre-merge review result")
     report_parser.add_argument("result")
     report_parser.set_defaults(func=report_review)

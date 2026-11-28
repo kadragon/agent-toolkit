@@ -133,7 +133,7 @@ requires review. A dev-only or prod-only release preserves the guard approval.
 Dispatch holds task delivery when the installed dev has moved its hooks and guard is missing
 from the shared cache.
 
-From the home session, prepare the cache for the trusted target directory:
+Run the preparation command from the home session and specify the trusted target directory.
 
 ```sh
 python3 -I "<dispatch>/scripts/dispatch.py" prepare-codex --repo "<agent-toolkit checkout>" --cwd "<target repo>"
@@ -143,8 +143,9 @@ The command fetches the checkout's default remote branch, compares installed kad
 versions, upgrades that marketplace if needed, then starts and closes an idle Herdr child.
 Read `pending_hooks` in its JSON for the exact enabled hooks Codex marks untrusted or modified.
 `hook_content_diffs` compares the affected kadragon plugin's hook manifest and bundled hook
-files with a previously observed trusted copy in this Codex home. A first run with no available
-trusted copy reports that gap. Third-party pending hooks appear in `pending_hooks` with their
+files with a previously observed trusted copy in this Codex home. If native startup refresh
+replaces the old cache before its trust can be inspected, the command uses the last recorded
+trusted copy or reports that no trusted copy is available. Third-party pending hooks appear in `pending_hooks` with their
 native source paths and review status.
 
 If hooks need approval, launch an idle child and use **Review hooks** or `/hooks`. Close the
@@ -210,7 +211,8 @@ Read the live screen with `hc read --lines 0 <address>` before resolving a block
 Retry with `dispatch.py send --run <receipt> -- <address> '<first message>'` once the hooks are
 active, all blockers are resolved, and the composer is clear. If the source cannot be verified,
 approval is unavailable during manual review, or a warning remains, report the blocker and
-withhold the task. For an unconfirmed send, inspect whether the task already started before retrying.
+withhold the task. For an unconfirmed send, check for work with `dispatch.py peek <receipt>`.
+If no work is visible, inspect the raw screen for the submitted prompt, drafts, or dialogs before retrying.
 
 A send hold with a clear composer can indicate a stale installed plugin. Update it or use the current script.
 If a marketplace update replaced the installed directory, run `send --run <receipt>` using

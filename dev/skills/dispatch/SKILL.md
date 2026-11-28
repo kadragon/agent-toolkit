@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 3.5.0
+version: 3.6.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo listed in
   the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to
@@ -147,12 +147,11 @@ To append recurring repo-specific lines to a child's first message, configure `r
 in the home repo. See `references/launch-handoff.md` for the schema and path matching.
 
 Children run in the background. Keep the printed child address and receipt (`run`) with its
-result path. Use `hc read <address>` to inspect the terminal. If `$HC_TERMINAL_ID` is stale,
-identify this session in `hc ls` and pass `--parent <address>`. For Claude, pass
-`--keep-connectors` when the request needs claude.ai connectors.
+result path. Use `hc read <address>` for dialogs. If `$HC_TERMINAL_ID` is stale, identify this session
+in `hc ls` and pass `--parent <address>`. Pass `--keep-connectors` if Claude needs claude.ai connectors.
 
 The first message travels as a `claude` argument, so it arrives with the launch. Confirm with
-`hc read --lines 40 <address>` that the session took it and the skill loaded (`Read SKILL.md
+`dispatch.py peek <receipt>` that the skill loaded (`Read SKILL.md
 (dev:task-next skill)` or the like). A trust dialog on a repo never opened before blocks it —
 answer that with `hc keys <address> down enter` only after telling the user.
 
@@ -197,6 +196,7 @@ Tell the user each terminal's name, address and repo. Watch in the background an
   `collect` for details and review evidence. `--stall-minutes N` overrides the 30-minute
   inactivity threshold. Report the stop reason, model, effort and any measured token totals or
   review retries. On `hooks_broken` or `plugin_drift`, see `references/codex-readiness.md`.
+- If a child stalls, use `dispatch.py peek <receipt> --since-last` for new rows, or omit the flag for the full tail.
 - After a wave has merged and been cleaned up, tell the user that `/clear` starts the next
   wave from an empty context. Filter running terminals by the validated parent in the launch
   receipts. When compacting context, keep receipts, active phases and decisions.
