@@ -489,39 +489,53 @@ def main() -> int:
         bindir = tmp / "gh_bin"
         bindir.mkdir()
         # Older gh rejects --slurp and streams one JSON object per page.
-        # `pr view` and `pr checks` always report a stale head and failure, so reading either
-        # instead of the one snapshot shows up red.
+        # Only the PR URL can come from a separate request. Any other PR fields return stale data.
         (bindir / "gh").write_text(
             "#!/usr/bin/env bash\n"
             'case "$1 $2" in\n'
             '  "api graphql")\n'
+            '    expected="${GH_DEFAULT_REPO:-o/r}"\n'
+            '    owner= name=\n'
             '    for arg in "$@"; do\n'
             '      if [[ "$arg" == --slurp ]]; then echo "unknown flag: --slurp" >&2; exit 1; fi\n'
+            '      case "$arg" in owner=*) owner="${arg#owner=}" ;; name=*) name="${arg#name=}" ;; esac\n'
             '    done\n'
+            '    [ "$owner/$name" = "$expected" ] || exit 1\n'
             '    [ -n "${GH_VIEW:-}" ] || exit 1\n'
             '    printf \'%s\' "$GH_VIEW"; exit 0 ;;\n'
-            '  "run view") echo "Actions job log"; exit 0 ;;\n'
-            '  "pr view") echo "' + "b" * 40 + '"; exit 0 ;;\n'
+            '  "run view") [ "$4" = --repo ] && [ "$5" = "${GH_LOG_REPO:-o/r}" ] || exit 1\n'
+            '    echo "Actions job log"; exit 0 ;;\n'
+            '  "pr view") if [[ "$4 $5 $6 $7" == "--json url --jq .url" ]]; then\n'
+            '    printf \'https://github.com/%s/pull/%s\\n\' "${GH_DEFAULT_REPO:-o/r}" "$3"\n'
+            '    else echo "' + "b" * 40 + '"; fi; exit 0 ;;\n'
             "  \"pr checks\") echo '[{\"bucket\": \"fail\"}]'; exit 1 ;;\n"
             "esac\n"
             "exit 1\n",
             encoding="utf-8")
         (bindir / "gh").chmod(0o755)
 
-        def page(contexts, oid="a" * 40):
+        def page(contexts, oid="a" * 40, repo="o/r"):
             rollup = None if contexts is None else {"contexts": {"nodes": contexts}}
-            return {"data": {"repository": {"pullRequest": {"commits": {"nodes": [
+            return {"data": {"repository": {"nameWithOwner": repo, "pullRequest": {"commits": {"nodes": [
                 {"commit": {"oid": oid, "statusCheckRollup": rollup}}]}}}}}
 
-        def hub_output(rollup, pages=None, command="ci-status"):
+        def hub_output(rollup, pages=None, command="ci-status", expected_head=None, **gh_env):
             if pages is None and rollup is not None:
                 pages = [page(rollup)]
             env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}")
-            env.pop("GH_VIEW", None)
+            for name in ("GH_VIEW", "GH_DEFAULT_REPO", "GH_LOG_REPO"):
+                env.pop(name, None)
+            env.update(gh_env)
             if pages is not None:
                 env["GH_VIEW"] = "\n".join(json.dumps(page_data) for page_data in pages)
+            if command == "ci-logs":
+                args = [str(SCRIPT.parent / "ci-failure-logs.sh"), "7"]
+            else:
+                args = [str(SCRIPT.parent / "hub.sh"), command, "7"]
+            if expected_head:
+                args.extend(["--expected-head", expected_head])
             proc = subprocess.run(
-                ["bash", str(SCRIPT.parent / "hub.sh"), command, "7"], cwd=hub_repo,
+                ["bash", *args], cwd=hub_repo,
                 capture_output=True, text=True, timeout=30, env=env)
             try:
                 return json.loads(proc.stdout)
@@ -585,7 +599,8 @@ def main() -> int:
         failure = run_ctx("FAILURE")
         logs = hub_output(None, pages=[page([failure]), page([], oid="c" * 40)], command="ci-logs")
         check("failure diagnostics report that a moving head requires a retry",
-              logs.get("logs_available") is False and "retry" in logs.get("message", ""), f"got {logs}")
+              logs.get("logs_available") is True and logs.get("reason") == "head-changed"
+              and logs.get("count") == 0, f"got {logs}")
         external = {"__typename": "StatusContext", "context": "external", "state": "ERROR",
                     "link": "https://external.test/runs/123"}
         logs = hub_output([external], command="ci-logs")
@@ -597,6 +612,32 @@ def main() -> int:
         check("a GitHub Actions link in the target repository still fetches its log",
               logs.get("count") == 1 and logs["failed_checks"][0].get("run_id") == "123"
               and logs["failed_checks"][0].get("logs") == "Actions job log", f"got {logs}")
+        logs = hub_output([failure], command="ci-logs", expected_head="c" * 40)
+        check("failure diagnostics reject a snapshot from another commit",
+              logs.get("reason") == "head-changed" and logs.get("count") == 0, f"got {logs}")
+        logs = hub_output(None, command="ci-logs", expected_head="a" * 40)
+        check("failure diagnostics report when the snapshot has no verifiable head",
+              logs.get("reason") == "head-unavailable" and logs.get("count") == 0, f"got {logs}")
+        logs = hub_output([failure], command="ci-logs", expected_head="a" * 40)
+        check("failure diagnostics accept the reviewed commit",
+              logs.get("count") == 1 and logs["failed_checks"][0].get("logs") == "Actions job log",
+              f"got {logs}")
+        upstream_failure = dict(failure, link="https://github.com/upstream/r/actions/runs/123/job/456")
+        upstream = [page([upstream_failure], repo="upstream/r")]
+        status = hub_output(None, pages=upstream, GH_DEFAULT_REPO="upstream/r")
+        check("CI status queries the GitHub CLI default repository for a fork",
+              status.get("status") == "failure" and status.get("head_sha") == "a" * 40, f"got {status}")
+        logs = hub_output(None, pages=upstream, command="ci-logs",
+                          GH_DEFAULT_REPO="upstream/r", GH_LOG_REPO="upstream/r")
+        check("failure diagnostics fetch logs in the fork PR's upstream repository",
+              logs.get("count") == 1 and logs["failed_checks"][0].get("logs") == "Actions job log",
+              f"got {logs}")
+        renamed = dict(failure, link="https://github.com/new-owner/new-repo/actions/runs/123/job/456")
+        logs = hub_output(None, pages=[page([renamed], repo="new-owner/new-repo")],
+                          command="ci-logs", GH_LOG_REPO="new-owner/new-repo")
+        check("failure diagnostics fetch logs using the canonical name after a repository redirect",
+              logs.get("count") == 1 and logs["failed_checks"][0].get("logs") == "Actions job log",
+              f"got {logs}")
         status = hub_output(None, pages=[page([run_ctx("SUCCESS")]),
                                          page([run_ctx("FAILURE", name="lint")])])
         check("older gh reports the head and includes a failure on a later page",

@@ -9,10 +9,11 @@
 #   pr-create --base <b> --title <t> --body <body> → {pr_number, pr_url}
 #   pr-get                                  → {pr_number, pr_url}   (open PR for current branch)
 #   ci-status <pr_number>                   → {status: "pending"|"success"|"failure"|"none", checks: n, head_sha?}
-#   ci-logs <pr_number>                     → {failed_checks:[{name,run_id,logs}], count, logs_available}
+#   ci-logs <pr_number> [--expected-head <sha>]
+#                                            → {failed_checks:[{name,run_id,logs}], count, logs_available, reason?}
 #   merge <pr_number> <squash|merge|rebase> [authority_branch] [expected_head]
 #                                            → {merge_ok, queued, unconfirmed, merge_output, head_sha?}
-#   expected_head requires GitHub.
+#   --expected-head requires GitHub.
 #
 # Auth:
 #   github  — gh CLI must be authenticated (gh auth login)
@@ -112,11 +113,17 @@ emit_status() {
 
 github_ci_snapshot() {
   # Separate GitHub requests could pair a new head SHA with the previous commit's failure.
-  local pr_number="$1" view
+  local pr_number="$1" pr_url repo view
+  pr_url=$(gh pr view "$pr_number" --json url --jq .url) || return 1
+  if [[ ! "$pr_url" =~ ^https://github\.com/([^/]+/[^/]+)/pull/[0-9]+$ ]]; then
+    echo "Could not resolve the GitHub repository for PR $pr_number." >&2
+    return 1
+  fi
+  repo="${BASH_REMATCH[1]}"
   view=$(gh api graphql --paginate -F number="$pr_number" \
-    -f owner="${OWNER_REPO%%/*}" -f name="${OWNER_REPO#*/}" -f query='
+    -f owner="${repo%%/*}" -f name="${repo#*/}" -f query='
     query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
-      repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+      repository(owner: $owner, name: $name) { nameWithOwner pullRequest(number: $number) {
         commits(last: 1) { nodes { commit { oid statusCheckRollup {
           contexts(first: 100, after: $endCursor) {
             pageInfo { hasNextPage endCursor }
@@ -127,8 +134,10 @@ github_ci_snapshot() {
                 checkSuite { app { id } workflowRun { event workflow { name } } } }
             } } } } } } } } }' 2>/dev/null) || view=""
   # Collect the streamed pages with jq for gh versions without --slurp.
-  jq -sc '[.[] | .data.repository.pullRequest.commits.nodes[0].commit] as $c
-    | {oids: ([$c[].oid] | unique),
+  jq -sc --arg repo "$repo" '[.[].data.repository] as $repositories
+    | [$repositories[].pullRequest.commits.nodes[0].commit] as $c
+    | {repository: ($repositories[0].nameWithOwner // $repo),
+       oids: ([$c[].oid | strings] | unique),
        checks: [[$c[].statusCheckRollup.contexts.nodes[]?]
          | group_by(if .__typename == "CheckRun"
              then [.name, .checkSuite.app.id, .checkSuite.workflowRun.workflow.name, .checkSuite.workflowRun.event]
@@ -141,7 +150,8 @@ github_ci_snapshot() {
             bucket: (if $s == "SUCCESS" or $s == "SKIPPED" or $s == "NEUTRAL" then "pass"
               elif $s == "FAILURE" or $s == "ERROR" or $s == "TIMED_OUT" or $s == "ACTION_REQUIRED"
                 or $s == "STARTUP_FAILURE" or $s == "CANCELLED" or $s == "STALE" then "fail"
-              else "pending" end)}]}' <<<"$view" 2>/dev/null || printf '%s\n' '{"oids": [], "checks": []}'
+              else "pending" end)}]}' <<<"$view" 2>/dev/null ||
+    jq -nc --arg repo "$repo" '{repository: $repo, oids: [], checks: []}'
 }
 
 case "$SUBCOMMAND" in
@@ -294,13 +304,30 @@ case "$SUBCOMMAND" in
     ;;
 
   ci-logs)
-    PR_NUMBER="${1:?Usage: hub.sh ci-logs <pr_number>}"
+    PR_NUMBER="${1:?Usage: hub.sh ci-logs <pr_number> [--expected-head <sha>]}"
+    EXPECTED_HEAD=""
+    if [ "$#" -gt 1 ]; then
+      if [[ "$HUB_TYPE" != "github" || "$#" -ne 3 || "$2" != "--expected-head" ||
+            ! "${3:-}" =~ ^[0-9a-f]{40}$ ]]; then
+        echo "Usage: hub.sh ci-logs <pr_number> [--expected-head <sha> (GitHub only)]" >&2
+        exit 1
+      fi
+      EXPECTED_HEAD="$3"
+    fi
     if [ "$HUB_TYPE" = "github" ]; then
       SNAPSHOT=$(github_ci_snapshot "$PR_NUMBER")
-      if [ "$(jq '.oids | length' <<<"$SNAPSHOT")" -gt 1 ]; then
-        echo '{"failed_checks": [], "count": 0, "logs_available": false, "message": "PR head changed while fetching checks; retry."}'
+      HEAD_PROBLEM=$(jq -r --arg expected "$EXPECTED_HEAD" '
+        if (.oids | length) > 1 then "head-changed"
+        elif $expected != "" then
+          if (.oids | length) == 0 then "head-unavailable"
+          elif .oids[0] != $expected then "head-changed"
+          else empty end
+        else empty end' <<<"$SNAPSHOT")
+      if [ -n "$HEAD_PROBLEM" ]; then
+        jq -nc --arg reason "$HEAD_PROBLEM" '{failed_checks: [], count: 0, logs_available: true, reason: $reason}'
         exit 0
       fi
+      CHECK_REPO=$(jq -r '.repository' <<<"$SNAPSHOT")
       FAILED_CHECKS=$(jq -c '[.checks[] | select(.bucket == "fail")]' <<<"$SNAPSHOT")
       if [ "$FAILED_CHECKS" = "[]" ]; then
         echo '{"failed_checks": [], "count": 0, "logs_available": true, "message": "No failed checks found"}'
@@ -311,7 +338,7 @@ case "$SUBCOMMAND" in
         NAME=$(jq -r '.name' <<<"$check")
         LINK=$(jq -r '.link // empty' <<<"$check")
         CHECK_STATE=$(jq -r '.state' <<<"$check")
-        RUN_ID=$(jq -r --arg prefix "https://github.com/${OWNER_REPO}/actions/runs/" '
+        RUN_ID=$(jq -r --arg prefix "https://github.com/${CHECK_REPO}/actions/runs/" '
           (.link // "" | ascii_downcase)
           | select(startswith($prefix | ascii_downcase))
           | ltrimstr($prefix | ascii_downcase)
@@ -319,7 +346,7 @@ case "$SUBCOMMAND" in
         LOGS=""
         if [ -n "$RUN_ID" ]; then
           # Limit to last 200 lines per job to avoid context/memory overflow
-          LOGS=$(gh run view "$RUN_ID" --repo "$OWNER_REPO" --log-failed 2>&1 | tail -200 || echo "Failed to fetch logs for run $RUN_ID")
+          LOGS=$(gh run view "$RUN_ID" --repo "$CHECK_REPO" --log-failed 2>&1 | tail -200 || echo "Failed to fetch logs for run $RUN_ID")
         else
           LOGS="Could not extract run ID from link: $LINK"
         fi
