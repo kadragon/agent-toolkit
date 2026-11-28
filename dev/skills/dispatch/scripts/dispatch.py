@@ -89,11 +89,11 @@ CODEX_MISSING_HOOK = re.compile(r"failed to spawn.*?\bos error 2\b", re.DOTALL)
 WARNING_FOOTER = re.compile(r"⚠\ufe0f?\s*(\d+)\s+warnings?\s*·\s*f2 to view\b", re.IGNORECASE)
 HOOK_BYPASS_NOTICE = ("`--dangerously-bypass-hook-trust` is enabled. "
                       "Enabled hooks may run without review for this invocation.")
-UNSTABLE_FEATURES_NOTICE = re.compile(
+UNSTABLE_FEATURES_PREFIX = re.compile(
     r"Under-development features enabled: [a-z0-9_]+(?:, [a-z0-9_]+)*\. "
     r"Under-development features are incomplete and may behave unpredictably\. "
-    r"To suppress this warning, set `suppress_unstable_features_warning = true` in "
-    r"(?:(?:[A-Za-z]:|~)?[/\\](?:[^`]*[/\\])? *)?config\.toml\.")
+    r"To suppress this warning, set `suppress_unstable_features_warning = true` in ")
+UNSTABLE_FEATURES_PATH = re.compile(r"(?:(?:[A-Za-z]:|~)?[/\\](?:[^`]*[/\\])? *)?config\.toml\.")
 WARNING_VIEW_TITLE = re.compile(r"Warnings · \d+ of \d+ · .+")
 STARTUP_WARNING_TITLE = re.compile(r"Warnings · ([1-9][0-9]*) of ([1-9][0-9]*) · Startup")
 WARNING_VIEW_FOOTER = re.compile(
@@ -1594,13 +1594,31 @@ def startup_warning_page(text):
     if footer := WARNING_VIEW_FOOTER.search(body):
         body = body[:footer.start()].rstrip("\n")
     notice = body.replace("\n", " ")
-    if UNSTABLE_FEATURES_NOTICE.fullmatch(notice):
-        # Reflow at a directory separator does not add a space to the path.
-        notice = re.sub(r"(?<=[/\\])\n", "", body).replace("\n", " ")
-    elif notice != HOOK_BYPASS_NOTICE:
-        return None
+    if notice != HOOK_BYPASS_NOTICE:
+        prefix = UNSTABLE_FEATURES_PREFIX.match(notice)
+        if not prefix:
+            return None
+        config_path = body[prefix.end():]
+        if not UNSTABLE_FEATURES_PATH.fullmatch(config_path.replace("\n", "")):
+            return None
+        notice = prefix[0] + config_path
     page, count = map(int, title.groups())
     return page, count, notice
+
+
+def same_startup_warning_page(current, previous):
+    if current is None or current[:2] != previous[:2]:
+        return False
+    if current[2] == previous[2]:
+        return True
+    layout = r"([^ \n])([ \n]*)"
+    current_layout = re.findall(layout, current[2])
+    previous_layout = re.findall(layout, previous[2])
+    # A Codex display row break can split a path component or replace a space.
+    return len(current_layout) == len(previous_layout) and all(
+        char == old_char and (gap == old_gap or {gap, old_gap} in ({"\n", ""}, {"\n", " "}))
+        for (char, gap), (old_char, old_gap) in zip(current_layout, previous_layout)
+    )
 
 
 def send(args):
@@ -1749,7 +1767,8 @@ def send_task(args, run_path):
                 raise SystemExit(f"{address}: task withheld; inspect the Codex hook status with /hooks")
             position = startup_warning_page(text) if screen == "warning-view" else None
             if closing_warning is not None and screen != "waiting":
-                if position == closing_warning and time.monotonic() < closing_warning_until:
+                if (time.monotonic() < closing_warning_until
+                        and same_startup_warning_page(position, closing_warning)):
                     time.sleep(SCREEN_POLL_SECONDS)
                     continue
                 closing_warning = None

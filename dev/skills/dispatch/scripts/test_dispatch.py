@@ -3414,17 +3414,23 @@ class CodexSendTests(DispatchTestCase):
         last = self.UNSTABLE_FEATURES_NOTICE
         split_controls = last.replace(" · esc dismiss", " ·\n  esc dismiss")
         wrapped_path = last.replace("Config/config.toml.", "Config/\n  config.toml.")
-        for label, redraws, sends in (
-            ("split controls", [split_controls], True),
-            ("wrapped path", [wrapped_path], True),
-            ("different path", [wrapped_path.replace("/tmp/", "/var/")], False),
-            ("expired window", [wrapped_path] * 8, False),
+        hyphenated_path = last.replace("Codex Config", "codex-home")
+        spaced_path = last.replace("/tmp/Codex Config", "/tmp/ Codex Config")
+        for label, original, redraws, sends in (
+            ("split controls", last, [split_controls], True),
+            ("wrapped path", last, [wrapped_path], True),
+            ("wrapped path component", hyphenated_path, [hyphenated_path.replace("codex-home", "codex-\n  home")], True),
+            ("wrapped filename", last, [last.replace("config.toml.", "config.to\n  ml.")], True),
+            ("wrapped path with a space", spaced_path, [spaced_path.replace("/tmp/ ", "/tmp/\n  ")], True),
+            ("different path", last, [wrapped_path.replace("/tmp/", "/var/")], False),
+            ("different visible spacing", last, [spaced_path], False),
+            ("expired window", last, [wrapped_path] * 8, False),
         ):
             with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
                 receipt = Path(directory) / "run.json"
                 receipt.write_text(json.dumps({**DispatchReceiptTests.RECEIPT, "trust_hooks": True}),
                                    encoding="utf-8")
-                frames = iter([first, last, *redraws])
+                frames = iter([first, original, *redraws])
                 operations = []
                 now = 0
                 escaped_at = None
@@ -3455,7 +3461,8 @@ class CodexSendTests(DispatchTestCase):
                     else:
                         with self.assertRaisesRegex(SystemExit, "task withheld.*F2"):
                             send(args)
-                        self.assertEqual(now - escaped_at, 1 if label == "expired window" else 0.25)
+                        expected_wait = 1 if label == "expired window" else 0.25
+                        self.assertEqual(now - escaped_at, expected_wait)
                 expected = ["right", "esc", "send"] if sends else ["right", "esc"]
                 self.assertEqual(operations, expected)
                 self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], sends)
