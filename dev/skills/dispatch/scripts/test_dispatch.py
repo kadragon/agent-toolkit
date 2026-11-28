@@ -1395,24 +1395,25 @@ class DispatchReceiptTests(DispatchTestCase):
     def test_report_review_distinguishes_continuing_merge_from_pause(self):
         head = "a" * 40
         cases = (
-            ("working", False, False, DEFAULT_GIT_LIMITS, head, False, "working", "merge"),
-            ("ready", False, False, DEFAULT_GIT_LIMITS, head, False, "working", "merge"),
-            ("ready", True, False, DEFAULT_GIT_LIMITS, head, False, "ready", "review"),
-            ("ready", False, False, "pr-only", head, False, "ready", "review"),
-            ("working", True, False, DEFAULT_GIT_LIMITS, head, False, "blocked", "review-state"),
-            ("working", True, True, DEFAULT_GIT_LIMITS, head, False, "working", "merge"),
-            ("working", True, True, " PR-ONLY ", head, False, "blocked", "review-state"),
-            ("working", False, False, "no-push", head, False, "blocked", "review-state"),
-            ("working", False, False, "implementation-only", head, False, "blocked", "review-state"),
-            ("working", False, False, DEFAULT_GIT_LIMITS, "b" * 40, False, "blocked", "review-state"),
-            ("working", False, False, DEFAULT_GIT_LIMITS, head, True, "blocked", "review-sources"),
+            ("working", False, None, DEFAULT_GIT_LIMITS, head, False, "working", "merge"),
+            ("ready", False, None, DEFAULT_GIT_LIMITS, head, False, "working", "merge"),
+            ("ready", False, "--pause", DEFAULT_GIT_LIMITS, head, False, "ready", "review"),
+            ("ready", True, None, DEFAULT_GIT_LIMITS, head, False, "ready", "review"),
+            ("ready", False, None, "pr-only", head, False, "ready", "review"),
+            ("working", True, None, DEFAULT_GIT_LIMITS, head, False, "blocked", "review-state"),
+            ("working", True, "--resume-merge", DEFAULT_GIT_LIMITS, head, False, "working", "merge"),
+            ("working", True, "--resume-merge", " PR-ONLY ", head, False, "blocked", "review-state"),
+            ("working", False, None, "no-push", head, False, "blocked", "review-state"),
+            ("working", False, None, "implementation-only", head, False, "blocked", "review-state"),
+            ("working", False, None, DEFAULT_GIT_LIMITS, "b" * 40, False, "blocked", "review-state"),
+            ("working", False, None, DEFAULT_GIT_LIMITS, head, True, "blocked", "review-sources"),
         )
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
             path = receipt.with_name("result.json")
-            for status, stop, resume, limits, review_head, require_sources, expected, phase in cases:
+            for status, stop, mode, limits, review_head, require_sources, expected, phase in cases:
                 with self.subTest(status=status, stop=stop, limits=limits, review_head=review_head,
-                                  require_sources=require_sources, resume=resume):
+                                  require_sources=require_sources, mode=mode):
                     write_json(receipt, {
                         **self.RECEIPT, "cli": "claude", "pre_merge_stop": stop,
                         "handoff": {"git_limits": limits, **({"queue_reservation": {"ref": "#1"}} if stop else {})},
@@ -1424,8 +1425,8 @@ class DispatchReceiptTests(DispatchTestCase):
                         "review": {"head": review_head, "sources": ["codex"], "status": "passed"},
                     }
                     command = [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "report-review", str(path)]
-                    if resume:
-                        command.append("--resume-merge")
+                    if mode:
+                        command.append(mode)
                     completed = subprocess.run(
                         command,
                         input=json.dumps(result), text=True, check=False, capture_output=True,
@@ -1471,6 +1472,30 @@ class DispatchReceiptTests(DispatchTestCase):
             details = json.loads((path.parent / blocked["evidence"]).read_text(encoding="utf-8"))
             self.assertEqual(details["review_sources"], result["review_sources"])
             self.assertEqual(details["evidence"], result["evidence"])
+
+    def test_report_review_blocks_when_merge_normalization_exceeds_the_size_limit(self):
+        head = "a" * 40
+        result = {
+            "status": "ready", "phase": "merge", "summary": "CI passed", "head": head,
+            "review": {"head": head, "status": "passed", "sources": ["claude"]},
+            "evidence": "",
+        }
+        result["evidence"] = "x" * (8192 - len(json.dumps(result, separators=(",", ":"))))
+        raw = json.dumps(result, separators=(",", ":")).encode("utf-8")
+        self.assertEqual(len(raw), 8192)
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            write_json(receipt, {**self.RECEIPT, "handoff": {"git_limits": DEFAULT_GIT_LIMITS}})
+            path = receipt.with_name("result.json")
+            completed = subprocess.run(
+                [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "report-review", str(path)],
+                input=raw, check=False, capture_output=True,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr.decode("utf-8"))
+            self.assertLessEqual(path.stat().st_size, 8192)
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["status"], "blocked")
+            self.assertIn("Continuing merge report exceeds 8 KiB", saved["summary"])
 
     def test_collect_cannot_close_on_a_result_from_the_previous_phase(self):
         with tempfile.TemporaryDirectory() as directory:

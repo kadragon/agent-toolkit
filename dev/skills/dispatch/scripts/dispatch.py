@@ -645,18 +645,25 @@ def report_review(args):
         limits = " ".join(raw_limits.casefold().split()) if isinstance(raw_limits, str) else ""
         if args.resume_merge and result["status"] != "working":
             raise ValueError("--resume-merge expects a working report")
+        if args.pause and result["status"] != "ready":
+            raise ValueError("--pause expects a ready report")
         review_gate_candidate = {**result, "status": "ready"} if result["status"] == "working" else result
         gated = gate_review_result(review_gate_candidate, require_review_sources=required)
         if gated["status"] == "ready":
             if result["status"] == "working" and (pre_merge_stop or limits in {"pr-only", "no-push", "implementation-only"}):
                 gated = {**result, "status": "blocked", "phase": "review-state",
                          "summary": "Dispatch receipt does not permit reporting a continuing merge"}
-            elif result["status"] == "working" or (raw_limits == DEFAULT_GIT_LIMITS and not pre_merge_stop):
+            elif result["status"] == "working" or (
+                raw_limits == DEFAULT_GIT_LIMITS and not pre_merge_stop and not args.pause
+            ):
                 gated = {**result, "status": "working", "phase": "merge"}
         serialized = serialize_result(gated)
-        if gated is not result and gated["status"] == "blocked" and len(serialized.encode("utf-8")) > RESULT_LIMIT:
+        if gated is not result and len(serialized.encode("utf-8")) > RESULT_LIMIT:
+            if gated["status"] == "working":
+                gated.update(status="blocked", phase="review-state", summary="Continuing merge report exceeds 8 KiB")
             phase = gated["phase"]
-            names = ", ".join(missing_reviews(result)) if phase == "review-sources" else "Independent review"
+            names = ", ".join(missing_reviews(result)) if phase == "review-sources" else gated["summary"]
+            names = " ".join(names.split())[:160]
             gated["summary"] = f"{names}: see review record"
             serialized = serialize_result(gated)
             if len(serialized.encode("utf-8")) > RESULT_LIMIT:
@@ -2853,8 +2860,10 @@ def main(argv):
     peek_parser.set_defaults(func=peek)
     report_parser = sub.add_parser("report-review", help="write a gated pre-merge review result")
     report_parser.add_argument("result")
-    report_parser.add_argument("--resume-merge", action="store_true",
-                               help="report a continuing merge after an explicitly released dispatch stop")
+    report_mode = report_parser.add_mutually_exclusive_group()
+    report_mode.add_argument("--pause", action="store_true", help="preserve an explicit ready report")
+    report_mode.add_argument("--resume-merge", action="store_true",
+                             help="report a continuing merge after an explicitly released dispatch stop")
     report_parser.set_defaults(func=report_review)
     timing_parser = sub.add_parser("timing", help="inspect or record dispatch phase timings")
     timing_parser.add_argument("run")
