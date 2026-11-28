@@ -34,14 +34,9 @@ for Bash blocks in this skill and its references. For a dispatched `--tree` cycl
 | Start review | *Step 4 — Hand off* and `references/cycle.md` → *Hand off*. Follow its direct call to `dev:task-review-cycle` and start at *Caller gate* |
 
 Open *Step 2* for manual selection or parked entries and `references/edge-cases.md` when applicable.
-With a `Queue reservation`, use `references/tree.md` → *Reserved dispatch intake*.
+With a `Queue reservation`, go directly to [Reserved dispatch intake](references/tree.md#reserved-dispatch-intake), skipping the generic prerequisites and candidate selection.
 
 ## Prerequisites
-
-**Reserved dispatch.** When the assigned `--tree` handoff contains a `Queue reservation`,
-go directly to [Reserved dispatch intake](references/tree.md#reserved-dispatch-intake).
-Claim the pinned base there and continue at Step 3. The fetch and selection below apply to
-runs that still need to select a base or queue candidate.
 
 **Pin the worktree base.** For other `--tree` runs, pin the remote base before resolving the queue or
 applying the working-tree gate:

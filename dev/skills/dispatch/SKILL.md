@@ -139,8 +139,7 @@ For work authorized to proceed without Git writes, pass `--no-git-writes`. Add `
 For standalone work that needs no Git writes and has no user-provided limits, pass `--git-limits='not specified'`.
 Shell-quote each value, as in `--git-limits='don'\''t merge'`. Preview with `--dry-run`.
 
-For Codex waves, see [Approval checks before a wave](references/codex-readiness.md#approval-checks-before-a-wave)
-for local Git reads, result files, optional network-read rules, and review transfers.
+For Codex waves, follow [Approval checks before a wave](references/codex-readiness.md#approval-checks-before-a-wave).
 Queue, new and `task-review` launches carry the standing review transfer approval. A separate user grant passed
 with `--review-transfer-approval='<verbatim approval>'` replaces it; `--no-standing-review-approval` honors a restriction.
 
