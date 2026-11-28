@@ -1423,17 +1423,22 @@ def wait(args):
     pending = list(dict.fromkeys(Path(receipt).resolve() for receipt in args.runs))
     deadline = time.monotonic() + args.timeout
     previous = {}
+    progress = sys.stderr if args.first else sys.stdout
     try:
         while pending:
             next_pending = []
             working = None
             for path in pending:
                 report = collect_result(path, False, False, args.stall_minutes, warn_drift=False, deadline=deadline)
+                outcome = reached_outcome(report, args.until)
                 line = brief_report(report)
+                if args.first and outcome:
+                    print(f"{path} · {line}", flush=True)
+                    return
                 if previous.get(path) != line:
-                    print(line, flush=True)
+                    print(line, file=progress, flush=True)
                     previous[path] = line
-                if not reached_outcome(report, args.until):
+                if not outcome:
                     next_pending.append(path)
                     if working is None and report["state"] == "live" and report["status"] == "working":
                         working = report["address"]
@@ -1874,6 +1879,7 @@ def main(argv):
     collect_parser.set_defaults(func=collect)
     wait_parser = sub.add_parser("wait", help="watch receipts until each reaches a selected outcome")
     wait_parser.add_argument("runs", nargs="+")
+    wait_parser.add_argument("--first", action="store_true", help="return after printing the first selected outcome")
     wait_parser.add_argument("--until", default=",".join(WAIT_DEFAULT),
                              help=f"comma-separated outcomes (default: {','.join(WAIT_DEFAULT)})")
     wait_parser.add_argument("--timeout", type=int, default=WAIT_TIMEOUT_SECONDS, metavar="SECONDS")
