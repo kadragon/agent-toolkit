@@ -29,6 +29,7 @@ if [ -z "$CHANGED_FILES" ]; then
   echo "No changes detected against ${BASE_BRANCH} — skipping Antigravity review." >&2
   exit 0
 fi
+command -v jq >/dev/null 2>&1 || { echo "ERROR: jq is required for Antigravity review." >&2; exit 1; }
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
@@ -169,18 +170,22 @@ NO_COLOR=1 TERM=dumb agy -p "$REVIEW_PROMPT" \
   --add-dir "$REPO_ROOT" \
   --print-timeout 15m >"$AGY_OUT" 2>"$AGY_ERR" || AGY_EXIT=$?
 
-# Keep the final stderr diagnostic plus its reset hints. An earlier retry can
-# report a 429 before the request terminates with a different error.
+# agy can print a retry's 429 before reporting a different terminal error.
 TERMINAL_DIAGNOSTIC=""
 if [ "$AGY_EXIT" -gt 0 ] && [ "$AGY_EXIT" -lt 124 ]; then
   TERMINAL_DIAGNOSTIC=$(awk '
-    !NF { next }
+    { sub(/\r$/, "") }
+    !NF || /^[[:space:]]+at[[:space:]]/ { next }
     tolower($0) ~ /^[[:space:]]*((your[[:space:]]+)?(quota[[:space:]]+)?(will[[:space:]]+)?resets?[[:space:]]+(in|after|at)|retry[[:space:]]+(in|after)|retry-after:)/ {
-      diagnostic = diagnostic "\n" $0
+      hint = $0
       next
     }
-    { diagnostic = $0 }
-    END { print diagnostic }
+    { diagnostic = $0; prior_hint = hint; hint = "" }
+    END {
+      print diagnostic
+      if (hint != "") print hint
+      else if (prior_hint != "") print prior_hint
+    }
   ' "$AGY_ERR")
 fi
 
@@ -191,11 +196,16 @@ is_quota_failure() {
       jq -e '(.error_code | tostring) == "429" and (.code_kind == "http" or .status == "RESOURCE_EXHAUSTED")' \
         <<<"${error#AGY_ERROR: }" >/dev/null 2>&1
       ;;
+    'API Error: {'*)
+      jq -e '(.code // .statusCode // .error_code | tostring) == "429"' \
+        <<<"${error#API Error: }" >/dev/null 2>&1
+      ;;
     *)
-      local http='\bHTTP([[:space:]]+error)?[[:space:]:]+429\b|\b429[[:space:]]+Too Many Requests\b|\bAPI Error:[[:space:]]*429\b'
-      local status='\bAPI Error:.*\b(status(Code)?|error_code|code)"?[[:space:]]*[:=][[:space:]]*"?429\b'
-      local message='(^[[:space:]]*((API[[:space:]]+)?error:[[:space:]]*)?quota|\b(individual|model|api|request|usage|your)[[:space:]]+quota|\brate[[:space:]-]limit)[[:space:]]+((is|has been)[[:space:]]+)?(exhausted|exceeded|reached)\b|\b(exhausted|exceeded|reached)[[:space:]]+your[[:space:]]+(quota|rate limit)\b'
-      grep -Eiq -e "$http" -e "$status" -e "$message" <<<"$error"
+      local prefix='^[[:space:]]*((API[[:space:]]+)?error:[[:space:]]*)?'
+      local http='HTTP([[:space:]]+error)?[[:space:]:]+429\b|429([[:space:]]+(Too Many Requests|Resource (has been )?exhausted)\b|[[:space:]]*$)'
+      local resource='RESOURCE_EXHAUSTED([[:space:]]+\(code[[:space:]]+429\)|[[:space:].]*$)'
+      local message='(((individual|model|api|request|usage|your)[[:space:]]+)?quota|rate[[:space:]-]limit)[[:space:]]+((is|has been)[[:space:]]+)?(exhausted|exceeded|reached)\b|you[[:space:]]+(have[[:space:]]+)?(exhausted|exceeded|reached)[[:space:]]+your[[:space:]]+(quota|rate limit)\b'
+      grep -Eiq "$prefix($http|$resource|$message)" <<<"$error"
       ;;
   esac
 }

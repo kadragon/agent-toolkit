@@ -247,6 +247,10 @@ def case_quota_exhaustion(tmp):
         ('AGY_ERROR: {"error_code":429,"code_kind":"http","status":"RESOURCE_EXHAUSTED",'
          '"short_error":"Individual quota reached. Resets in 1h15m38s."}\n', "1h15m38s"),
         ('API Error: {"code": 429}\nRetry-After: 3600\n', "3600"),
+        ("API Error: 429\n", None),
+        ("Quota resets in 2 hours.\nHTTP 429 Too Many Requests\r\n\r\n", "2 hours"),
+        ("Error: 429 Resource has been exhausted (e.g. check quota).\n    at fetch (client.js:10)\n", None),
+        ("Error: RESOURCE_EXHAUSTED\n", None),
         ("API Error: You have exhausted your quota on this model.\n", None),
     )):
         sub = tmp / str(index)
@@ -271,6 +275,9 @@ def case_quota_diagnostics_are_not_review_text_or_hard_failures(tmp):
         ("", "Permission denied. See docs at line 429.\n", 1, "empty"),
         ("", "Error: EDQUOT: disk quota exceeded, write temp/cache\n", 1, "empty"),
         ("", "HTTP 429 during retry\nQuota resets in 2 hours.\nPermission denied.\n", 1, "empty"),
+        ("", "API Error: HTTP 403 Forbidden after retrying HTTP 429\n", 1, "empty"),
+        ("Error: fetch failed\n", "Retrying request after HTTP 429 (attempt 3/3)\n", 1, "failed"),
+        ("", 'API Error: {"code": 429\n', 1, "empty"),
         ("", 'AGY_ERROR: {"error_code":403,"status":"PERMISSION_DENIED",'
          '"short_error":"Prior retry returned HTTP 429."}\n', 1, "empty"),
         ("", "HTTP 429\n", 139, "empty"),

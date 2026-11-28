@@ -639,16 +639,15 @@ def review_problem(result, *, require_review_sources=False):
         not isinstance(source, str) or not source.strip() for source in sources
     ):
         return "Independent review sources are missing"
-    if require_review_sources:
-        if agy_quota_exhausted(result):
-            if review.get("agy_quota_head") != head:
-                return "Agy quota skip head differs from result head"
-            if not {"claude", "codex"}.issubset(sources) or "agy" in sources:
-                return "Independent review record must list claude and codex without agy after a quota skip"
-            if result.get("ci") != "success":
-                return "Passing CI is required after an agy quota skip"
-        elif not {"claude", "agy", "codex"}.issubset(sources):
-            return "Independent review record must list claude, agy and codex"
+    if agy_quota_exhausted(result):
+        if review.get("agy_quota_head") != head:
+            return "Agy quota skip head differs from result head"
+        if not {"claude", "codex"}.issubset(sources) or "agy" in sources:
+            return "Independent review record must list claude and codex without agy after a quota skip"
+        if result.get("ci") != "success":
+            return "Passing CI is required after an agy quota skip"
+    elif require_review_sources and not {"claude", "agy", "codex"}.issubset(sources):
+        return "Independent review record must list claude, agy and codex"
     return None
 
 

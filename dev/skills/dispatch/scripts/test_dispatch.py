@@ -1456,6 +1456,13 @@ class DispatchReceiptTests(DispatchTestCase):
                     self.assertIn("agy: quota-exhausted", output.getvalue())
                     self.assertIn("review=passed", output.getvalue())
 
+            write_json(path, {
+                **base, "phase": "merge", "review": {**base["review"], "agy_quota_head": "b" * 40},
+            })
+            with patch("dispatch.hc_json", return_value=terminal), redirect_stdout(StringIO()) as output:
+                collect(SimpleNamespace(run=receipt, close=False, brief=True))
+            self.assertIn("review=missing", output.getvalue())
+
     def test_report_review_respects_the_resumed_dispatch_receipts_review_policy(self):
         head = "a" * 40
         terminal = {**self.TERMINAL, "status": {"state": "done"}}
