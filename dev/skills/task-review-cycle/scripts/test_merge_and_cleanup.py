@@ -230,7 +230,7 @@ esac
 
 
 def run_hub_merge(tmp, state="MERGED", *, fork=False, advance=False, deny_delete=False,
-                  present=True, pr_repo="o/r", push_url=None, redirect_push=False):
+                  present=True, pr_repo="o/r", push_url=None, redirect_push=False, follow_tags=False):
     repo = make_repo(tmp)
     remote = Path(tempfile.mkdtemp(dir=tmp)) / "origin.git"
     git(repo, "init", "-q", "--bare", str(remote))
@@ -245,6 +245,9 @@ def run_hub_merge(tmp, state="MERGED", *, fork=False, advance=False, deny_delete
     merged = git(repo, "rev-parse", "HEAD").stdout.strip()
     if present:
         git(repo, "push", str(remote), f"HEAD:{ref}")
+    if follow_tags:
+        git(repo, "-c", "tag.gpgSign=false", "tag", "-a", "unpublished", "-m", "unpublished")
+        git(repo, "config", "push.followTags", "true")
     if advance:
         git(repo, "commit", "--allow-empty", "-qm", "[TEST] newer feature commit")
     if deny_delete:
@@ -279,6 +282,8 @@ esac
         fail("hub_merge", f"merge and view must use the same gh default repository as PR creation: {calls}")
     tip = subprocess.run(["git", "-C", str(remote), "rev-parse", "--verify", ref],
                          capture_output=True, text=True, check=False).stdout.strip()
+    if follow_tags and git(remote, "tag", "--list").stdout.strip():
+        fail("hub_only_deletes_merged_ref", "remote cleanup published an annotated tag")
     return json.loads(proc.stdout), tip, expected_tip
 
 
@@ -315,6 +320,14 @@ def case_hub_push_target_matches_pr(tmp):
     out, tip, _ = run_hub_merge(tmp, push_url="git@github.com:o/r.git")
     if not out["merge_ok"] or tip:
         fail(case, f"the same repository's configured SSH pushurl should be used: {out!r}, tip={tip}")
+    print(f"ok {case}")
+
+
+def case_hub_only_deletes_merged_ref(tmp):
+    case = "hub_only_deletes_merged_ref"
+    out, tip, _ = run_hub_merge(tmp, follow_tags=True)
+    if not out["merge_ok"] or tip:
+        fail(case, f"expected remote branch deletion: {out!r}, tip={tip}")
     print(f"ok {case}")
 
 
@@ -662,6 +675,7 @@ def main():
         case_base_checkout_fails(tmp)
         case_hub_preserves_advanced_remote_head(tmp)
         case_hub_push_target_matches_pr(tmp)
+        case_hub_only_deletes_merged_ref(tmp)
         case_hub_remote_delete_when(tmp)
         case_hub_merge_queue_is_not_merged(tmp)
         case_merge_matches_reviewed_head(tmp)

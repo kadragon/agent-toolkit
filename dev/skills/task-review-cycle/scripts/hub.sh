@@ -396,7 +396,8 @@ case "$SUBCOMMAND" in
           && [[ -z "$EXPECTED_HEAD" || "$EXPECTED_HEAD" == "$MERGED_HEAD" ]]; then
           if ! PUSH_URL=$(github_push_url_for_pr "$PR_URL" "$PR_NUMBER"); then
             MERGE_OUTPUT="${MERGE_OUTPUT}"$'\n'"Remote head kept: origin's push target does not match the merged PR repository"
-          elif ! DELETE_ERR=$(GIT_TERMINAL_PROMPT=0 git push --porcelain --force-with-lease="$HEAD_REF:$MERGED_HEAD" \
+          elif ! DELETE_ERR=$(GIT_TERMINAL_PROMPT=0 git push --porcelain --no-follow-tags \
+            --force-with-lease="$HEAD_REF:$MERGED_HEAD" \
             -- origin ":$HEAD_REF" 2>&1); then
             # A repository's auto-delete setting can remove the ref first.
             REF_STATUS=0
