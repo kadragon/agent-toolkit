@@ -1056,17 +1056,29 @@ def _repo_rel(path: str, top: str) -> str:
     return os.path.relpath(os.path.join(directory, os.path.basename(path)), os.path.realpath(top))
 
 
+RESERVATION_LOCK_REASON = "dispatch reservation "
+
+
+def _worktree_listing(repo: str) -> str | None:
+    return _git(repo, "worktree", "list", "--porcelain", "-z") or _git(repo, "worktree", "list", "--porcelain")
+
+
 def _claimants(listing: str, top: str, include_self: bool) -> list[str]:
     """Worktrees whose claims count: every other `.worktrees/` one, plus (include_self) this
     checkout and the main worktree. `top` is the realpath of this checkout's top level."""
-    claimants = [
-        wt
-        for wt in (ln[len("worktree "):] for ln in listing.splitlines() if ln.startswith("worktree "))
-        if "/.worktrees/" in wt and os.path.isdir(wt) and os.path.realpath(wt) != top
-    ]
+    separator = "\0" if "\0" in listing else "\n"
+    records = [dict(field.partition(" ")[::2] for field in record.split(separator) if field)
+               for record in listing.split(separator * 2)]
+    claimants = []
+    for record in records:
+        wt = record.get("worktree", "")
+        if record.get("locked", "").startswith(RESERVATION_LOCK_REASON):
+            continue
+        if "/.worktrees/" in wt and os.path.isdir(wt) and os.path.realpath(wt) != top:
+            claimants.append(wt)
     if include_self:
         # this checkout, and the main worktree (first listed) when run from a linked one
-        main_wt = next((ln[len("worktree "):] for ln in listing.splitlines() if ln.startswith("worktree ")), None)
+        main_wt = records[0].get("worktree")
         claimants.append(top)
         if main_wt and os.path.isdir(main_wt) and os.path.realpath(main_wt) != top:
             claimants.append(main_wt)
@@ -1080,7 +1092,7 @@ def collect_block_claims(
     `collect_claims`: same claimant set, repo-relative tasks.md path and merge-base against `ref`."""
     repo = os.path.dirname(os.path.abspath(backlog_path))
     top = _git(repo, "rev-parse", "--show-toplevel")
-    listing = _git(repo, "worktree", "list", "--porcelain")
+    listing = _worktree_listing(repo)
     if top is None or listing is None:
         return {}
     top = os.path.realpath(top.strip())
@@ -1138,7 +1150,7 @@ def collect_claims(
     """
     repo = os.path.dirname(os.path.abspath(backlog_path))
     top = _git(repo, "rev-parse", "--show-toplevel")
-    listing = _git(repo, "worktree", "list", "--porcelain")
+    listing = _worktree_listing(repo)
     if top is None or listing is None:
         return {}
     top = os.path.realpath(top.strip())
