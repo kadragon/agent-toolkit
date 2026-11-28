@@ -69,13 +69,14 @@ Use `wait --first` after delivery and keep merges into the base sequential.
 
 ## Resync a pushed child PR
 
-After each merge into the base, the home session asks every open sibling PR's child to resync,
-through *Continue with another phase*, before collecting that PR's pre-merge report. The child
+Before collecting a PR's pre-merge report, and after each merge into the base, the home session checks
+that the current base is an ancestor of the PR head. If not, it asks that PR's child to resync,
+through *Continue with another phase*. The child
 performs the resync; the home session never commits to or pushes the child's branch. The child
 holds the `commit` and `feature-push` authority through its archived contract. In its feature
-worktree it runs, from the installed dev plugin's absolute path, `python3 cycle_state.py authorize
---action commit` and `--action feature-push`, then `python3 task-review-cycle/scripts/pre_merge_resync.py
---base <BASE_BRANCH>`. When the base is already merged or merges without conflict, the helper
+worktree it runs `python3 <dev plugin>/skills/task-next/scripts/cycle_state.py authorize --action commit`
+and `--action feature-push`, then `python3 <dev plugin>/skills/task-review-cycle/scripts/pre_merge_resync.py
+--base <BASE_BRANCH>`, with absolute paths into the installed dev plugin. When the base is already merged or merges without conflict, the helper
 commits, reapplies any needed version bump and pushes the feature branch, and the child resumes at
 final verification (`task-review-cycle` → *Dispatch pre-merge report*). On a conflict, a failed
 check, `denied` or `error`, the child does not resolve or push anything: it stops and reports to
