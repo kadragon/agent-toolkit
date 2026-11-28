@@ -544,6 +544,14 @@ def review_record(result):
     return review if isinstance(review, dict) else {}
 
 
+def requires_review_sources(run):
+    """Receipts launched with an explicit review_policy never use the legacy require_review_sources flag."""
+    policy = run.get("review_policy")
+    if policy is not None:
+        return policy == "three-source"
+    return run.get("require_review_sources", False)
+
+
 def review_problem(result, *, require_review_sources=False):
     review = review_record(result)
     status = review.get("status")
@@ -595,7 +603,7 @@ def report_review(args):
             raise ValueError("report-review expects a ready or blocked report")
         receipt = path.with_name("run.json")
         # Preserve the three-source gate for callers that do not have a dispatch receipt.
-        required = load_run(receipt).get("require_review_sources", False) if receipt.exists() else True
+        required = requires_review_sources(load_run(receipt)) if receipt.exists() else True
         gated = gate_review_result(result, require_review_sources=required)
         serialized = serialize_result(gated)
         if gated is not result and len(serialized.encode("utf-8")) > RESULT_LIMIT:
@@ -1235,7 +1243,9 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
         run["plugin_versions"] = versions
     if title:
         run["title"] = title
-    if args.cli == "codex" and handoff["work_kind"] != "standalone":
+    three_source = args.cli == "codex" and handoff["work_kind"] != "standalone"
+    run["review_policy"] = "three-source" if three_source else "head-bound"
+    if three_source:
         run["require_review_sources"] = True
     if args.cli != "claude":
         save_launch_timing()
@@ -1784,7 +1794,7 @@ def send_task(args, run_path):
                           "assigned unit, and Git limits in the first message", file=sys.stderr)
             message += "\n\n" + report_instruction(
                 run_path.with_name("result.json"),
-                require_review_sources=run.get("require_review_sources", False),
+                require_review_sources=requires_review_sources(run),
             )
         sent_message = message.strip()
         echoed_before = transcript_echoed(text, sent_message)
@@ -2225,7 +2235,7 @@ def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadli
         print(error, file=sys.stderr)
         result, written = None, None
     if result:
-        result = gate_review_result(result, require_review_sources=run.get("require_review_sources", False))
+        result = gate_review_result(result, require_review_sources=requires_review_sources(run))
     timeout = remaining_wait(deadline) if deadline is not None else None
     if deadline is not None and run.get("closed_reason"):
         return {"address": run["address"], "status": None, "state": "finished", "result": result,

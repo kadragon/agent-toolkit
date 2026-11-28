@@ -186,7 +186,7 @@ with `gh pr edit`, keeping every closing line.
 **Local-only or PR-only** — apply `references/consolidation-guide.md` → *Final verification*.
 `--no-hub` stops with remote checks pending. PR-only, unverified base-merge authority and dispatch
 pre-merge stops finish CI and preserve the archive. Use the guide's *Dispatch pre-merge report*
-for Codex task dispatches. Other PR-only runs report ready after final verification.
+for every dispatched PR, whichever CLI runs it. Other PR-only runs report ready after final verification.
 
 **Lite path** — fetch the current base and re-run the floor after any repair. A non-empty `FLOOR_HIT` or
 base tip outside the reviewed HEAD's history → Step 1's hub block, then launch unused hub

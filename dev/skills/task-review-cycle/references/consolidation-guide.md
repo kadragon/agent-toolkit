@@ -118,7 +118,7 @@ Use the same SHA in the merge command or ready report. On Forgejo, confirm that 
 and its applicable CI match the local candidate.
 
 Apply the [Dispatch pre-merge report](#dispatch-pre-merge-report) gate to every dispatched
-Codex task cycle before a ready report or any authorized base merge.
+task cycle, Codex or Claude, before a ready report or any authorized base merge.
 
 Finalize dispositions and update the PR's `Verification:` section from final evidence when
 authorized. Keep its closing lines and report local and remote check outcomes. On lite, preserve
