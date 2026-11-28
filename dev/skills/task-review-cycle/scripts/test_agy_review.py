@@ -10,9 +10,8 @@ work the prompt never asked for.
 Two fixes, one case group each:
 - The prompt scopes agy to a read-only review (git + file reads, no tests/builds/background
   commands). `case_prompt_is_read_only` fails if that section is removed.
-- Every finished run leaves `<key>.pending` → `<key>.review.txt` + `<key>.meta` under
-  AGY_REVIEW_RESULT_DIR, the same layout codex-review.sh uses, so the pre-merge reclaim
-  (references/late-source-reclaim.md) can collect a late agy review.
+- Every invocation owns its pending marker, review text and metadata under AGY_REVIEW_RESULT_DIR,
+  so the pre-merge reclaim can collect late reviews across resyncs and overlapping launches.
 - Every finished run also appends a `timings.log` line (elapsed + diff size), so the
   `--print-timeout` cap can be argued from data, as codex's is.
 
@@ -27,6 +26,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent / "agy-review.sh"
@@ -42,7 +42,11 @@ while [ $# -gt 0 ]; do
   if [ "$1" = "-p" ]; then printf '%s' "$2" >"$AGY_STUB_CAPTURE"; shift; fi
   shift
 done
-cat "$AGY_STUB_PENDING" >"$AGY_STUB_PENDING_SNAPSHOT" 2>/dev/null || true
+for pending in "$AGY_STUB_RESULTS"/*/run.*/review.pending; do
+  if [ -f "$pending" ]; then
+    cat "$pending" >"$AGY_STUB_PENDING_SNAPSHOT"
+  fi
+done
 printf '%s' "$AGY_STUB_STDOUT"
 exit "$AGY_STUB_EXIT"
 """
@@ -98,7 +102,7 @@ def run(tmp, stdout="", exit_code=0, review_guidance=None, base="main"):
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         "AGY_REVIEW_RESULT_DIR": str(result_dir),
         "AGY_STUB_CAPTURE": str(capture),
-        "AGY_STUB_PENDING": str(result_dir / f"{KEY}.pending"),
+        "AGY_STUB_RESULTS": str(result_dir),
         "AGY_STUB_PENDING_SNAPSHOT": str(snapshot),
         "AGY_STUB_STDOUT": stdout,
         "AGY_STUB_EXIT": str(exit_code),
@@ -116,11 +120,13 @@ def run(tmp, stdout="", exit_code=0, review_guidance=None, base="main"):
     return proc, prompt, pending, result_dir
 
 
-def meta(result_dir):
-    path = result_dir / f"{KEY}.meta"
-    if not path.exists():
-        return {}
+def result_metadata(path):
     return dict(line.split("=", 1) for line in path.read_text().splitlines() if "=" in line)
+
+
+def meta(result_dir):
+    paths = list(result_dir.glob("*/run.*/review.meta"))
+    return result_metadata(paths[0]) if paths else {}
 
 
 def case_script_parses(_tmp):
@@ -137,7 +143,7 @@ def case_base_ref_is_distinguished_from_empty_diff(tmp):
     check("unknown ref names the ref", "no-such-ref" in proc.stderr, proc.stderr)
     check("unknown ref is not reported as an empty diff", "No changes detected" not in proc.stderr, proc.stderr)
     check("agy is not launched for an unknown ref", prompt == "")
-    check("no result trio is written", not (result_dir / f"{KEY}.meta").exists())
+    check("no result trio is written", not list(result_dir.rglob("*.meta")))
     (tmp / "same").mkdir()
     proc, prompt, _, _ = run(tmp / "same", stdout="LGTM\n", base=BRANCH)
     check("empty diff exits 0", proc.returncode == 0, proc.stderr)
@@ -166,7 +172,7 @@ def case_failing_diff_is_an_error_not_an_empty_diff(tmp):
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         "AGY_REVIEW_RESULT_DIR": str(tmp / "results"),
         "AGY_STUB_CAPTURE": str(capture),
-        "AGY_STUB_PENDING": str(tmp / "none"),
+        "AGY_STUB_RESULTS": str(tmp / "results"),
         "AGY_STUB_PENDING_SNAPSHOT": str(tmp / "snap"),
         "AGY_STUB_STDOUT": "LGTM\n",
         "AGY_STUB_EXIT": "0",
@@ -201,13 +207,16 @@ def case_ok_run_persists_review(tmp):
     print("\ncase: a finished run leaves review + meta, and pending existed while it ran")
     proc, _, pending, result_dir = run(tmp, stdout="[P1] Fix x\nOverall verdict: LGTM\n")
     m = meta(result_dir)
-    review = result_dir / f"{KEY}.review.txt"
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=tmp / "repo", text=True).strip()
+    review_paths = list(result_dir.glob(f"{head}/run.*/review.txt"))
+    review = review_paths[0] if review_paths else result_dir / "missing.txt"
     check("script exits 0", proc.returncode == 0, proc.stderr)
     check("stdout still carries the review", "[P1] Fix x" in proc.stdout, proc.stdout)
     check("pending existed during the run", f"branch={BRANCH}" in pending, pending)
-    check("pending removed after the run", not (result_dir / f"{KEY}.pending").exists())
+    check("pending removed after the run", not list(result_dir.rglob("*.pending")))
     check("meta status=ok", m.get("status") == "ok", str(m))
     check("meta carries branch and base", m.get("branch") == BRANCH and m.get("base") == "main", str(m))
+    check("meta carries the full reviewed head", m.get("head_sha") == head, str(m))
     check("meta names the review file", m.get("review_file") == str(review), str(m))
     check("review file holds the text", review.exists() and "[P1] Fix x" in review.read_text())
 
@@ -219,7 +228,7 @@ def case_failed_run_records_failure(tmp):
     check("script exits non-zero", proc.returncode != 0)
     check("meta status=failed", m.get("status") == "failed", str(m))
     check("meta exit_code=3", m.get("exit_code") == "3", str(m))
-    check("no review file", not (result_dir / f"{KEY}.review.txt").exists())
+    check("no review file", not list(result_dir.rglob("*.txt")))
 
 
 def case_empty_run_records_empty(tmp):
@@ -231,15 +240,16 @@ def case_empty_run_records_empty(tmp):
     check("meta review_file is blank", m.get("review_file") == "", str(m))
 
 
-def case_stale_trio_cleared(tmp):
-    print("\ncase: a previous run's result is cleared before the new run")
+def case_legacy_trio_is_not_reused(tmp):
+    print("\ncase: a previous branch-keyed result is not reused")
     result_dir = tmp / "results"
     result_dir.mkdir()
     (result_dir / f"{KEY}.review.txt").write_text("OLD REVIEW\n")
     (result_dir / f"{KEY}.meta").write_text("status=ok\n")
     run(tmp, stdout="  \n")
     check("meta is this run's (empty), not the stale ok", meta(result_dir).get("status") == "empty")
-    check("stale review file removed", not (result_dir / f"{KEY}.review.txt").exists())
+    check("the new invocation has no review text", not list(result_dir.glob("*/run.*/review.txt")))
+    check("the legacy artifact is preserved", (result_dir / f"{KEY}.review.txt").read_text() == "OLD REVIEW\n")
 
 
 def case_every_run_appends_timing(tmp):
@@ -258,6 +268,89 @@ def case_every_run_appends_timing(tmp):
         check(f"{status}: raw branch recorded", line.endswith(f" branch={BRANCH}"), line)
 
 
+def check_overlapping_runs(tmp, *, resync):
+    print(f"\ncase: an older run finishes while a newer run is pending (resync={resync})")
+    repo = make_repo(tmp)
+    old_head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+    stub = tmp / "agy"
+    stub.write_text("""#!/usr/bin/env bash
+printf '%s\n' "$*" >"$AGY_STUB_READY"
+while [ ! -f "$AGY_STUB_RELEASE" ]; do
+  sleep 0.02
+done
+printf '%s\n' "$AGY_STUB_STDOUT"
+""")
+    stub.chmod(0o755)
+    results = tmp / "results"
+    env = {**os.environ, "PATH": f"{tmp}{os.pathsep}{os.environ['PATH']}",
+           "AGY_REVIEW_RESULT_DIR": str(results)}
+    runs = []
+
+    def start(label):
+        ready = tmp / f"{label}.ready"
+        release = tmp / f"{label}.release"
+        proc = subprocess.Popen(
+            ["bash", str(SCRIPT), "main"], cwd=repo,
+            env={**env, "AGY_STUB_READY": str(ready), "AGY_STUB_RELEASE": str(release),
+                 "AGY_STUB_STDOUT": f"{label} review"},
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        runs.append((proc, release))
+        deadline = time.monotonic() + 10
+        while not ready.exists() and proc.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        if not ready.exists():
+            raise RuntimeError(f"{label} agy invocation did not start")
+        return proc, release
+
+    def finish(run):
+        proc, release = run
+        release.touch()
+        _, stderr = proc.communicate(timeout=10)
+        check("review exits 0", proc.returncode == 0, stderr)
+
+    def records(pattern):
+        return [result_metadata(path) for path in results.rglob(pattern)]
+
+    try:
+        old = start("old")
+        if resync:
+            (repo / "b.txt").write_text("new\n")
+            git(repo, "add", "b.txt")
+            git(repo, "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "resync")
+        new_head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+        new = start("new")
+        base = subprocess.check_output(["git", "rev-parse", "main"], cwd=repo, text=True).strip()
+        check("the older prompt pins both revisions",
+              f"{base}...{old_head}" in (tmp / "old.ready").read_text())
+        check("the newer prompt pins both revisions",
+              f"{base}...{new_head}" in (tmp / "new.ready").read_text())
+        finish(old)
+        published = records("*.meta")
+        pending = records("*.pending")
+        check("only the older head has published while the newer run is pending",
+              [record.get("head_sha") for record in published] == [old_head], str(published))
+        check("the newer run's pending marker survives",
+              [record.get("head_sha") for record in pending] == [new_head], str(pending))
+        finish(new)
+        actual = {(record.get("head_sha"), Path(record["review_file"]).read_text().strip())
+                  for record in records("*.meta") if record.get("review_file")}
+        check("both review texts match their own heads",
+              actual == {(old_head, "old review"), (new_head, "new review")}, str(actual))
+        check("all completed runs retired their pending markers", not records("*.pending"))
+    finally:
+        for proc, release in runs:
+            if proc.poll() is None:
+                release.touch()
+                proc.communicate(timeout=10)
+
+
+def case_overlapping_runs_keep_their_own_sidecars(tmp):
+    for name, resync in (("same-head", False), ("resync", True)):
+        case_dir = tmp / name
+        case_dir.mkdir()
+        check_overlapping_runs(case_dir, resync=resync)
+
 def main():
     if os.name == "nt":
         print("POSIX-only (the agy stub uses a shebang) — skipped on Windows")
@@ -274,8 +367,9 @@ def main():
         case_ok_run_persists_review,
         case_failed_run_records_failure,
         case_empty_run_records_empty,
-        case_stale_trio_cleared,
+        case_legacy_trio_is_not_reused,
         case_every_run_appends_timing,
+        case_overlapping_runs_keep_their_own_sidecars,
     )
     for case in cases:
         with tempfile.TemporaryDirectory() as raw:

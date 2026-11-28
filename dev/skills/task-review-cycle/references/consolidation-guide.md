@@ -177,16 +177,17 @@ Include the full PR head SHA in `head` and the usual PR, CI and evidence fields.
 the independent results cover in `review.head` (use `null` when unavailable) and list the reviewers in
 `review.sources`. Set `review.status` to `passed` when the required reviews pass for that
 head, `pending` while awaiting a result, or `missing` when a required result is unavailable.
-Carry the reviewed SHA forward from the evidence. Legacy completion reports without a review
-record remain collectable and surface any missing required sources as a warning.
+Carry the reviewed SHA forward from the evidence. Collection preserves PR completion reports
+and warns when their review record or required source results are missing, stale or incomplete.
 
 After a repair or a home-side resync changes the head, the child resumes at final verification.
 Confirm that the local checkout matches the current PR head and recover the prior source results.
 Obtain one read-only confirmation for the current SHA from each required source whose result
 covers a different head. Give each source the previous SHA, its findings and the delta to check.
 Use the regular source launch when no prior result exists. The disposition and re-review budgets still
-apply to code findings. Record the outcomes on the current SHA before reporting ready. Resume a
-legacy report the same way, using archived evidence that identifies the reviewed head.
+apply to code findings. Reclaim agy results from the matching invocation directory per
+`late-source-reclaim.md`. Record the outcomes on the current SHA before reporting ready. Resume
+a legacy report the same way, using archived evidence that identifies the reviewed head.
 
 For a receipt with `require_review_sources`, set `review_sources` to an object with the keys
 `claude`, `agy` and `codex`. Use `"complete"` only for a completed, consolidated independent

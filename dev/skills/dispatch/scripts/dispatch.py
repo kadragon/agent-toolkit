@@ -522,7 +522,7 @@ def gate_required_reviews(result):
     if not missing:
         return result
     reasons = [f"{reviewer}: {reason}" for reviewer, reason in missing.items()]
-    if status == "ready" or (result.get("pr") and "review" in result):
+    if status == "ready":
         return {**result, "status": "blocked", "phase": "review-sources", "summary": "\n".join(reasons)}
     return {**result, "review_warning": " | ".join(reasons)}
 
@@ -562,11 +562,15 @@ def gate_review_result(result, *, require_review_sources):
     if require_review_sources:
         result = gate_required_reviews(result)
     status = result["status"]
-    # Legacy completions remain collectable with any required-source warnings.
-    if status == "ready" or (status in {"done", "merged"} and result.get("pr") and "review" in result):
-        if reason := review_problem(result, require_review_sources=require_review_sources):
-            return {**result, "status": "blocked", "phase": "review-state", "summary": reason}
-    return result
+    if status != "ready" and not (status in {"done", "merged"} and result.get("pr")):
+        return result
+    reason = review_problem(result, require_review_sources=require_review_sources)
+    if not reason:
+        return result
+    if status == "ready":
+        return {**result, "status": "blocked", "phase": "review-state", "summary": reason}
+    warning = result.get("review_warning")
+    return {**result, "review_warning": f"{warning} | {reason}" if warning else reason}
 
 
 def report_review(args):

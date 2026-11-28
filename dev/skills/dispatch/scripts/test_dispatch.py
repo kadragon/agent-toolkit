@@ -765,6 +765,7 @@ class DispatchReceiptTests(DispatchTestCase):
                 receipt = Path(directory) / "run.json"
                 write_json(receipt, self.RECEIPT)
                 result = {"status": status, "phase": "complete", "summary": "PR work completed", "pr": "example-pr"}
+                expected = {**result, "review_warning": "Independent review is missing"}
                 result_path = receipt.with_name("result.json")
                 write_json(result_path, result)
                 with (
@@ -773,14 +774,14 @@ class DispatchReceiptTests(DispatchTestCase):
                     redirect_stdout(StringIO()) as output,
                 ):
                     collect(SimpleNamespace(run=receipt, close=False))
-                    self.assertEqual(json.loads(output.getvalue())["result"], result)
+                    self.assertEqual(json.loads(output.getvalue())["result"], expected)
                 with (
                     self.subTest(close=True),
                     patch("dispatch.hc_json", side_effect=[terminal, {}, finished, {}]) as hc,
                     redirect_stdout(StringIO()) as output,
                 ):
                     collect(SimpleNamespace(run=receipt, close=True))
-                    self.assertEqual(json.loads(output.getvalue())["result"], result)
+                    self.assertEqual(json.loads(output.getvalue())["result"], expected)
                     self.assertEqual(hc.call_args_list, [
                         call("get", "t7"), call("kill", "t7"), call("get", "t7", timeout=ANY), call("rm", "t7"),
                     ])
@@ -871,7 +872,7 @@ class DispatchReceiptTests(DispatchTestCase):
             ])
             self.assertNotIn("closed_reason", json.loads(receipt.read_text(encoding="utf-8")))
 
-    def test_collect_blocks_pr_outcomes_until_every_required_review_completes(self):
+    def test_collect_blocks_readiness_and_warns_on_completion_when_required_sources_are_missing(self):
         terminal = {**self.TERMINAL, "status": {"state": "done"}}
         cases = (
             (None, ("claude", "agy", "codex", "no completed result")),
@@ -896,10 +897,18 @@ class DispatchReceiptTests(DispatchTestCase):
                         with patch("dispatch.hc_json", return_value=terminal), redirect_stdout(output):
                             collect(SimpleNamespace(run=receipt, close=False))
                         reported = json.loads(output.getvalue())["result"]
-                        self.assertEqual(reported["status"], "blocked" if blockers else status)
+                        blocked = bool(blockers) and status == "ready"
+                        self.assertEqual(reported["status"], "blocked" if blocked else status)
                         self.assertEqual(reported["pr"], "example-pr")
-                        for blocker in blockers:
-                            self.assertIn(blocker, reported["summary"])
+                        if blocked:
+                            self.assertEqual(reported["phase"], "review-sources")
+                            for blocker in blockers:
+                                self.assertIn(blocker, reported["summary"])
+                        else:
+                            warning = reported.pop("review_warning", "")
+                            for blocker in blockers:
+                                self.assertIn(blocker, warning)
+                            self.assertEqual(reported, result)
 
     def test_collect_gates_ready_and_warns_on_completed_reports(self):
         terminal = {**self.TERMINAL, "status": {"state": "done"}}
@@ -936,6 +945,8 @@ class DispatchReceiptTests(DispatchTestCase):
                         warning = reported["summary"] if status == "ready" else reported.get("review_warning", "")
                         for blocker in blockers:
                             self.assertIn(blocker, warning)
+                        if status != "ready":
+                            self.assertIn("Independent review is missing", warning)
 
     def test_collect_warns_about_missing_reviews_without_blocking_done(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -979,6 +990,52 @@ class DispatchReceiptTests(DispatchTestCase):
             self.assertIn("codex: no completed result", output.getvalue())
             self.assertEqual(json.loads(receipt.read_text(encoding="utf-8"))["closed_reason"], "final_result")
 
+    def test_collect_preserves_pr_completion_with_invalid_review_evidence(self):
+        terminal = {**self.TERMINAL, "status": {"state": "done"}}
+        finished = {**terminal, "state": "finished"}
+        head = "a" * 40
+        complete = dict.fromkeys(("claude", "agy", "codex"), "complete")
+        review = {"head": head, "sources": list(complete), "status": "passed"}
+        cases = (
+            ({}, complete, "Independent review is missing"),
+            ({"review": None}, complete, "Independent review is missing"),
+            ({"review": {**review, "head": "b" * 40}}, complete, "Independent review head differs"),
+            ({"review": {**review, "status": "pending"}}, complete, "Independent review is pending"),
+            ({"review": {**review, "sources": ["codex"]}}, complete, "must list claude, agy and codex"),
+            ({"review": review}, {**complete, "agy": "still running"}, "agy: still running"),
+            ({"review": review}, complete, None),
+        )
+        for status in ("done", "merged"):
+            for fields, sources, warning in cases:
+                with self.subTest(status=status, review=fields, sources=sources), tempfile.TemporaryDirectory() as tmp:
+                    receipt = Path(tmp) / "run.json"
+                    write_json(receipt, {**self.RECEIPT, "require_review_sources": True})
+                    result = {"status": status, "phase": "complete", "summary": "PR work completed",
+                              "pr": "example-pr", "head": head, "review_sources": sources, **fields}
+                    result_path = receipt.with_name("result.json")
+                    write_json(result_path, result)
+                    with patch("dispatch.hc_json", return_value=terminal), redirect_stdout(StringIO()) as full:
+                        collect(SimpleNamespace(run=receipt, close=False))
+                    with patch("dispatch.hc_json", return_value=terminal), redirect_stdout(StringIO()) as brief:
+                        collect(SimpleNamespace(run=receipt, close=False, brief=True))
+                    with (
+                        patch("dispatch.hc_json", side_effect=[terminal, {}, finished, {}]) as hc,
+                        redirect_stdout(StringIO()) as closed,
+                    ):
+                        collect(SimpleNamespace(run=receipt, close=True))
+                    for output in (full, closed):
+                        reported = json.loads(output.getvalue())["result"]
+                        if warning:
+                            self.assertIn(warning, reported.pop("review_warning", ""))
+                        self.assertEqual(reported, result)
+                    if warning:
+                        self.assertIn(warning, brief.getvalue())
+                    self.assertEqual(json.loads(result_path.read_text(encoding="utf-8")), result)
+                    self.assertEqual(json.loads(closed.getvalue())["closed_reason"], "final_result")
+                    self.assertEqual(hc.call_args_list, [
+                        call("get", "t7"), call("kill", "t7"), call("get", "t7", timeout=ANY), call("rm", "t7"),
+                    ])
+
     def test_collect_requires_passed_review_on_the_reported_pr_head(self):
         terminal = {**self.TERMINAL, "status": {"state": "done"}}
         head = "a" * 40
@@ -1009,11 +1066,13 @@ class DispatchReceiptTests(DispatchTestCase):
                     with patch("dispatch.hc_json", return_value=terminal), redirect_stdout(StringIO()) as full:
                         collect(SimpleNamespace(run=receipt, close=False))
                     reported = json.loads(full.getvalue())["result"]
-                    if blocker:
+                    if blocker and status == "ready":
                         self.assertEqual(reported["status"], "blocked")
                         self.assertEqual(reported["phase"], "review-state")
                         self.assertIn(blocker, reported["summary"])
                     else:
+                        if blocker:
+                            self.assertIn(blocker, reported.pop("review_warning", ""))
                         self.assertEqual(reported, result)
                     self.assertEqual(reported.get("review"), record)
                     self.assertEqual(json.loads(result_path.read_text(encoding="utf-8")), result)
