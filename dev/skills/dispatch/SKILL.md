@@ -80,10 +80,8 @@ for refresh warnings, pass files, and a manual refresh after redemption.
 | `codex` | Top-tier work goes to `sol`. For `opus`, pass `--bias-exception` with `unknown-cause debugging`, `open grill/spec`, `security`, `auth`, `data migration`, `production DB` or `deploy`. |
 | `claude` | Route `luna` to `haiku`, mid-tier `sol` below `xhigh` to `sonnet`, top-tier `sol/high` to `opus/high`, and `terra` to `sonnet` at the chosen effort. Carry any escalation floor. |
 
-- When `prefer_expiring_passes` is true, route top-tier work to the favored CLI at `xhigh`
-  where the task warrants it. Only `production DB` and `deploy` qualify as task-based exceptions.
-- If another home session holds the shared Codex cache, follow `references/codex-readiness.md` →
-  *Before a shared-cache Codex wave* to use the verified Claude fallback at the same tier.
+- With `prefer_expiring_passes`, use `xhigh` for top-tier work when warranted. Only `production DB` and `deploy` qualify as task-based exceptions.
+- For a shared-cache hold, see the [same-tier Claude fallback](references/codex-readiness.md#before-a-shared-cache-codex-wave).
 - Launch: use `--user-pinned` for an explicit user choice. For a `critical` CLI
   (check `raw_state` when present), pass `--approve-critical` only with the user's approval.
   An exception category may be followed by `: detail`. Report any quota warnings.
@@ -157,10 +155,8 @@ The first message travels as a `claude` argument, so it arrives with the launch.
 (dev:task-next skill)` or the like). A trust dialog on a repo never opened before blocks it —
 answer that with `hc keys <address> down enter` only after telling the user.
 
-For independent Codex waves, use `references/codex-readiness.md` → *Verified wave* to pin
-the reviewed plugin version and send through receipts. For shared-cache launches, follow
-*Before a shared-cache Codex wave* for `prepare-codex` and the options if a live wave holds startup.
-Once the shared cache is ready, launch with:
+For independent Codex waves, [pin the reviewed plugin version](references/codex-readiness.md#verified-wave) and send through receipts.
+For shared-cache launches, [prepare the cache or handle a live-wave hold](references/codex-readiness.md#before-a-shared-cache-codex-wave), then launch:
 
 ```sh
 python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model <codex family> \

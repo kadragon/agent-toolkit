@@ -270,14 +270,19 @@ def shared_cache_children(label):
         terminals = hc_json("ls", "--label", label, timeout=LAUNCH_LOOKUP_SECONDS)["terminals"]
         if not isinstance(terminals, list) or any(not isinstance(terminal, dict) for terminal in terminals):
             raise ValueError("invalid terminal list")
+        live_children = [terminal for terminal in terminals if terminal.get("state") == "live"]
+        for terminal in live_children:
+            address = terminal.get("address")
+            if not isinstance(address, str) or not address.strip():
+                raise ValueError("invalid live terminal address")
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
         raise SystemExit(f"cannot check the shared Codex cache for live waves: {error}") from None
-    return [terminal for terminal in terminals if terminal.get("state") == "live"]
+    return live_children
 
 
 def has_foreign_shared_cache_child(children, parent):
     owners = (terminal.get("parent") for terminal in children)
-    return any(isinstance(owner, str) and owner and owner != parent for owner in owners)
+    return any(isinstance(owner, str) and owner.strip() and owner != parent for owner in owners)
 
 
 def require_shared_cache_available(children, *, parent=None, preparing=False):

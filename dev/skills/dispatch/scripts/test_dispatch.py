@@ -657,10 +657,19 @@ class DispatchReceiptTests(DispatchTestCase):
             with self.assertRaisesRegex(SystemExit, "cannot check the shared Codex cache"):
                 launch(args)
             run.assert_not_called()
-        with patch("dispatch.hc_json", return_value={"terminals": None}), patch("dispatch.subprocess.run") as run:
-            with self.assertRaisesRegex(SystemExit, "cannot check the shared Codex cache"):
-                launch(args)
-            run.assert_not_called()
+        args.dry_run = True
+        for malformed in (None, [{"state": "live", "parent": "t8"}],
+                          [{"address": "", "state": "live", "parent": "t8"}]):
+            with (
+                self.subTest(malformed=malformed),
+                patch("dispatch.hc_json", return_value={"terminals": malformed}),
+                patch("dispatch.warn_linked_worktree"),
+                patch("dispatch.subprocess.run") as run,
+                redirect_stdout(StringIO()),
+            ):
+                with self.assertRaisesRegex(SystemExit, "cannot check the shared Codex cache"):
+                    launch(args)
+                run.assert_not_called()
 
     def test_shared_cache_exception_requires_a_claude_launch_and_home_address(self):
         for overrides, error in (
