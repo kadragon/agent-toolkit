@@ -80,7 +80,8 @@ and `--action feature-push`, then `python3 <dev plugin>/skills/task-review-cycle
 commits, reapplies any needed version bump and pushes the feature branch, and the child resumes at
 final verification (`task-review-cycle` → *Dispatch pre-merge report*). On a conflict, a failed
 check, `denied` or `error`, the child does not resolve or push anything: it stops and reports to
-the home session. A rebase-only repository skips the resync and reports a behind branch the same way.
+the home session, which escalates to the user to resolve the conflict, preserving queue entries from both
+sides, or to grant that child a scoped resolve-and-push phase. A rebase-only repository skips the resync and reports a behind branch the same way.
 
 ## Home merges a child PR
 
