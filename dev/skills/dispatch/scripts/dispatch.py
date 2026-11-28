@@ -630,12 +630,16 @@ def report_review(args):
             raise ValueError("result exceeds 8 KiB")
         result = json.loads(raw.decode("utf-8-sig"))
         validate_result(result)
-        if result["status"] not in {"ready", "blocked"}:
-            raise ValueError("report-review expects a ready or blocked report")
+        if result["status"] not in {"working", "ready", "blocked"}:
+            raise ValueError("report-review expects a working, ready, or blocked report")
         receipt = path.with_name("run.json")
         # Preserve the three-source gate for callers that do not have a dispatch receipt.
         required = requires_review_sources(load_run(receipt)) if receipt.exists() else True
-        gated = gate_review_result(result, require_review_sources=required)
+        # A continuing merge must pass the same review gate as a pre-merge stop.
+        candidate = {**result, "status": "ready"} if result["status"] == "working" else result
+        gated = gate_review_result(candidate, require_review_sources=required)
+        if gated is candidate:
+            gated = result
         serialized = serialize_result(gated)
         if gated is not result and len(serialized.encode("utf-8")) > RESULT_LIMIT:
             phase = gated["phase"]

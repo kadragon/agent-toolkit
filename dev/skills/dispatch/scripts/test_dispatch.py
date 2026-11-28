@@ -43,6 +43,7 @@ from dispatch import (
     pre_merge_resume,
     pre_merge_stop,
     prepare_codex,
+    reached_outcome,
     release,
     report_instruction,
     requires_review_sources,
@@ -1382,6 +1383,39 @@ class DispatchReceiptTests(DispatchTestCase):
                     with patch("dispatch.hc_json", return_value=terminal), redirect_stdout(StringIO()) as output:
                         collect(SimpleNamespace(run=receipt, close=False))
                     self.assertEqual(json.loads(output.getvalue())["result"], saved)
+
+    def test_report_review_distinguishes_continuing_merge_from_pause(self):
+        head = "a" * 40
+        cases = (
+            ("working", head, False, "working", "review", None),
+            ("ready", head, False, "ready", "review", "ready"),
+            ("working", "b" * 40, False, "blocked", "review-state", None),
+            ("working", head, True, "blocked", "review-sources", None),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            path = receipt.with_name("result.json")
+            for status, review_head, require_sources, expected, phase, outcome in cases:
+                with self.subTest(status=status, review_head=review_head, require_sources=require_sources):
+                    write_json(receipt, {
+                        **self.RECEIPT, "cli": "claude", "pre_merge_stop": status == "ready",
+                        "require_review_sources": require_sources,
+                    })
+                    result = {
+                        "status": status, "phase": "review", "summary": "CI passed",
+                        "pr": "example-pr", "head": head, "ci": "success",
+                        "review": {"head": review_head, "sources": ["codex"], "status": "passed"},
+                    }
+                    completed = subprocess.run(
+                        [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "report-review", str(path)],
+                        input=json.dumps(result), text=True, check=False, capture_output=True,
+                    )
+                    self.assertEqual(completed.returncode, 0, completed.stderr)
+                    saved = json.loads(path.read_text(encoding="utf-8"))
+                    self.assertEqual((saved["status"], saved["phase"]), (expected, phase))
+                    self.assertEqual(saved["review"], result["review"])
+                    report = {"result": saved, "state": "running", "status": "active"}
+                    self.assertEqual(reached_outcome(report, {"ready", "merged"}), outcome)
 
     def test_explicit_review_policy_overrides_the_legacy_source_flag(self):
         self.assertFalse(requires_review_sources({"review_policy": "head-bound", "require_review_sources": True}))
