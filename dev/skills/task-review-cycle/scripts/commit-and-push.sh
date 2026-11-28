@@ -250,7 +250,6 @@ elif [ -n "$FILES" ]; then
   # Word-split is intentional here: FILES is a space-separated list of paths.
   # shellcheck disable=SC2086
   for f in $FILES; do
-    # A listed staged deletion still belongs in the commit pathspec.
     if [ "$EXPLICIT_FILES" = "true" ]; then
       REQUESTED+=("$f")
     fi

@@ -195,7 +195,6 @@ if [ "$MERGE_OK" = "true" ]; then
     fi
   fi
   if [ "$CAN_CLEAN" = "true" ]; then
-    # Worktree first: a checked-out feature branch must be kept.
     if [ -n "$WORKTREE_PATH" ]; then
       PY=$(command -v python3 || command -v python || true)
       BROKER_NOTE=""
@@ -211,7 +210,11 @@ if [ "$MERGE_OK" = "true" ]; then
             ;;
         esac
       fi
-      if [ -n "$HOLDER" ] || [ -n "$BROKER_NOTE" ]; then
+      WORKTREE_GIT_DIR=$(git -C "$WORKTREE_PATH" rev-parse --absolute-git-dir 2>/dev/null || true)
+      if [ -n "$WORKTREE_GIT_DIR" ] && { [ -d "$WORKTREE_GIT_DIR/rebase-merge" ] ||
+        [ -d "$WORKTREE_GIT_DIR/rebase-apply" ] || [ -f "$WORKTREE_GIT_DIR/BISECT_START" ]; }; then
+        WORKTREE_MSG="WARNING: Could not remove worktree '${WORKTREE_PATH}': rebase or bisect is in progress"
+      elif [ -n "$HOLDER" ] || [ -n "$BROKER_NOTE" ]; then
         WORKTREE_MSG="WARNING: Could not remove worktree '${WORKTREE_PATH}': ${BROKER_NOTE} ${HOLDER}"
       elif REMOVE_ERR=$(git worktree remove "$WORKTREE_PATH" 2>&1); then
         WORKTREE_MSG="Worktree '${WORKTREE_PATH}' removed"

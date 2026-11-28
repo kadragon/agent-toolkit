@@ -156,6 +156,11 @@ def case_branch_in_a_detached_rebase_is_kept(tmp):
     out = run("branch_in_a_detached_rebase_is_kept", repo, d)
     if not branch_exists(repo) or "checked out" not in out["cleanup_message"]:
         fail("branch_in_a_detached_rebase_is_kept", f"got {out!r}")
+    # Git can remove a clean detached worktree even when the rebase is active.
+    git(wt, "restore", "--source=HEAD", "--staged", "--worktree", "--", "a.md")
+    out = run("branch_in_a_detached_rebase_is_kept", repo, d, worktree=wt)
+    if not wt.is_dir() or not branch_exists(repo) or "rebase or bisect" not in out["worktree_message"]:
+        fail("branch_in_a_detached_rebase_is_kept", f"cleanup discarded active worktree state: {out!r}")
     git(wt, "rebase", "--abort")
     print("ok branch_in_a_detached_rebase_is_kept")
 
