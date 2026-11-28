@@ -345,6 +345,8 @@ def backlog_list(req: dict, reservations=(), *, snapshot=False) -> dict:
                 candidate["body_digest"] = hashlib.sha256(body.encode("utf-8")).hexdigest()
             else:
                 candidate["covers"] = [backlog_lines[item["line"] - 1] for item in selection]
+                bodies = [_backlog_item_body(backlog_lines, item["line"]) for item in selection]
+                candidate["body_digest"] = hashlib.sha256(json.dumps(bodies).encode("utf-8")).hexdigest()
         candidates.append(candidate)
 
     parked = []
@@ -379,6 +381,19 @@ def _strip_marker(m: re.Match) -> str:
     return m.group(0) if m.group(1).lower() == "blocked by" and bc._is_placeholder_payload(m.group(2)) else " "
 
 
+def _backlog_item_body(lines: list[str], line: int) -> str:
+    """Read the checkbox and its indented Markdown, including interior blank lines."""
+    end = line
+    for index in range(line, len(lines)):
+        content = lines[index]
+        if not content.strip():
+            continue
+        if not content[0].isspace():
+            break
+        end = index + 1
+    return "\n".join(lines[line - 1:end])
+
+
 def backlog_show(req: dict) -> dict:
     label, line = _parse_ref(req.get("ref"))
     backlog, tasks = _paths(req)
@@ -401,11 +416,6 @@ def backlog_show(req: dict) -> dict:
             "labels": [], "blocked_by": [], "parent": _ref(label, outer[-1]["line"]) if outer else None,
             "url": "",
         }
-    body_lines = [lines[line - 1]]
-    for nxt in lines[line:]:
-        if not (nxt[:1].isspace() and nxt.strip()):
-            break
-        body_lines.append(nxt)
     blocked_by = [
         m.group(2).strip() for m in bc._BLOCK_MARKER_RE.finditer(token["text"])
         if m.group(1).lower() == "blocked by" and not bc._is_placeholder_payload(m.group(2))
@@ -413,7 +423,7 @@ def backlog_show(req: dict) -> dict:
     above = [h for h in headings if h["line"] < line]
     return {
         "ref": _ref(label, line), "title": " ".join(bc._BLOCK_MARKER_RE.sub(_strip_marker, token["text"]).split()),
-        "body": "\n".join(body_lines), "labels": [], "blocked_by": blocked_by,
+        "body": _backlog_item_body(lines, line), "labels": [], "blocked_by": blocked_by,
         "parent": _ref(label, above[-1]["line"]) if above else None, "url": "",
     }
 

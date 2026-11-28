@@ -29,7 +29,8 @@ FEATURE = "feat/x"
 
 # Stub hub.sh: report a successful merge and leave every local ref alone, as the real one does.
 HUB_STUB = """#!/usr/bin/env bash
-echo '{"merge_ok": true, "merge_output": "stub"}'
+HEAD_SHA=$(git rev-parse refs/heads/main)
+jq -n --arg sha "$HEAD_SHA" '{merge_ok: true, merge_output: "stub", head_sha: $sha}'
 """
 
 
@@ -111,6 +112,30 @@ def case_deleted_by_script(tmp):
     if msg != f"Local branch '{FEATURE}' deleted" or branch_exists(repo):
         fail("deleted_by_script", f"got {msg!r}, branch exists={branch_exists(repo)}")
     print("ok deleted_by_script")
+
+
+def case_branch_ahead_of_merged_head_is_kept(tmp):
+    repo, d = make_repo(tmp), make_script_dir(tmp)
+    git(repo, "checkout", "-q", "main")
+    wt = Path(tempfile.mkdtemp(dir=tmp)) / "wt"
+    git(repo, "worktree", "add", "-q", str(wt), FEATURE)
+    git(wt, "commit", "--allow-empty", "-qm", "[TEST] unpushed feature work")
+    local_head = git(wt, "rev-parse", "HEAD").stdout.strip()
+    out = run("branch_ahead_of_merged_head_is_kept", repo, d, worktree=wt)
+    if not branch_exists(repo) or git(repo, "rev-parse", FEATURE).stdout.strip() != local_head:
+        fail("branch_ahead_of_merged_head_is_kept", f"lost unpushed commit {local_head}: {out!r}")
+    if "does not match" not in out["cleanup_message"]:
+        fail("branch_ahead_of_merged_head_is_kept", f"missing mismatch warning: {out!r}")
+    print("ok branch_ahead_of_merged_head_is_kept")
+
+
+def case_unreported_merged_head_keeps_local_branch(tmp):
+    repo, d = make_repo(tmp), make_script_dir(tmp)
+    (d / "hub.sh").write_text("echo '{\"merge_ok\": true}'\n", encoding="utf-8")
+    out = run("unreported_merged_head_keeps_local_branch", repo, d)
+    if not branch_exists(repo) or "unknown" not in out["cleanup_message"]:
+        fail("unreported_merged_head_keeps_local_branch", f"got {out!r}")
+    print("ok unreported_merged_head_keeps_local_branch")
 
 
 def case_real_failure_still_warns(tmp):
@@ -528,6 +553,8 @@ def main():
         case_unauthorized_merge_never_calls_hub(tmp)
         case_hub_never_deletes_local(tmp)
         case_deleted_by_script(tmp)
+        case_branch_ahead_of_merged_head_is_kept(tmp)
+        case_unreported_merged_head_keeps_local_branch(tmp)
         case_real_failure_still_warns(tmp)
         case_unknown_branch_warns(tmp)
         case_worktree_holding_branch(tmp)

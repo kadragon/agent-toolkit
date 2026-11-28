@@ -1574,11 +1574,11 @@ def verify_pinned_delivery(run, terminal):
         raise SystemExit(f"{run['address']}: pinned task withheld; {error}") from None
 
 
-def require_shared_guard(run):
+def require_shared_guard(run, terminal):
     versions = installed_plugin_versions()
     started = (run or {}).get("plugin_versions") or {}
     dev = versions.get("dev")
-    if not dev or ("guard" in versions and (not started or "guard" in started)):
+    if not dev:
         return
     manifest = plugin_cache() / "dev" / dev / pinned_wave.MANIFEST
     try:
@@ -1587,14 +1587,29 @@ def require_shared_guard(run):
         return
     except (OSError, ValueError) as error:
         raise SystemExit(f"task withheld; can't read the installed dev plugin manifest: {error}") from None
-    if "hooks" not in installed:
+    if "hooks" in installed:
+        return
+    if "guard" not in versions or (started and "guard" not in started):
         raise SystemExit("task withheld; install guard@kadragon, restart the idle Codex child, and review its hooks")
+
+    # Cache directories outlive plugin disablement. Query the effective hooks in
+    # the child's directory before sending work that relies on the separate guard.
+    target = ((terminal.get("foreground") or {}).get("cwd") or (run or {}).get("cwd")
+              or terminal.get("cwd"))
+    binary = shutil.which("codex")
+    if not target or binary is None:
+        raise SystemExit("task withheld; cannot locate Codex or the target directory to verify guard@kadragon hooks")
+    try:
+        cwd = Path(target).resolve(strict=True)
+        shared_codex.inventory(binary, codex_home(), cwd, versions, require_guard=True)
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+        raise SystemExit(f"task withheld; cannot verify guard@kadragon hooks: {error}") from None
 
 
 def verify_delivery_turn(run, terminal):
     verify_pinned_delivery(run, terminal)
     if not run or not run.get("wave"):
-        require_shared_guard(run)
+        require_shared_guard(run, terminal)
     else:
         current = hc_json("get", run["address"])
         verify_terminal(run, current)

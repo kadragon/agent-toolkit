@@ -123,6 +123,23 @@ def case_staged_deletion(tmp):
     print("OK: staged deletion no longer aborts the stage step (sibling edit still committed)")
 
 
+def case_explicit_paths_preserve_unrelated_staged_changes(tmp):
+    repo = make_repo(tmp)
+    (repo / "keep.md").write_text("listed edit\n")
+    (repo / "unrelated.md").write_text("already staged\n")
+    git(repo, "add", "unrelated.md")
+    git(repo, "rm", "-q", "tasks.md")
+
+    proc, payload = run_script(repo, "keep.md tasks.md")
+    if proc.returncode or not payload or not payload["committed"]:
+        fail("explicit paths", f"commit failed: {proc.stderr.strip()}")
+    if name_status(repo) != ["D\ttasks.md", "M\tkeep.md"]:
+        fail("explicit paths", f"commit contains {name_status(repo)}")
+    if git(repo, "diff", "--cached", "--name-only").stdout.strip() != "unrelated.md":
+        fail("explicit paths", "unrelated change disappeared from the index")
+    print("OK: explicit paths commit a listed staged deletion and leave unrelated entries staged")
+
+
 def case_deletion_only(tmp):
     """A cycle whose ONLY change is an already-staged deletion must still commit."""
     repo = make_repo(tmp)
@@ -657,6 +674,7 @@ def main():
         case_remote_boundaries(tmp)
         case_implementation_only_blocks_before_commit(tmp)
         case_staged_deletion(tmp)
+        case_explicit_paths_preserve_unrelated_staged_changes(tmp)
         case_deletion_only(tmp)
         case_unstaged_deletion(tmp)
         case_unknown_path(tmp)
