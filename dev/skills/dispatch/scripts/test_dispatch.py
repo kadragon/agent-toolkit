@@ -1611,6 +1611,8 @@ class SharedCodexPreparationTests(unittest.TestCase):
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
         self.home = self.root / "codex"
         self.cache = self.home / "plugins/cache/kadragon/guard"
+        self.binary = str(self.root / "bin" / "codex.cmd")
+        self.enterContext(patch("dispatch.shutil.which", return_value=self.binary))
         self.enterContext(patch.dict(os.environ, {"CODEX_HOME": str(self.home)}))
         self.args = SimpleNamespace(repo=self.root, cwd=self.root, parent="t6")
         self.terminal = {"address": "t7", "parent": "t6", "state": "live",
@@ -1631,7 +1633,7 @@ class SharedCodexPreparationTests(unittest.TestCase):
         (root / "hooks/guard.py").write_text(content + "\n", encoding="utf-8")
 
     def codex(self, argv, **kwargs):
-        if argv[0] == "codex":
+        if argv[0] == self.binary:
             self.events.append(argv)
             self.assertEqual(kwargs["cwd"], self.root)
             self.install("1.1.0", "new guard")
@@ -1651,7 +1653,7 @@ class SharedCodexPreparationTests(unittest.TestCase):
         return json.dumps({"version": self.expected})
 
     def hooks(self, binary, home, method, params, **kwargs):
-        self.assertEqual((binary, home, method, params), ("codex", self.home, "hooks/list", {"cwds": [str(self.root)]}))
+        self.assertEqual((binary, home, method, params), (self.binary, self.home, "hooks/list", {"cwds": [str(self.root)]}))
         self.assertTrue(kwargs["experimental"])
         version = next(self.cache.iterdir()).name
         self.events.append(f"hooks {version}")
@@ -1669,7 +1671,7 @@ class SharedCodexPreparationTests(unittest.TestCase):
             return {"terminals": []}
         if command == "run":
             self.events.append("hc run")
-            self.assertEqual(args[-3:], ("codex", "--no-daemon", "--no-alt-screen"))
+            self.assertEqual(args[-3:], (self.binary, "--no-daemon", "--no-alt-screen"))
             self.assertIn("--no-notify", args)
             return {"address": "t7"}
         self.assertEqual(args[-1], "t7")
@@ -1697,7 +1699,7 @@ class SharedCodexPreparationTests(unittest.TestCase):
         self.install("1.0.0", "trusted guard")
         report = self.prepare("1.1.0")
         self.assertEqual(self.events, ["git fetch", "hooks 1.0.0",
-                                       ["codex", "plugin", "marketplace", "upgrade", "kadragon"],
+                                       [self.binary, "plugin", "marketplace", "upgrade", "kadragon"],
                                        "hc run", "hc kill", "hc rm", "hooks 1.1.0"])
         self.assertTrue(report["upgraded"])
         self.assertEqual(report["installed"], {"guard": "1.1.0"})

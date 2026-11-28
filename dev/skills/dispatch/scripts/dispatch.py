@@ -38,6 +38,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -732,13 +733,13 @@ def close_codex_warmup(run):
     hc_json("rm", address, timeout=CLOSE_WAIT_SECONDS)
 
 
-def warmup_codex(cwd, parent, label):
+def warmup_codex(binary, cwd, parent, label):
     name = f"dispatch-warmup-{secrets.token_hex(4)}"
     started = time.time_ns() // 1_000_000 - 1000
     try:
         reply = hc_json("run", "--bg", "--no-notify", "--name", name, "--cwd", str(cwd),
                         "--label", label, *(["--parent", parent] if parent else ["--no-parent"]),
-                        "codex", "--no-daemon", "--no-alt-screen", timeout=LAUNCH_LOOKUP_SECONDS)
+                        binary, "--no-daemon", "--no-alt-screen", timeout=LAUNCH_LOOKUP_SECONDS)
         address = reply["address"]
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         raise ValueError(f"warm-up launch could not be confirmed; check {name} in Herdr: {error}") from None
@@ -783,6 +784,9 @@ def prepare_codex(args):
     try:
         cwd = Path(args.cwd).expanduser().resolve(strict=True)
         repo = Path(args.repo).expanduser().resolve(strict=True)
+        binary = shutil.which("codex")
+        if binary is None:
+            raise ValueError("Codex CLI executable not found")
         with lock_shared_cache(home):
             require_shared_cache_available(shared_cache_children(label), preparing=True)
             before = installed_plugin_versions()
@@ -790,7 +794,7 @@ def prepare_codex(args):
             baseline_path = home / "dispatch-trusted-hooks.json"
             baseline = json.loads(baseline_path.read_text(encoding="utf-8")) if baseline_path.exists() else {}
             try:
-                _, old_hooks = shared_codex.inventory(home, cwd, before)
+                _, old_hooks = shared_codex.inventory(binary, home, cwd, before)
             except (OSError, ValueError, KeyError):
                 if installed_plugin_versions() == before:
                     raise
@@ -801,13 +805,13 @@ def prepare_codex(args):
             current = installed_plugin_versions()
             upgrade = any(current.get(name) != version for name, version in expected.items())
             if upgrade:
-                shared_codex.command(["codex", "plugin", "marketplace", "upgrade", shared_codex.MARKET],
+                shared_codex.command([binary, "plugin", "marketplace", "upgrade", shared_codex.MARKET],
                                      cwd=cwd, timeout=None)
-            warmup_codex(cwd, parent, label)
+            warmup_codex(binary, cwd, parent, label)
             installed = installed_plugin_versions()
             if any(installed.get(name) != version for name, version in expected.items()):
                 raise ValueError(f"installed versions after warm-up {installed} differ from expected {expected}")
-            pending, snapshot = shared_codex.inventory(home, cwd, installed, require_guard="guard" in expected)
+            pending, snapshot = shared_codex.inventory(binary, home, cwd, installed, require_guard="guard" in expected)
             if installed_plugin_versions() != installed:
                 raise ValueError("the installed plugins changed during final hook discovery; prepare the wave again")
             diffs = shared_codex.trusted_diff(pending, snapshot, baseline)

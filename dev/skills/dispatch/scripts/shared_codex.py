@@ -38,8 +38,8 @@ def remote_versions(repo, installed):
     }
 
 
-def inventory(home, cwd, versions, *, require_guard=False):
-    response = request("codex", home, "hooks/list", {"cwds": [str(cwd)]},
+def inventory(binary, home, cwd, versions, *, require_guard=False):
+    response = request(binary, home, "hooks/list", {"cwds": [str(cwd)]},
                        timeout=TIMEOUT, cwd=cwd, experimental=True)
     [group] = response["data"]
     if Path(group["cwd"]).resolve() != cwd or group["errors"] or group["warnings"]:
