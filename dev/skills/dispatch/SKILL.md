@@ -156,7 +156,8 @@ The first message travels as a `claude` argument, so it arrives with the launch.
 answer that with `hc keys <address> down enter` only after telling the user.
 
 For independent Codex waves, [pin the reviewed plugin version](references/codex-readiness.md#verified-wave) and send through receipts.
-For shared-cache launches, [prepare the cache or handle a live-wave hold](references/codex-readiness.md#before-a-shared-cache-codex-wave), then launch:
+For shared-cache launches, [prepare the cache or choose a fallback](references/codex-readiness.md#before-a-shared-cache-codex-wave).
+Run the command below once the shared cache is ready.
 
 ```sh
 python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model <codex family> \
