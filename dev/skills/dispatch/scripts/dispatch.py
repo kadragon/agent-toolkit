@@ -6,7 +6,7 @@
   dispatch.py launch --cli claude|codex --model M --effort E --cwd PATH
                      --work-kind queue|new|standalone --request REQUEST --unit UNIT
                      [--git-limits LIMITS] [--git-grant-recorded | --no-git-writes]
-                     [--review-transfer-approval APPROVAL]
+                     [--review-transfer-approval APPROVAL] [--no-standing-review-approval]
                      [--relaunch-from PREVIOUS_RUN]
                      [--name N] [--title TEXT] [--parent T] [--task TASK] [--trust-hooks] [--keep-connectors]
                      [--dry-run] [MESSAGE]
@@ -14,6 +14,9 @@
       --title becomes the hc label title=TEXT and, without --name, the source of the name.
       Codex takes --task or a later send with --run. Claude takes MESSAGE.
       --trust-hooks bypasses persisted hook trust for this Codex launch only.
+      Queue and new work without --git-limits carry the dispatch default through merge. Task cycles
+      and task-review launches carry the standing review transfer approval unless
+      --review-transfer-approval or --no-standing-review-approval replaces it.
       A Codex family (luna, terra, sol, any case) resolves to its newest listed slug in
       $CODEX_HOME/models_cache.json; a full slug passes through. fable and astra are refused.
   dispatch.py send [--run RECEIPT] [--continue | --resend] ADDRESS MESSAGE
@@ -137,6 +140,16 @@ WAIT_OUTCOMES = (*WAIT_DEFAULT, "done")
 WAIT_POLL_SECONDS = 2
 WAIT_TIMEOUT_SECONDS = 1800
 TASK_COMMANDS = {"claude": ("/dev:task-next", "/dev:task-new"), "codex": ("$task-next", "$task-new")}
+REVIEW_COMMANDS = {"/dev:task-review", "$task-review"}
+DEFAULT_GIT_LIMITS = ("dispatch-default: through merge (commit, feature-push, pr-write, and base-merge "
+                      "after the review cycle passes); the user stated no Git limits")
+STANDING_REVIEW_TRANSFER = (
+    "Standing user approval (2026-11-28): invoking task-review, directly or through a task-next or "
+    "task-new cycle, authorizes sending this repository's change diff, relevant source, Sprint Contract "
+    "and root REVIEW.md to the required independent reviewers: Anthropic Claude CLI, OpenAI Codex CLI "
+    "and Google Antigravity. An explicit user prohibition in the original request and the repository's "
+    "data-sharing policy override it."
+)
 BANNED_MODELS = ("fable", "astra")
 CODEX_FAMILIES = ("luna", "terra", "sol")
 CODEX_SLUG = re.compile(r"gpt-(\d+(?:\.\d+)*)-([a-z]+)")
@@ -648,6 +661,10 @@ def first_prompt(cli, message, handoff):
               "Git limits": handoff["git_limits"]}
     if "additional_git_limits" in handoff:
         fields["Additional Git limits (verbatim)"] = handoff["additional_git_limits"]
+    review_command = message.split(maxsplit=1)[0] in REVIEW_COMMANDS
+    if (handoff.get("review_transfer_standing") or (review_command and "review_transfer_approval" not in handoff
+                                                    and not handoff.get("no_standing_review_approval"))):
+        fields["Review transfer approval (standing)"] = STANDING_REVIEW_TRANSFER
     if "review_transfer_approval" in handoff:
         fields["Review transfer approval (verbatim)"] = handoff["review_transfer_approval"]
     if reservation := handoff.get("queue_reservation"):
@@ -730,9 +747,13 @@ def launch_handoff(args, cwd):
         handoff["git_limits"] = "implementation-only"
         if not no_authority:
             handoff["additional_git_limits"] = args.git_limits
+    elif handoff["work_kind"] in {"queue", "new"} and args.git_limits is None:
+        if grant_recorded:
+            raise SystemExit("--git-grant-recorded needs the verbatim grant in --git-limits")
+        handoff["git_limits"] = DEFAULT_GIT_LIMITS
     elif handoff["work_kind"] in {"queue", "new"} and (no_authority or not (standard_limits or grant_recorded)):
-        raise SystemExit("--git-limits must carry a verified user grant; "
-                         "use --git-grant-recorded with a verbatim free-form grant, or "
+        raise SystemExit("--git-limits must carry a verified user grant; omit it for the dispatch default "
+                         "through merge, use --git-grant-recorded with a verbatim free-form grant, or "
                          "use --no-git-writes for implementation-only work")
     elif not limits:
         raise SystemExit("--git-limits must not be blank")
@@ -741,6 +762,10 @@ def launch_handoff(args, cwd):
         if not approval.strip():
             raise SystemExit("--review-transfer-approval must not be blank")
         handoff["review_transfer_approval"] = approval
+    elif getattr(args, "no_standing_review_approval", False):
+        handoff["no_standing_review_approval"] = True
+    elif handoff["work_kind"] in {"queue", "new"}:
+        handoff["review_transfer_standing"] = True
     extra_lines = configured_handoff_lines(Path.cwd(), cwd)
     if extra_lines:
         handoff["extra_lines"] = extra_lines
@@ -2451,6 +2476,8 @@ def main(argv):
                           help="confirm that free-form --git-limits records the verified user grant")
     git_mode.add_argument("--no-git-writes", action="store_true", help="hand off implementation-only work")
     launch_parser.add_argument("--review-transfer-approval", help="verbatim user grant for reviewer data transfer")
+    launch_parser.add_argument("--no-standing-review-approval", action="store_true",
+                               help="omit the standing review transfer approval (the user restricted reviewer transfers)")
     launch_parser.add_argument("--relaunch-from", help="previous dispatch receipt to carry timing across a relaunch")
     launch_parser.add_argument("--name")
     launch_parser.add_argument("--title", help="short task title; hc label title=TEXT, and the name source without --name")

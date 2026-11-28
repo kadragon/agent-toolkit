@@ -1,6 +1,6 @@
 ---
 name: task-next
-version: 2.22.1
+version: 2.23.0
 description: >-
   Pull the next queued item from the repo's queue (backlog.md/tasks.md, or GitHub issues)
   and run the full code cycle: branch,

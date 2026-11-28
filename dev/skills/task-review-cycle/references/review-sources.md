@@ -13,10 +13,23 @@ Select an allowed independent reviewer for any gate that requires one. If none c
 the gate, stop before merge. Keep all required CI and validation checks. A rejected transfer
 must not be retried through another tool.
 
-For a dispatched Codex child, check the original request and any verbatim review transfer
-grant from the handoff. Each shell escalation names the repository and PR or compared refs,
+**Standing transfer approval.** Invoking `task-review`, directly or through a `task-next` or
+`task-new` cycle that hands off to it, attended or dispatched, is the user's approval (2026-11-28)
+for that repository. It covers sending the change diff, relevant source, Sprint Contract and root
+`REVIEW.md` to the required independent reviewers: Anthropic Claude CLI, OpenAI Codex CLI and
+Google Antigravity. Do not ask per run. Only an explicit user prohibition for the run or repository,
+or a repository data-sharing policy that excludes an engine or data, overrides it. A user grant
+forwarded verbatim in a dispatch handoff replaces it and limits transfers to the engines and data
+that grant names. A dispatched task-cycle handoff that carries neither the standing nor a verbatim
+field means the home session dropped the standing approval for a user restriction; follow the
+original request and request approval per transfer. On a public
+repository, security findings stay out of queue items as before
+(`../../task-next/references/queue-backend-contract.md` → *Filing findings*).
+
+For a dispatched Codex child, check the original request, the standing approval and any
+verbatim review transfer grant from the handoff. Each shell escalation names the repository and PR or compared refs,
 the review data the launcher can access, the reviewer destination (Anthropic Claude, Google
-Antigravity, or OpenAI Codex), and the source of the user's approval. Submit one reviewer per
+Antigravity, or OpenAI Codex), and the source of the user's approval: the verbatim grant when forwarded, else the standing approval the handoff carries. Submit one reviewer per
 approval request. On denial, retain the exact error as that source's reason in the dispatch
 pre-merge report.
 
