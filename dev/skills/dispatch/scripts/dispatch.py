@@ -103,7 +103,8 @@ WARNING_VIEW_FOOTER = re.compile(
 PASTED_CONTENT = re.compile(r"\[Pasted Content \d+ chars\](?: #\d+)?")
 HERDR_MESSAGE = re.compile(r'^<hc\s+from="[^"]+"(?:\s+[\w-]+="[^"]*")*>\s*(.*?)\s*</hc>$', re.DOTALL)
 CODEX_STATUS_LINE = re.compile(
-    r"^ {2,}(?:gpt-\S+|(?:~|…|[a-z]:)?[/\\]\S)",
+    r"^ {2,}(?:gpt-\S+|(?:~|…|[a-z]:)?[/\\]\S|"
+    r"\S+ · (?:[^·]+ · )*Context \d+% used(?: · |$))",
     re.IGNORECASE,
 )
 CODEX_SHORTCUT_LINE = re.compile(r"^ {2,}(?:← for agents · )?\? for shortcuts\b(?: {2,}\S.*)?", re.IGNORECASE)

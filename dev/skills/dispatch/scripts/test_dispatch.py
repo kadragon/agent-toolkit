@@ -1554,6 +1554,8 @@ class DispatchReceiptTests(DispatchTestCase):
         composer = "› Ask Codex to do anything\n\n  GPT-6.2-Sol default · ~/repo"
         draft = ("› Unsent follow-up\n\n  GPT-6.2-Sol default · ~/repo\n"
                  "  ← for agents · ? for shortcuts")
+        branch_draft = draft.replace("GPT-6.2-Sol default · ~/repo",
+                                     "main · weekly 54% left · Context 0% used · my-app")
         warning = "       ⚠ 1 warning · f2 to view"
         ide_context = "       IDE context"
         cases = (
@@ -1566,6 +1568,8 @@ class DispatchReceiptTests(DispatchTestCase):
             (f"› Next task\n\n{failure}\n\n{draft}{warning}", "hooks_broken"),
             (f"› Next task\n\n{failure}\n\n{draft}{ide_context}", "hooks_broken"),
             (f"› Next task\n\n{failure}\n\n{draft}{ide_context}{warning}", "hooks_broken"),
+            (f"› Next task\n\n{failure}\n\n{branch_draft}{ide_context}", "hooks_broken"),
+            (f"› Next task\n\n{failure}\n\n{branch_draft}{ide_context}{warning}", "hooks_broken"),
             (f"{failure}\n\n{composer}", "hooks_broken"),
         )
         with tempfile.TemporaryDirectory() as directory, \
