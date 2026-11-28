@@ -33,7 +33,8 @@
       A Codex child whose hooks fail, or whose launch-time kadragon plugin version directory
       was removed, reports stop_reason hooks_broken; any plugin version change warns on stderr.
   dispatch.py prepare-codex --repo PATH --cwd PATH [--parent ADDRESS]
-      Prepare the shared marketplace and report the native hooks awaiting review.
+      Pin the shared marketplace to the remote head commit, upgrade it, and report the native
+      hooks awaiting review.
   dispatch.py pin --repo PATH --commit SHA --codex PATH
       Create an isolated Codex wave. Launch idle children with launch --wave WAVE.
   dispatch.py release WAVE
@@ -125,6 +126,7 @@ WARMUP_SETTLE_SECONDS = 2
 MARKETPLACE_UPGRADE_SECONDS = 180
 DRAFT_CLEARS = 5
 DRAFT_CLEAR_SETTLE_SECONDS = 1
+WARNING_CLOSE_SETTLE_SECONDS = 1
 LOST_SETTLE_SECONDS = 2
 RESULT_STATES = {"done", "ready", "blocked", "merged", "working"}
 RESULT_LIMIT = 8192
@@ -155,6 +157,7 @@ CODEX_FAMILIES = ("luna", "terra", "sol")
 CODEX_SLUG = re.compile(r"gpt-(\d+(?:\.\d+)*)-([a-z]+)")
 QUOTA_SCRIPT = Path(__file__).resolve().with_name("quota.py")
 QUOTA_TIMEOUT_SECONDS = 10
+SHARED_CACHE_HOLD = "shared-cache hold"
 EXPIRING_PASS_EXCEPTIONS = ("production DB", "deploy")
 BIAS_EXCEPTIONS = ("unknown-cause debugging", "open grill/spec", "security", "auth", "data migration",
                    *EXPIRING_PASS_EXCEPTIONS)
@@ -267,25 +270,49 @@ def lock_shared_cache(home):
 def shared_cache_children(label):
     try:
         terminals = hc_json("ls", "--label", label, timeout=LAUNCH_LOOKUP_SECONDS)["terminals"]
-    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        if not isinstance(terminals, list) or any(not isinstance(terminal, dict) for terminal in terminals):
+            raise ValueError("invalid terminal list")
+        live_children = [terminal for terminal in terminals if terminal.get("state") == "live"]
+        for terminal in live_children:
+            address = terminal.get("address")
+            if not isinstance(address, str) or not address.strip():
+                raise ValueError("invalid live terminal address")
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
         raise SystemExit(f"cannot check the shared Codex cache for live waves: {error}") from None
-    return [terminal for terminal in terminals if terminal.get("state") == "live"]
+    return live_children
+
+
+def has_foreign_shared_cache_child(children, parent):
+    owners = (terminal.get("parent") for terminal in children)
+    return any(isinstance(owner, str) and owner.strip() and owner != parent for owner in owners)
 
 
 def require_shared_cache_available(children, *, parent=None, preparing=False):
     others = [terminal["address"] for terminal in children
               if preparing or parent is None or terminal.get("parent") != parent]
     if others:
+        guidance = ""
+        if not preparing:
+            if parent is None:
+                guidance = "; use --parent to associate siblings with a home session"
+            elif has_foreign_shared_cache_child(children, parent):
+                guidance = f"; for Claude use --bias-exception '{SHARED_CACHE_HOLD}'"
         raise SystemExit("shared-cache Codex startup withheld: a live wave uses this cache "
-                         f"({', '.join(others)}); wait for it to finish or use a pinned wave"
-                         + ("; use --parent to associate siblings with a home session" if not preparing and parent is None else ""))
+                         f"({', '.join(others)}); wait for it to finish or use a pinned wave{guidance}")
 
 
 def verify_shared_cache_versions(home, installed):
     try:
         prepared = json.loads((home / "dispatch-prepared-cache.json").read_text(encoding="utf-8"))
         repo = Path(prepared["repo"])
-        expected = shared_codex.remote_versions(repo, prepared["versions"])
+        pin = shared_codex.marketplace_pin(home)
+        if pin is None:
+            print("warning: the shared Codex marketplace is not pinned to a commit, so any Codex startup can "
+                  "refresh it and delete the plugin caches live children use; run prepare-codex between waves to pin it",
+                  file=sys.stderr)
+        if pin is not None:
+            shared_codex.ensure_commit(repo, pin)
+        expected = shared_codex.remote_versions(repo, prepared["versions"], pin)
     except (OSError, ValueError, KeyError, TypeError, pinned_wave.PinError, subprocess.SubprocessError) as error:
         raise SystemExit("shared-cache Codex startup withheld: cannot verify marketplace versions for the live wave; "
                          f"prepare the cache between waves or use a pinned wave ({error})") from None
@@ -857,7 +884,7 @@ def read_quota_snapshot():
     return snapshot
 
 
-def launch_quota(args, model):
+def launch_quota(args, model, parent):
     snapshot = read_quota_snapshot()
     pinned = getattr(args, "user_pinned", False)
     approved = getattr(args, "approve_critical", False)
@@ -869,12 +896,23 @@ def launch_quota(args, model):
         audit["critical_approved"] = True
     if reason is not None:
         audit["bias_exception"] = reason
-    if snapshot is None:
+    quota = snapshot[args.cli] if snapshot is not None else None
+    if quota is not None and quota.get("raw_state", quota["state"]) == "critical" and not approved:
+        raise SystemExit(f"{args.cli} quota is critical; --approve-critical requires explicit user approval")
+
+    category = (reason or "").partition(":")[0].strip().casefold()
+    if category == SHARED_CACHE_HOLD:
+        if args.cli != "claude":
+            raise SystemExit("shared-cache hold is only supported for Claude launches")
+        if not parent:
+            raise SystemExit("shared-cache hold requires a home session address; pass --parent")
+        children = shared_cache_children(shared_codex.cache_label(codex_home()))
+        if not has_foreign_shared_cache_child(children, parent):
+            raise SystemExit("shared-cache hold could not be verified: no live child from another home session")
         return audit
 
-    quota = snapshot[args.cli]
-    if quota.get("raw_state", quota["state"]) == "critical" and not approved:
-        raise SystemExit(f"{args.cli} quota is critical; --approve-critical requires explicit user approval")
+    if snapshot is None:
+        return audit
     preferred = snapshot["effective_bias"]
     if pinned or quota["state"] == "unknown" or preferred in ("none", args.cli):
         return audit
@@ -893,7 +931,6 @@ def launch_quota(args, model):
                          "use the preferred CLI or --user-pinned for an explicit user choice")
 
     allowed = EXPIRING_PASS_EXCEPTIONS if strong else BIAS_EXCEPTIONS
-    category = (reason or "").partition(":")[0].strip().casefold()
     if category not in {item.casefold() for item in allowed}:
         raise SystemExit(f"quota bias {preferred} requires --bias-exception with one of: {', '.join(allowed)}")
     return audit
@@ -982,7 +1019,9 @@ def prepare_codex(args):
         with lock_shared_cache(home):
             require_shared_cache_available(shared_cache_children(label), preparing=True)
             before = installed_plugin_versions()
-            expected = shared_codex.remote_versions(repo, before)
+            commit = shared_codex.remote_head(repo)
+            expected = shared_codex.remote_versions(repo, before, commit)
+            pinned = shared_codex.marketplace_pin(home)
             baseline_path = home / "dispatch-trusted-hooks.json"
             baseline = json.loads(baseline_path.read_text(encoding="utf-8")) if baseline_path.exists() else {}
             try:
@@ -995,9 +1034,17 @@ def prepare_codex(args):
             baseline.update({name: info for name, info in old_hooks.items() if info["trusted"]})
             write_json(baseline_path, baseline)
             current = installed_plugin_versions()
-            if any(current.get(name) != version for name, version in expected.items()):
-                shared_codex.command([binary, "plugin", "marketplace", "upgrade", shared_codex.MARKET],
-                                     cwd=cwd, timeout=MARKETPLACE_UPGRADE_SECONDS)
+            if pinned != commit or any(current.get(name) != version for name, version in expected.items()):
+                # A full-SHA ref makes later Codex startup refreshes no-ops until the next preparation moves it.
+                previous = shared_codex.pin_marketplace(home, commit) if pinned != commit else None
+                try:
+                    shared_codex.command([binary, "plugin", "marketplace", "upgrade", shared_codex.MARKET],
+                                         cwd=cwd, timeout=MARKETPLACE_UPGRADE_SECONDS)
+                except (OSError, subprocess.SubprocessError):
+                    # The snapshot did not move, so a new ref would make the next Codex startup do the upgrade.
+                    if previous is not None:
+                        shared_codex.write_config(home / "config.toml", previous)
+                    raise
             warmup_codex(binary, cwd, parent, label)
             installed = installed_plugin_versions()
             if any(installed.get(name) != version for name, version in expected.items()):
@@ -1012,6 +1059,7 @@ def prepare_codex(args):
     except (OSError, ValueError, KeyError, TypeError, pinned_wave.PinError, subprocess.SubprocessError) as error:
         raise SystemExit(f"cannot prepare shared-cache Codex: {error}") from None
     print(json.dumps({"before": before, "expected": expected, "installed": installed, "upgraded": before != installed,
+                      "pinned": commit, "previously_pinned": pinned,
                       "pending_hooks": pending, "hook_content_diffs": diffs}, ensure_ascii=False))
 
 
@@ -1084,8 +1132,8 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
         message = first_prompt(args.cli, message, handoff)
     if args.task is not None and not args.task.strip():
         raise SystemExit("first message is empty")
-    quota = launch_quota(args, model)
     home = args.parent or os.environ.get("HC_TERMINAL_ID") or None
+    quota = launch_quota(args, model, home)
     result_path = None
     child = None
     previous = getattr(args, "relaunch_from", None)
@@ -1155,6 +1203,7 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
         except OSError as error:
             raise SystemExit(f"pinned launch withheld; could not register child: {error}") from None
     versions = {}
+    guard_enabled_at_launch = None
     started_ms = phase_timing.now_ms()
     try:
         phase_timing.new_launch(history, started_ms)
@@ -1180,6 +1229,11 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
                     children = shared_cache_children(shared_label)
                     require_shared_cache_available(children, parent=home)
                     versions = installed_plugin_versions()
+                    if "guard" in versions:
+                        try:
+                            guard_enabled_at_launch = shared_codex.guard_enabled(shared_home, cwd.resolve())
+                        except (OSError, ValueError, AttributeError):
+                            guard_enabled_at_launch = False
                     if children:
                         verify_shared_cache_versions(shared_home, versions)
                 stdout = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", check=True,
@@ -1233,6 +1287,8 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
         run.update(wave=str(wave_path), wave_trusted_at_start=pinned_startup)
     elif versions:
         run["plugin_versions"] = versions
+        if guard_enabled_at_launch is not None:
+            run["shared_guard_enabled_at_launch"] = guard_enabled_at_launch
     if title:
         run["title"] = title
     if args.cli == "codex" and handoff["work_kind"] != "standalone":
@@ -1536,10 +1592,9 @@ def startup_warning_page(text):
     if body and WARNING_VIEW_FOOTER.fullmatch(body[-1]):
         body.pop()
     notice = " ".join(body)
-    is_bypass = notice == HOOK_BYPASS_NOTICE
-    if is_bypass or UNSTABLE_FEATURES_NOTICE.fullmatch(notice):
+    if notice == HOOK_BYPASS_NOTICE or UNSTABLE_FEATURES_NOTICE.fullmatch(notice):
         page, count = map(int, title.groups())
-        return page, count, is_bypass
+        return page, count, notice
     return None
 
 
@@ -1574,11 +1629,11 @@ def verify_pinned_delivery(run, terminal):
         raise SystemExit(f"{run['address']}: pinned task withheld; {error}") from None
 
 
-def require_shared_guard(run):
+def require_shared_guard(run, terminal):
     versions = installed_plugin_versions()
     started = (run or {}).get("plugin_versions") or {}
     dev = versions.get("dev")
-    if not dev or ("guard" in versions and (not started or "guard" in started)):
+    if not dev:
         return
     manifest = plugin_cache() / "dev" / dev / pinned_wave.MANIFEST
     try:
@@ -1587,14 +1642,32 @@ def require_shared_guard(run):
         return
     except (OSError, ValueError) as error:
         raise SystemExit(f"task withheld; can't read the installed dev plugin manifest: {error}") from None
-    if "hooks" not in installed:
+    if "hooks" in installed:
+        return
+    if "guard" not in versions or (started and "guard" not in started):
         raise SystemExit("task withheld; install guard@kadragon, restart the idle Codex child, and review its hooks")
+    if ("guard" in started and not (plugin_cache() / "guard" / started["guard"]).is_dir()
+            or (run or {}).get("shared_guard_enabled_at_launch") is False):
+        raise SystemExit("task withheld; enable guard@kadragon, restart the idle Codex child, and review its hooks")
+
+    # Starting an app server here could refresh the cache used by live children.
+    target = ((terminal.get("foreground") or {}).get("cwd") or (run or {}).get("cwd")
+              or terminal.get("cwd"))
+    if not target:
+        raise SystemExit("task withheld; cannot locate the target directory to verify guard@kadragon")
+    try:
+        cwd = Path(target).resolve(strict=True)
+        enabled = shared_codex.guard_enabled(codex_home(), cwd)
+    except (OSError, ValueError, TypeError, AttributeError) as error:
+        raise SystemExit(f"task withheld; cannot verify guard@kadragon settings: {error}") from None
+    if not enabled:
+        raise SystemExit("task withheld; enable guard@kadragon, restart the idle Codex child, and review its hooks")
 
 
 def verify_delivery_turn(run, terminal):
     verify_pinned_delivery(run, terminal)
     if not run or not run.get("wave"):
-        require_shared_guard(run)
+        require_shared_guard(run, terminal)
     else:
         current = hc_json("get", run["address"])
         verify_terminal(run, current)
@@ -1652,9 +1725,12 @@ def send_task(args, run_path):
     warning_turn = None
     warning_count = None
     warning_page = 0
+    next_warning_page = 1
     saw_bypass_notice = False
     warning_withheld = f"{address}: task withheld; inspect the Codex warning with F2"
     dismissed_startup_warnings = False
+    closing_warning = None
+    closing_warning_until = 0
     try:
         deadline = time.monotonic() + 30
         while True:
@@ -1666,22 +1742,32 @@ def send_task(args, run_path):
                 raise SystemExit(f"{address}: resend withheld; the Codex composer is not clear")
             if screen == "hooks":
                 raise SystemExit(f"{address}: task withheld; inspect the Codex hook status with /hooks")
+            position = startup_warning_page(text) if screen == "warning-view" else None
+            if closing_warning is not None and screen != "waiting":
+                if position == closing_warning and time.monotonic() < closing_warning_until:
+                    time.sleep(SCREEN_POLL_SECONDS)
+                    continue
+                closing_warning = None
             if screen in {"warning", "warning-view"}:
                 if (not run or run.get("wave") or run.get("trust_hooks") is not True or run["sent"] is not False
                         or dismissed_startup_warnings):
                     raise SystemExit(warning_withheld)
                 if screen == "warning-view":
-                    position = startup_warning_page(text)
                     if position is None:
                         raise SystemExit(warning_withheld)
-                    page, count, is_bypass = position
-                    if (page > count or page not in (warning_page, warning_page + 1)
+                    page, count, notice = position
+                    if warning_count is None:
+                        # A viewer already open at startup can be on any page.
+                        next_warning_page = page
+                    if (page > count or page not in (warning_page, next_warning_page)
                             or (warning_count is not None and count != warning_count)):
                         raise SystemExit(warning_withheld)
-                    if page > warning_page:
-                        saw_bypass_notice = saw_bypass_notice or is_bypass
-                        if page == count and not saw_bypass_notice:
-                            raise SystemExit(warning_withheld)
+                    if page == next_warning_page:
+                        rewinding = page > 1 and (warning_page == 0 or page < warning_page)
+                        if not rewinding:
+                            saw_bypass_notice = saw_bypass_notice or notice == HOOK_BYPASS_NOTICE
+                            if page == count and not saw_bypass_notice:
+                                raise SystemExit(warning_withheld)
                         terminal = hc_json("get", address)
                         verify_terminal(run, terminal)
                         # Herdr can report working while the local warning viewer owns the input.
@@ -1689,14 +1775,21 @@ def send_task(args, run_path):
                         if (terminal["state"] != "live" or turn not in (0, 1)
                                 or (warning_turn is not None and turn != warning_turn)):
                             raise SystemExit(warning_withheld)
-                        if page == count:
+                        if rewinding:
+                            hc_json("keys", address, "left")
+                            next_warning_page = page - 1
+                        elif page == count:
                             hc_json("keys", address, "esc")
                             warning_turn = None
                             dismissed_startup_warnings = True
+                            closing_warning = position
+                            closing_warning_until = min(deadline, time.monotonic() + WARNING_CLOSE_SETTLE_SECONDS)
                             time.sleep(SCREEN_POLL_SECONDS)
                             continue
-                        # Codex dismisses visited pages on Esc. Check all pages before closing.
-                        hc_json("keys", address, "right")
+                        else:
+                            # Codex dismisses visited pages on Esc. Check all pages before closing.
+                            hc_json("keys", address, "right")
+                            next_warning_page = page + 1
                         warning_turn, warning_count, warning_page = turn, count, page
                 elif warning_turn is None:
                     footer = "\n".join(text.rstrip().splitlines()[-2:])
@@ -2620,7 +2713,9 @@ def main(argv):
     wait_parser.add_argument("--timeout", type=int, default=WAIT_TIMEOUT_SECONDS, metavar="SECONDS")
     wait_parser.add_argument("--stall-minutes", type=int, default=STALL_MINUTES)
     wait_parser.set_defaults(func=wait)
-    launch_parser.add_argument("--bias-exception", help="routing exception category, optionally followed by ': detail'")
+    launch_parser.add_argument("--bias-exception",
+                               help=f"routing exception category (including '{SHARED_CACHE_HOLD}' for Claude), "
+                               "optionally followed by ': detail'")
     launch_parser.add_argument("--user-pinned", action="store_true",
                                help="the user explicitly selected this CLI, model or effort")
     launch_parser.add_argument("--approve-critical", action="store_true",

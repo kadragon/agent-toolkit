@@ -21,6 +21,7 @@ import pinned_wave
 import shared_codex
 from dispatch import (
     DEFAULT_GIT_LIMITS,
+    LAUNCH_LOOKUP_SECONDS,
     POST_SEND_SETTLE_SECONDS,
     QUEUE_BACKEND,
     STANDING_REVIEW_TRANSFER,
@@ -607,6 +608,96 @@ class DispatchReceiptTests(DispatchTestCase):
             self.assertEqual(receipt["handoff"], {**self.HANDOFF, "extra_lines": extra_lines})
             self.assertEqual(submit.call_args.args[0].run, Path(payload["run"]))
             self.assertEqual(submit.call_args.args[0].message, "$task-next")
+
+    def test_shared_cache_hold_allows_claude_even_with_expiring_codex_passes(self):
+        self.quota.return_value = {**QUOTA_OK, "bias": "codex", "effective_bias": "codex",
+                                   "prefer_expiring_passes": True}
+        owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd())}
+        foreign = {"address": "t9", "state": "live", "parent": "t8"}
+        reply = SimpleNamespace(stdout=json.dumps(self.TERMINAL))
+        label = shared_codex.cache_label(Path(os.environ["CODEX_HOME"]))
+        for model, effort in (("haiku", "medium"), ("sonnet", "high"), ("opus", "high")):
+            with (
+                self.subTest(model=model),
+                tempfile.TemporaryDirectory() as directory,
+                patch("dispatch.hc_json", side_effect=[{"terminals": [foreign]},
+                                                       {"terminals": [owner]}, owner, self.TERMINAL]) as hc,
+                patch("dispatch.warn_linked_worktree"),
+                patch("dispatch.subprocess.run", return_value=reply) as run,
+                patch("dispatch.tempfile.mkdtemp", return_value=directory),
+                redirect_stdout(StringIO()) as stdout,
+            ):
+                launch(self.launch_args(directory, cli="claude", model=model, effort=effort, task=None,
+                                        message="/dev:task-next", bias_exception="shared-cache hold"))
+                hc.assert_any_call("ls", "--label", label, timeout=LAUNCH_LOOKUP_SECONDS)
+                argv = run.call_args.args[0]
+                self.assertEqual(argv[argv.index("claude"):][:5],
+                                 ["claude", "--model", model, "--effort", effort])
+                receipt = Path(json.loads(stdout.getvalue())["run"])
+                audit = json.loads(receipt.read_text(encoding="utf-8"))
+                self.assertEqual(audit["bias_exception"], "shared-cache hold")
+                self.assertNotIn("user_pin_reason", audit)
+
+    def test_shared_cache_exception_requires_a_live_foreign_home_child(self):
+        self.quota.return_value = {**QUOTA_OK, "bias": "codex", "effective_bias": "codex"}
+        args = self.launch_args(Path.cwd(), cli="claude", model="opus", task=None,
+                                message="/dev:task-next", bias_exception="Shared-Cache Hold: t9")
+        for terminals in ([], [{"address": "t9", "state": "finished", "parent": "t8"}],
+                          [{"address": "t9", "state": "live", "parent": "t6"}],
+                          [{"address": "t9", "state": "live", "parent": None}]):
+            with (
+                self.subTest(terminals=terminals),
+                patch("dispatch.hc_json", return_value={"terminals": terminals}),
+                patch("dispatch.subprocess.run") as run,
+            ):
+                with self.assertRaisesRegex(SystemExit, "no live child from another home session"):
+                    launch(args)
+                run.assert_not_called()
+        with patch("dispatch.hc_json", side_effect=TimeoutError), patch("dispatch.subprocess.run") as run:
+            with self.assertRaisesRegex(SystemExit, "cannot check the shared Codex cache"):
+                launch(args)
+            run.assert_not_called()
+        args.dry_run = True
+        for malformed in (None, [{"state": "live", "parent": "t8"}],
+                          [{"address": "", "state": "live", "parent": "t8"}]):
+            with (
+                self.subTest(malformed=malformed),
+                patch("dispatch.hc_json", return_value={"terminals": malformed}),
+                patch("dispatch.warn_linked_worktree"),
+                patch("dispatch.subprocess.run") as run,
+                redirect_stdout(StringIO()),
+            ):
+                with self.assertRaisesRegex(SystemExit, "cannot check the shared Codex cache"):
+                    launch(args)
+                run.assert_not_called()
+
+    def test_shared_cache_exception_requires_a_claude_launch_and_home_address(self):
+        for overrides, error in (
+            ({}, "shared-cache hold is only supported for Claude launches"),
+            ({"cli": "claude", "model": "opus", "task": None, "message": "/dev:task-next", "parent": None},
+             "shared-cache hold requires a home session address"),
+        ):
+            with (
+                self.subTest(overrides=overrides),
+                patch.dict(os.environ, {"HC_TERMINAL_ID": ""}),
+                patch("dispatch.hc_json") as hc,
+                patch("dispatch.subprocess.run") as run,
+            ):
+                with self.assertRaisesRegex(SystemExit, error):
+                    launch(self.launch_args(Path.cwd(), bias_exception="shared-cache hold", **overrides))
+                hc.assert_not_called()
+                run.assert_not_called()
+
+    def test_shared_cache_exception_does_not_approve_critical_quota(self):
+        self.quota.return_value = {**QUOTA_OK, "claude": {"state": "ok", "raw_state": "critical"},
+                                   "bias": "codex", "effective_bias": "codex", "prefer_expiring_passes": True}
+        args = self.launch_args(Path.cwd(), cli="claude", model="opus", task=None,
+                                message="/dev:task-next", bias_exception="shared-cache hold")
+        with patch("dispatch.hc_json") as hc, patch("dispatch.subprocess.run") as run:
+            with self.assertRaisesRegex(SystemExit, "claude quota is critical"):
+                launch(args)
+            hc.assert_not_called()
+            run.assert_not_called()
 
     def test_launch_keeps_the_receipt_when_terminal_lookup_fails_after_run(self):
         claude = {"task": None, "message": "/dev:task-next", "model": "opus"}
@@ -1310,7 +1401,7 @@ class DispatchReceiptTests(DispatchTestCase):
         with patch("dispatch.hc_json", side_effect=[
             {"terminals": [owner, first_home_child]}, owner, {"terminals": [first_home_child]},
         ]) as hc, patch("dispatch.subprocess.run") as run:
-            with self.assertRaisesRegex(SystemExit, r"live wave uses this cache \(t7\)"):
+            with self.assertRaisesRegex(SystemExit, r"live wave uses this cache \(t7\).*'shared-cache hold'"):
                 launch(args)
         self.assertEqual(hc.call_args.args[:2], ("ls", "--label"))
         self.assertTrue(hc.call_args.args[2].startswith(f"{shared_codex.LABEL}="))
@@ -1334,8 +1425,55 @@ class DispatchReceiptTests(DispatchTestCase):
             ):
                 with self.assertRaisesRegex(SystemExit, "marketplace versions changed"):
                     launch(self.launch_args(Path.cwd()))
-            remote.assert_called_once_with(home, versions)
+            remote.assert_called_once_with(home, versions, None)
             self.assertTrue(all(entry.args[0][0] != "hc" for entry in run.call_args_list))
+
+    def test_same_home_launch_compares_against_the_pinned_commit_not_the_remote_head(self):
+        owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd())}
+        sibling = {"address": "t7", "state": "live", "parent": "t6"}
+        versions = {"guard": "1.0.0"}
+        pin = "d" * 40
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            write_json(home / "dispatch-prepared-cache.json", {"repo": str(home), "versions": versions})
+            (home / "config.toml").write_text(f'[marketplaces.kadragon]\nref = "{pin}"\n', encoding="utf-8")
+            with (
+                patch.dict(os.environ, {"CODEX_HOME": directory}),
+                patch("dispatch.hc_json", side_effect=[
+                    {"terminals": [owner, sibling]}, owner, {"terminals": [sibling]}, self.TERMINAL,
+                ]),
+                patch("dispatch.installed_plugin_versions", return_value=versions),
+                patch("shared_codex.ensure_commit") as ensure,
+                patch("shared_codex.remote_versions", return_value=versions) as remote,
+                patch("dispatch.subprocess.run", return_value=SimpleNamespace(stdout=json.dumps(self.TERMINAL))),
+                patch("dispatch.send"), patch("builtins.print"),
+                patch("dispatch.tempfile.mkdtemp", return_value=directory),
+            ):
+                launch(self.launch_args(Path.cwd()))
+            ensure.assert_called_once_with(home, pin)
+            remote.assert_called_once_with(home, versions, pin)
+
+    def test_same_home_launch_warns_when_the_marketplace_is_not_pinned(self):
+        owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd())}
+        sibling = {"address": "t7", "state": "live", "parent": "t6"}
+        versions = {"guard": "1.0.0"}
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            write_json(home / "dispatch-prepared-cache.json", {"repo": str(home), "versions": versions})
+            (home / "config.toml").write_text('[marketplaces.kadragon]\nref = "main"\n', encoding="utf-8")
+            with (
+                patch.dict(os.environ, {"CODEX_HOME": directory}),
+                patch("dispatch.hc_json", side_effect=[
+                    {"terminals": [owner, sibling]}, owner, {"terminals": [sibling]},
+                ]),
+                patch("dispatch.installed_plugin_versions", return_value=versions),
+                patch("shared_codex.remote_versions", return_value={"guard": "1.1.0"}) as remote,
+                patch("dispatch.subprocess.run"), redirect_stderr(StringIO()) as warning,
+            ):
+                with self.assertRaisesRegex(SystemExit, "marketplace versions changed"):
+                    launch(self.launch_args(Path.cwd()))
+            remote.assert_called_once_with(home, versions, None)
+            self.assertIn("not pinned to a commit", warning.getvalue())
 
     def test_launch_records_the_installed_codex_plugin_versions(self):
         with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as home:
@@ -1935,20 +2073,46 @@ class CodexModelTests(DispatchTestCase):
 
 
 class SharedGuardMigrationTests(unittest.TestCase):
+    def setUp(self):
+        self.home = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.enterContext(patch.dict(os.environ, {"CODEX_HOME": str(self.home)}))
+        self.cache = self.home / "plugins/cache/kadragon"
+        self.manifest = self.cache / "dev/5.0.1" / pinned_wave.MANIFEST
+        self.manifest.parent.mkdir(parents=True)
+        self.manifest.write_text("{}", encoding="utf-8")
+        self.run = {"cwd": str(self.home), "plugin_versions": {"dev": "5.0.1", "guard": "1.0.0"}}
+
     def test_send_holds_when_dev_has_moved_its_hooks_but_guard_is_missing(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"CODEX_HOME": directory}):
-            cache = Path(directory) / "plugins/cache/kadragon"
-            manifest = cache / "dev/5.0.1" / pinned_wave.MANIFEST
-            manifest.parent.mkdir(parents=True)
-            manifest.write_text('{"hooks": "./hooks.json"}', encoding="utf-8")
+        self.manifest.write_text('{"hooks": "./hooks.json"}', encoding="utf-8")
+        verify_delivery_turn(None, {})
+        self.manifest.write_text("{}", encoding="utf-8")
+        with self.assertRaisesRegex(SystemExit, "install guard@kadragon"):
             verify_delivery_turn(None, {})
-            manifest.write_text("{}", encoding="utf-8")
-            with self.assertRaisesRegex(SystemExit, "install guard@kadragon"):
-                verify_delivery_turn(None, {})
-            (cache / "guard/1.0.0").mkdir(parents=True)
+        (self.cache / "guard/1.0.0").mkdir(parents=True)
+        with self.assertRaisesRegex(SystemExit, "restart the idle Codex child"):
+            verify_delivery_turn({"plugin_versions": {"dev": "5.0.1"}}, {})
+
+    def test_send_reads_guard_activation_without_starting_codex(self):
+        (self.cache / "guard/1.0.0").mkdir(parents=True)
+        user_config = self.home / "config.toml"
+        project_config = self.home / "project/.codex/config.toml"
+        project_config.parent.mkdir(parents=True)
+        terminal = {"foreground": {"cwd": str(project_config.parent.parent)}}
+        enabled = '[plugins."guard@kadragon"]\nenabled = true\n'
+        disabled = enabled.replace("true", "false")
+        with patch("shared_codex.request") as request:
+            user_config.write_text(disabled, encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "enable guard@kadragon"):
+                verify_delivery_turn(self.run, terminal)
+            user_config.write_text(enabled, encoding="utf-8")
+            verify_delivery_turn(self.run, terminal)
+            project_config.write_text(disabled, encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "enable guard@kadragon"):
+                verify_delivery_turn(self.run, terminal)
+            project_config.unlink()
             with self.assertRaisesRegex(SystemExit, "restart the idle Codex child"):
-                verify_delivery_turn({"plugin_versions": {"dev": "5.0.1"}}, {})
-            verify_delivery_turn({"plugin_versions": {"dev": "5.0.1", "guard": "1.0.0"}}, {})
+                verify_delivery_turn(dict(self.run, shared_guard_enabled_at_launch=False), terminal)
+            request.assert_not_called()
 
 
 class SharedCodexPreparationTests(unittest.TestCase):
@@ -1960,9 +2124,14 @@ class SharedCodexPreparationTests(unittest.TestCase):
         self.enterContext(patch("dispatch.shutil.which", return_value=self.binary))
         self.enterContext(patch.dict(os.environ, {"CODEX_HOME": str(self.home)}))
         self.args = SimpleNamespace(repo=self.root, cwd=self.root, parent="t6")
+        self.home.mkdir()
+        self.config = self.home / "config.toml"
+        self.write_config('ref = "' + "a" * 40 + '"\n')
         self.terminal = {"address": "t7", "parent": "t6", "state": "live",
                          "name": "dispatch-warmup-00112233", "created_ms": 2000}
         self.events = []
+        self.pins = []
+        self.upgrade_fails = False
         self.screen = "  Hooks need review"
         self.screen_updates = []
         self.native_refresh = False
@@ -1971,6 +2140,11 @@ class SharedCodexPreparationTests(unittest.TestCase):
         self.enterContext(patch("dispatch.WARMUP_SETTLE_SECONDS", 0))
         self.enterContext(patch("dispatch.secrets.token_hex", return_value="00112233"))
         self.enterContext(patch("dispatch.time.time_ns", return_value=2_000_000_000))
+
+    def write_config(self, pin=""):
+        self.config.write_text('model = "x"\n\n[marketplaces.kadragon]\nsource_type = "git"\n'
+                               'source = "https://example.test/agent-toolkit.git"\n' + pin
+                               + '\n[plugins."guard@kadragon"]\nenabled = true\n', encoding="utf-8")
 
     def install(self, version, content):
         root = self.cache / version
@@ -1984,6 +2158,9 @@ class SharedCodexPreparationTests(unittest.TestCase):
         if argv[0] == self.binary:
             self.events.append(argv)
             self.assertEqual(kwargs["cwd"], self.root)
+            self.pins.append(shared_codex.marketplace_pin(self.home))
+            if self.upgrade_fails:
+                raise subprocess.CalledProcessError(1, argv)
             self.install("1.1.0", "new guard")
             shutil.rmtree(self.cache / "1.0.0")
             return ""
@@ -2067,6 +2244,92 @@ class SharedCodexPreparationTests(unittest.TestCase):
         report = self.prepare("1.1.0")
         self.assertFalse(report["upgraded"])
         self.assertEqual(report["hook_content_diffs"]["guard"], diff)
+
+    def test_unpinned_marketplace_is_pinned_to_the_verified_remote_commit_before_the_upgrade(self):
+        self.write_config()
+        self.install("1.0.0", "trusted guard")
+        report = self.prepare("1.1.0")
+        self.assertEqual(self.events[:3], ["git fetch", "hooks 1.0.0",
+                                           [self.binary, "plugin", "marketplace", "upgrade", "kadragon"]])
+        self.assertEqual(self.pins, ["a" * 40])
+        self.assertEqual(shared_codex.marketplace_pin(self.home), "a" * 40)
+        self.assertEqual((report["pinned"], report["previously_pinned"]), ("a" * 40, None))
+        text = self.config.read_text(encoding="utf-8")
+        self.assertIn('model = "x"', text)
+        self.assertIn('[plugins."guard@kadragon"]\nenabled = true', text)
+
+    def test_pin_advances_to_the_new_remote_commit_between_waves(self):
+        old = "b" * 40
+        self.write_config(f'ref = "{old}"\n')
+        self.install("1.0.0", "trusted guard")
+        report = self.prepare("1.1.0")
+        self.assertIn([self.binary, "plugin", "marketplace", "upgrade", "kadragon"], self.events)
+        self.assertEqual(self.pins, ["a" * 40])
+        self.assertEqual(shared_codex.marketplace_pin(self.home), "a" * 40)
+        self.assertEqual((report["pinned"], report["previously_pinned"]), ("a" * 40, old))
+        self.assertNotIn(old, self.config.read_text(encoding="utf-8"))
+
+    def test_failed_upgrade_restores_the_previous_ref(self):
+        old = "b" * 40
+        self.write_config(f'ref = "{old}"\n')
+        before = self.config.read_text(encoding="utf-8")
+        self.install("1.0.0", "trusted guard")
+        self.upgrade_fails = True
+        with self.assertRaisesRegex(SystemExit, "cannot prepare shared-cache Codex"):
+            self.prepare("1.1.0")
+        self.assertEqual(self.pins, ["a" * 40])
+        self.assertEqual(self.config.read_text(encoding="utf-8"), before)
+        self.assertEqual(shared_codex.marketplace_pin(self.home), old)
+
+    def test_pin_accepts_other_toml_spellings_of_the_marketplace_table(self):
+        for header in ('[marketplaces."kadragon"]', "[ marketplaces . kadragon ]  # managed"):
+            with self.subTest(header=header):
+                self.config.write_text(f'{header}\nsource_type = "git"\n\n[other]\nref = "x"\n', encoding="utf-8")
+                shared_codex.pin_marketplace(self.home, "e" * 40)
+                self.assertEqual(shared_codex.marketplace_pin(self.home), "e" * 40)
+                self.assertIn('[other]\nref = "x"', self.config.read_text(encoding="utf-8"))
+
+    @unittest.skipIf(os.name == "nt", "POSIX permission bits and symlinks")
+    def test_pin_keeps_the_file_mode_and_writes_through_a_symlink(self):
+        target = self.root / "dotfiles-config.toml"
+        target.write_text(self.config.read_text(encoding="utf-8"), encoding="utf-8")
+        target.chmod(0o600)
+        self.config.unlink()
+        self.config.symlink_to(target)
+        shared_codex.pin_marketplace(self.home, "f" * 40)
+        self.assertTrue(self.config.is_symlink())
+        self.assertEqual(shared_codex.marketplace_pin(self.home), "f" * 40)
+        self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(list(self.home.glob("*.dispatch-tmp")) + list(self.root.glob("*.dispatch-tmp")), [])
+
+    def test_pinned_commit_missing_from_the_checkout_is_fetched_once(self):
+        commit = "d" * 40
+        missing = subprocess.CalledProcessError(128, "git")
+        with patch("shared_codex.command", side_effect=[missing, "", ""]) as cmd:
+            shared_codex.ensure_commit(self.root, commit)
+        self.assertEqual([entry.args[0][3:] for entry in cmd.call_args_list],
+                         [["cat-file", "-e", f"{commit}^{{commit}}"], ["fetch", "origin"],
+                          ["cat-file", "-e", f"{commit}^{{commit}}"]])
+        with patch("shared_codex.command", side_effect=[missing, "", missing]):
+            with self.assertRaisesRegex(ValueError, "is not in"):
+                shared_codex.ensure_commit(self.root, commit)
+
+    def test_pin_requires_a_configured_marketplace(self):
+        self.config.write_text('model = "x"\n', encoding="utf-8")
+        self.install("1.1.0", "new guard")
+        with self.assertRaisesRegex(SystemExit, r"no \[marketplaces.kadragon\] section"):
+            self.prepare("1.1.0")
+        self.assertEqual(self.config.read_text(encoding="utf-8"), 'model = "x"\n')
+        self.assertNotIn([self.binary, "plugin", "marketplace", "upgrade", "kadragon"], self.events)
+
+    def test_only_a_full_commit_counts_as_a_pin(self):
+        for pin, expected in (('ref = "main"\n', None), ('ref = "abc123"\n', None), ("", None),
+                              ('ref = "' + "c" * 40 + '"\n', "c" * 40)):
+            with self.subTest(pin=pin):
+                self.write_config(pin)
+                self.assertEqual(shared_codex.marketplace_pin(self.home), expected)
+        self.config.unlink()
+        self.assertIsNone(shared_codex.marketplace_pin(self.home))
 
     def test_equal_versions_without_a_trusted_baseline_still_report_pending_hooks(self):
         self.install("1.1.0", "new guard")
@@ -3062,6 +3325,91 @@ class CodexSendTests(DispatchTestCase):
                         self.fail(str(error))
                 self.assertEqual(operations, ["f2", "right", "esc", "send"])
                 self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], True)
+
+    def test_send_restarts_startup_warning_scan_from_a_later_page(self):
+        terminal = {**DispatchReceiptTests.TERMINAL, **self.IDLE}
+        first = self.BYPASS_NOTICE.replace("1 of 1", "1 of 3")
+        middle = self.UNSTABLE_FEATURES_NOTICE.replace("2 of 2", "2 of 3")
+        last = middle.replace("2 of 3", "3 of 3")
+        for recognized in (True, False):
+            with self.subTest(recognized=recognized), tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "run.json"
+                receipt.write_text(json.dumps({**DispatchReceiptTests.RECEIPT, "trust_hooks": True}),
+                                   encoding="utf-8")
+                first_page = first if recognized else first.replace("is enabled", "is disabled")
+                frames = iter([last, last, middle, first_page, middle, last])
+                operations = []
+
+                def respond(command, *args):
+                    if command == "get":
+                        return {**terminal, **self.WORKING} if operations[-1:] == ["send"] else terminal
+                    if command == "read":
+                        return self.screen(self.READY if "esc" in operations else next(frames))
+                    operations.append(args[-1] if command == "keys" else command)
+                    return {}
+
+                with patch("dispatch.hc_json", side_effect=respond), patch("dispatch.time.sleep"), \
+                        redirect_stdout(StringIO()):
+                    args = SimpleNamespace(address="t7", message="a task", run=receipt)
+                    if recognized:
+                        try:
+                            send(args)
+                        except SystemExit as error:
+                            self.fail(str(error))
+                    else:
+                        with self.assertRaisesRegex(SystemExit, "task withheld.*F2"):
+                            send(args)
+                expected = ["left", "left", "right", "right", "esc", "send"] if recognized else ["left", "left"]
+                self.assertEqual(operations, expected)
+                self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], recognized)
+
+    def test_send_waits_for_startup_warning_viewer_to_close(self):
+        terminal = {**DispatchReceiptTests.TERMINAL, **self.IDLE}
+        for closes in (True, False):
+            with self.subTest(closes=closes), tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "run.json"
+                receipt.write_text(json.dumps({**DispatchReceiptTests.RECEIPT, "trust_hooks": True}),
+                                   encoding="utf-8")
+                after_redraw = self.READY if closes else self.BYPASS_NOTICE
+                reflowed_notice = self.BYPASS_NOTICE.replace("may run\n  without", "may run without")
+                frames = iter([
+                    f"Starting MCP servers (3s)\n{self.BYPASS_NOTICE}",
+                    f"Starting MCP servers (4s)\n{self.BYPASS_NOTICE}",
+                    reflowed_notice,
+                    *[after_redraw] * 8,
+                ])
+                operations = []
+                now = 0
+
+                def sleep(seconds):
+                    nonlocal now
+                    now += seconds
+
+                def respond(command, *args):
+                    if command == "get":
+                        return {**terminal, **self.WORKING} if operations[-1:] == ["send"] else terminal
+                    if command == "read":
+                        frame = next(frames, None)
+                        self.assertIsNotNone(frame, "Dispatch should stop polling a surviving warning")
+                        return self.screen(frame)
+                    operations.append(args[-1] if command == "keys" else command)
+                    return {}
+
+                with patch("dispatch.hc_json", side_effect=respond), patch("dispatch.time.sleep", side_effect=sleep), \
+                        patch("dispatch.time.monotonic", side_effect=lambda: now), \
+                        redirect_stdout(StringIO()):
+                    args = SimpleNamespace(address="t7", message="a task", run=receipt)
+                    if closes:
+                        try:
+                            send(args)
+                        except SystemExit as error:
+                            self.fail(str(error))
+                    else:
+                        with self.assertRaisesRegex(SystemExit, "task withheld.*F2"):
+                            send(args)
+                        self.assertEqual(now, 1)
+                self.assertEqual(operations, ["esc", "send"] if closes else ["esc"])
+                self.assertIs(json.loads(receipt.read_text(encoding="utf-8"))["sent"], closes)
 
     def test_startup_notice_requires_opt_in_and_recognized_pages(self):
         terminal = {**DispatchReceiptTests.TERMINAL, **self.IDLE}
@@ -4732,6 +5080,51 @@ class ReservedQueueWaveTest(unittest.TestCase):
         self.backlog.write_text(self.backlog.read_text(encoding="utf-8").replace(
             "First item\n", "First item *(blocked by: second)*\n"), encoding="utf-8")
         self.git("commit", "-qam", "Block queued item after binding")
+        self.git("update-ref", "refs/remotes/origin/HEAD", "HEAD")
+        result = self.queue("claim-reservation", **delivery, base=wave["base"])
+        self.assertIn("no longer eligible on origin/HEAD", result.stderr)
+        self.assertFalse(Path(unit["worktree"]).exists())
+
+    def test_claim_rejects_a_nested_file_item_bullet_edit_after_binding(self):
+        self.assert_rejects_nested_item_edit("Nested detail")
+
+    def test_claim_rejects_a_nested_file_item_example_edit_after_binding(self):
+        self.assert_rejects_nested_item_edit("Original example")
+
+    def test_legacy_reservation_can_bind_after_the_helper_is_updated(self):
+        wave = self.reserve("First group")
+        [unit] = wave["reservations"]
+        self.remove_body_digest(unit["reservation"])
+        ref = unit["candidate"]["ref"]
+        delivery = {"reservation": unit["reservation"], "ref": ref, "delivery": str(self.receipt("first", ref))}
+        self.result("bind-wave", assignments=[delivery])
+        self.result("claim-reservation", **delivery, base=wave["base"])
+        self.assertTrue(Path(unit["worktree"]).is_dir())
+
+    def test_legacy_bound_reservation_checks_the_original_body(self):
+        self.assert_rejects_nested_item_edit("Nested detail", legacy=True)
+
+    def remove_body_digest(self, reservation):
+        store = self.repo / ".git/agent-queue/reservations.json"
+        records = json.loads(store.read_text(encoding="utf-8"))
+        del records["units"][reservation]["candidate"]["body_digest"]
+        write_json(store, records)
+
+    def assert_rejects_nested_item_edit(self, old, *, legacy=False):
+        original = self.backlog.read_text(encoding="utf-8").replace(
+            "First item\n", "First item\n  - Nested detail\n\n  ```text\nOriginal example\n  ```\n")
+        self.backlog.write_text(original, encoding="utf-8")
+        self.git("commit", "-qam", "Add a nested item body")
+        self.git("update-ref", "refs/remotes/origin/HEAD", "HEAD")
+        wave = self.reserve("First group")
+        [unit] = wave["reservations"]
+        ref = unit["candidate"]["ref"]
+        delivery = {"reservation": unit["reservation"], "ref": ref, "delivery": str(self.receipt("first", ref))}
+        self.result("bind-wave", assignments=[delivery])
+        if legacy:
+            self.remove_body_digest(unit["reservation"])
+        self.backlog.write_text(original.replace(old, "Changed scope"), encoding="utf-8")
+        self.git("commit", "-qam", "Edit the nested item body after binding")
         self.git("update-ref", "refs/remotes/origin/HEAD", "HEAD")
         result = self.queue("claim-reservation", **delivery, base=wave["base"])
         self.assertIn("no longer eligible on origin/HEAD", result.stderr)
