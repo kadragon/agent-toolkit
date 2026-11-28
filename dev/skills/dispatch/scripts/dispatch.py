@@ -25,6 +25,8 @@
       Read the result, status and any stop reason. Close an owned child.
       A Codex child whose hooks fail, or whose launch-time kadragon plugin version directory
       was removed, reports stop_reason hooks_broken; any plugin version change warns on stderr.
+  dispatch.py prepare-codex --repo PATH --cwd PATH [--parent ADDRESS]
+      Prepare the shared marketplace and report the native hooks awaiting review.
   dispatch.py pin --repo PATH --commit SHA --codex PATH
       Create an isolated Codex wave. Launch idle children with launch --wave WAVE.
   dispatch.py release WAVE
@@ -33,10 +35,13 @@
       Print one brief line per child and another only when its displayed state changes.
 """
 import argparse
+import errno
 import hashlib
 import json
 import os
 import re
+import secrets
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -47,6 +52,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pinned_wave  # noqa: E402
+import shared_codex  # noqa: E402
 
 CLAUDE_SETTINGS = {
     "promptSuggestionEnabled": False,
@@ -58,6 +64,8 @@ HOOK_BLOCKER = re.compile(
     r"^(?:[•└⚠]\ufe0f?\s*)?(?:(?:\d+\s+)?hooks? needs? review|"
     r"hook (?:failed|stopped)|blocked by hook|(?:plugin contents changed;\s*)?hook approval required)\b",
     re.IGNORECASE)
+RUNTIME_HOOK_BLOCKER = re.compile(
+    r"^(?:[•└⚠]\ufe0f?\s*)?(?:hook (?:failed|stopped)|blocked by hook)\b", re.IGNORECASE)
 # Codex can show this cause on its own or as a detail of a hook failure.
 PLUGIN_HOOK_FAILURE = re.compile(
     r"^(?:[•└⚠]\ufe0f?[ \t]*|(?:•[ \t]*)?hook failed\b[^\n]*?"
@@ -97,12 +105,14 @@ POLICY_ERROR = re.compile(r"API Error:.*\busage policy\b", re.IGNORECASE)
 STOP_USAGE = "Usage limit reached"
 STOP_FILTER = "Stopped by a safety or usage-policy filter"
 STOP_HOOKS = "hooks_broken"
-PLUGIN_MARKETPLACE = "kadragon"
+PLUGIN_MARKETPLACE = shared_codex.MARKET
 STALL_MINUTES = 30
 SCREEN_POLL_SECONDS = 0.25
 POST_SEND_SETTLE_SECONDS = 2
 CLOSE_WAIT_SECONDS = 10
 LAUNCH_LOOKUP_SECONDS = 30
+WARMUP_SETTLE_SECONDS = 2
+MARKETPLACE_UPGRADE_SECONDS = 180
 DRAFT_CLEARS = 5
 DRAFT_CLEAR_SETTLE_SECONDS = 1
 LOST_SETTLE_SECONDS = 2
@@ -188,7 +198,8 @@ def installed_plugin_versions():
     """Return {plugin: newest installed version} from the Codex plugin cache."""
     versions = {}
     try:
-        plugins = sorted(entry for entry in plugin_cache().iterdir() if entry.is_dir())
+        plugins = sorted(entry for entry in plugin_cache().iterdir()
+                         if entry.name in pinned_wave.PLUGINS and entry.is_dir())
     except OSError:
         return versions
     for plugin in plugins:
@@ -212,6 +223,46 @@ def plugin_drift(run):
     removed = [plugin for plugin, version in sorted(started.items())
                if not (plugin_cache() / plugin / version).is_dir()]
     return changed, removed
+
+
+@contextmanager
+def lock_shared_cache(home):
+    try:
+        home.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except OSError as error:
+        raise SystemExit(f"cannot initialize the shared Codex cache lock: {error}") from None
+    with lock_run(home / "dispatch-shared-cache.json", wait=LAUNCH_LOOKUP_SECONDS, label="shared Codex cache"):
+        yield
+
+
+def shared_cache_children(label):
+    try:
+        terminals = hc_json("ls", "--label", label, timeout=LAUNCH_LOOKUP_SECONDS)["terminals"]
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        raise SystemExit(f"cannot check the shared Codex cache for live waves: {error}") from None
+    return [terminal for terminal in terminals if terminal.get("state") == "live"]
+
+
+def require_shared_cache_available(children, *, parent=None, preparing=False):
+    others = [terminal["address"] for terminal in children
+              if preparing or parent is None or terminal.get("parent") != parent]
+    if others:
+        raise SystemExit("shared-cache Codex startup withheld: a live wave uses this cache "
+                         f"({', '.join(others)}); wait for it to finish or use a pinned wave"
+                         + ("; use --parent to associate siblings with a home session" if not preparing and parent is None else ""))
+
+
+def verify_shared_cache_versions(home, installed):
+    try:
+        prepared = json.loads((home / "dispatch-prepared-cache.json").read_text(encoding="utf-8"))
+        repo = Path(prepared["repo"])
+        expected = shared_codex.remote_versions(repo, prepared["versions"])
+    except (OSError, ValueError, KeyError, TypeError, pinned_wave.PinError, subprocess.SubprocessError) as error:
+        raise SystemExit("shared-cache Codex startup withheld: cannot verify marketplace versions for the live wave; "
+                         f"prepare the cache between waves or use a pinned wave ({error})") from None
+    if installed != prepared["versions"] or any(installed.get(name) != version for name, version in expected.items()):
+        raise SystemExit(f"shared-cache Codex startup withheld: marketplace versions changed ({expected}); "
+                         "wait for the live wave to finish or use a pinned wave")
 
 
 def resolve_codex_model(model):
@@ -280,20 +331,30 @@ def load_run(path):
 
 
 @contextmanager
-def lock_run(path):
-    with path.with_suffix(".lock").open("a+b") as lock:
-        lock.seek(0)
-        try:
-            if os.name == "nt":
-                import msvcrt
+def lock_run(path, *, wait=0, label="dispatch receipt"):
+    try:
+        lock = path.with_suffix(".lock").open("a+b")
+    except OSError as error:
+        raise SystemExit(f"cannot open {label} lock for {path}: {error}") from None
+    with lock:
+        deadline = time.monotonic() + wait if wait else None
+        while True:
+            lock.seek(0)
+            try:
+                if os.name == "nt":
+                    import msvcrt
 
-                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
 
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as error:
-            raise SystemExit(f"cannot lock dispatch receipt {path}: {error}") from None
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as error:
+                remaining = deadline - time.monotonic() if deadline is not None else 0
+                if remaining <= 0 or error.errno not in {errno.EACCES, errno.EAGAIN}:
+                    raise SystemExit(f"cannot lock {label} {path}: {error}") from None
+                time.sleep(min(SCREEN_POLL_SECONDS, remaining))
         yield
 
 
@@ -665,6 +726,119 @@ def launch_quota(args, model):
 PIN_ERRORS = (pinned_wave.PinError, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError)
 
 
+def close_codex_warmup(run):
+    address = run["address"]
+    # Retry a transient read, and close only when Herdr still confirms ownership.
+    try:
+        terminal = hc_json("get", address, timeout=CLOSE_WAIT_SECONDS)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        terminal = hc_json("get", address, timeout=CLOSE_WAIT_SECONDS)
+    verify_terminal(run, terminal)
+    if terminal["state"] != "finished":
+        hc_json("kill", address, timeout=CLOSE_WAIT_SECONDS)
+        wait_for_terminal_exit(run)
+    hc_json("rm", address, timeout=CLOSE_WAIT_SECONDS)
+
+
+def warmup_codex(binary, cwd, parent, label):
+    name = f"dispatch-warmup-{secrets.token_hex(4)}"
+    started = time.time_ns() // 1_000_000 - 1000
+    try:
+        reply = hc_json("run", "--bg", "--no-notify", "--name", name, "--cwd", str(cwd),
+                        "--label", label, *(["--parent", parent] if parent else ["--no-parent"]),
+                        binary, "--no-daemon", "--no-alt-screen", timeout=LAUNCH_LOOKUP_SECONDS)
+        address = reply["address"]
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        raise ValueError(f"warm-up launch could not be confirmed; check {name} in Herdr: {error}") from None
+
+    run = {"address": address, "name": name, "parent": parent, "launched_ms": started}
+    startup_error = None
+    try:
+        terminal = hc_json("get", address, timeout=LAUNCH_LOOKUP_SECONDS)
+        verify_terminal(run, terminal)
+        deadline = time.monotonic() + LAUNCH_LOOKUP_SECONDS
+        settled_after = None
+        while (remaining := deadline - time.monotonic()) > 0:
+            screen = hc_json("read", "--lines", "0", address, timeout=remaining)
+            if screen["complete"] and screen["how"] == "screen":
+                content = screen["text"]
+                failure = next((line for line in codex_hook_rows(content.splitlines())
+                                if RUNTIME_HOOK_BLOCKER.match(line)), None)
+                if failure:
+                    raise ValueError(f"warm-up startup hook failed: {failure}")
+                if codex_screen(content) in {"ready", "warning", "hooks"}:
+                    now = time.monotonic()
+                    if settled_after is None:
+                        settled_after = now + WARMUP_SETTLE_SECONDS
+                    if now >= settled_after:
+                        return
+                else:
+                    settled_after = None
+            else:
+                settled_after = None
+            terminal = hc_json("get", address, timeout=max(0.01, deadline - time.monotonic()))
+            verify_terminal(run, terminal)
+            if terminal["state"] == "finished":
+                raise ValueError("warm-up exited before the startup screen")
+            time.sleep(min(SCREEN_POLL_SECONDS, max(0, deadline - time.monotonic())))
+        raise ValueError("timed out waiting for Codex startup")
+    except (OSError, ValueError, KeyError, SystemExit, subprocess.SubprocessError) as error:
+        startup_error = error
+        raise
+    finally:
+        try:
+            close_codex_warmup(run)
+        except (OSError, ValueError, KeyError, SystemExit, subprocess.SubprocessError) as error:
+            detail = f"could not close warm-up {address} ({name}): {error}; inspect it in Herdr"
+            raise ValueError(f"{startup_error}; {detail}" if startup_error else detail) from None
+
+
+def prepare_codex(args):
+    home = codex_home().resolve()
+    label = shared_codex.cache_label(home)
+    parent = args.parent or os.environ.get("HC_TERMINAL_ID") or None
+    try:
+        cwd = Path(args.cwd).expanduser().resolve(strict=True)
+        repo = Path(args.repo).expanduser().resolve(strict=True)
+        binary = shutil.which("codex")
+        if binary is None:
+            raise ValueError("Codex CLI executable not found")
+        with lock_shared_cache(home):
+            require_shared_cache_available(shared_cache_children(label), preparing=True)
+            before = installed_plugin_versions()
+            expected = shared_codex.remote_versions(repo, before)
+            baseline_path = home / "dispatch-trusted-hooks.json"
+            baseline = json.loads(baseline_path.read_text(encoding="utf-8")) if baseline_path.exists() else {}
+            try:
+                _, old_hooks = shared_codex.inventory(binary, home, cwd, before)
+            except (OSError, ValueError, KeyError):
+                if installed_plugin_versions() == before:
+                    raise
+                # The inventory process can race Codex's own startup refresh.
+                old_hooks = {}
+            baseline.update({name: info for name, info in old_hooks.items() if info["trusted"]})
+            write_json(baseline_path, baseline)
+            current = installed_plugin_versions()
+            if any(current.get(name) != version for name, version in expected.items()):
+                shared_codex.command([binary, "plugin", "marketplace", "upgrade", shared_codex.MARKET],
+                                     cwd=cwd, timeout=MARKETPLACE_UPGRADE_SECONDS)
+            warmup_codex(binary, cwd, parent, label)
+            installed = installed_plugin_versions()
+            if any(installed.get(name) != version for name, version in expected.items()):
+                raise ValueError(f"installed versions after warm-up {installed} differ from expected {expected}")
+            pending, snapshot = shared_codex.inventory(binary, home, cwd, installed, require_guard="guard" in expected)
+            if installed_plugin_versions() != installed:
+                raise ValueError("the installed plugins changed during final hook discovery; prepare the wave again")
+            diffs = shared_codex.trusted_diff(pending, snapshot, baseline)
+            baseline.update({name: info for name, info in snapshot.items() if info["trusted"]})
+            write_json(baseline_path, baseline)
+            write_json(home / "dispatch-prepared-cache.json", {"repo": str(repo), "versions": installed})
+    except (OSError, ValueError, KeyError, TypeError, pinned_wave.PinError, subprocess.SubprocessError) as error:
+        raise SystemExit(f"cannot prepare shared-cache Codex: {error}") from None
+    print(json.dumps({"before": before, "expected": expected, "installed": installed, "upgraded": before != installed,
+                      "pending_hooks": pending, "hook_content_diffs": diffs}, ensure_ascii=False))
+
+
 def pin(args):
     try:
         path, wave = pinned_wave.prepare(Path(args.repo).resolve(), args.commit, args.codex)
@@ -763,6 +937,8 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
         child = child_argv(args.cli, model, args.effort, message, args.keep_connectors, result_path,
                            trust_hooks=trust_hooks)
     labels = {"title": title} if title else {}
+    shared_home = codex_home().resolve() if args.cli == "codex" and not wave else None
+    shared_label = shared_codex.cache_label(shared_home) if shared_home is not None else None
     if wave:
         labels[pinned_wave.WAVE_LABEL] = wave["market"]
         params = {"argv": child, "cwd": str(cwd.resolve()), "name": name, "parent": home,
@@ -772,7 +948,7 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
         argv = ["hc", "connect"]
     else:
         argv = ["hc", "run", "--bg", "--json", "--no-notify", "--outlive-parent",
-                "--name", name, "--cwd", str(cwd), *(["--label", f"title={title}"] if title else []),
+                "--name", name, "--cwd", str(cwd), *(["--label", f"title={title}"] if title else []), *(["--label", shared_label] if shared_label else []),
                 *(["--parent", home] if home else ["--no-parent"]), *child]
     if args.dry_run:
         preview = {"name": name, **resolved, **quota, "argv": argv}
@@ -791,14 +967,25 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
             write_json(wave_path, wave)
         except OSError as error:
             raise SystemExit(f"pinned launch withheld; could not register child: {error}") from None
-    versions = installed_plugin_versions() if args.cli == "codex" and not wave else {}
+    versions = {}
     launched_ms = time.time_ns() // 1_000_000 - 1000  # slack for clock rounding between processes
     try:
         if wave:
             reply = hc_rpc("terminal.run", params, LAUNCH_LOOKUP_SECONDS)
         else:
-            stdout = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", check=True,
-                                    timeout=LAUNCH_LOOKUP_SECONDS).stdout
+            with lock_shared_cache(shared_home) if shared_home is not None else nullcontext():
+                if shared_home is not None:
+                    children = shared_cache_children(shared_label)
+                    require_shared_cache_available(children, parent=home)
+                    versions = installed_plugin_versions()
+                    if children:
+                        verify_shared_cache_versions(shared_home, versions)
+                stdout = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", check=True,
+                                        timeout=LAUNCH_LOOKUP_SECONDS).stdout
+    except SystemExit:
+        with suppress(OSError):
+            result_path.parent.rmdir()
+        raise
     except (OSError, ValueError, AttributeError, subprocess.SubprocessError) as error:
         raise SystemExit(f"hc run failed ({error}); a child may be running, so do not retry the launch. "
                          f"Find terminal {name!r} with hc ls"
@@ -2020,6 +2207,11 @@ def main(argv):
     launch_parser.add_argument("--dry-run", action="store_true")
     launch_parser.add_argument("message", nargs="?")
     launch_parser.set_defaults(func=launch)
+    prepare_parser = sub.add_parser("prepare-codex", help="prepare the shared Codex plugin cache")
+    prepare_parser.add_argument("--repo", required=True, help="agent-toolkit checkout")
+    prepare_parser.add_argument("--cwd", required=True, help="target directory for hook discovery and warm-up")
+    prepare_parser.add_argument("--parent", help="Herdr address of the home session")
+    prepare_parser.set_defaults(func=prepare_codex)
     pin_parser = sub.add_parser("pin", help="create a verified private Codex wave from an agent-toolkit commit")
     pin_parser.add_argument("--repo", required=True)
     pin_parser.add_argument("--commit", required=True)
