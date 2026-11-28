@@ -81,28 +81,47 @@ under the normal approval policy so each transfer can be checked in context. A r
 auto-review policy has a broader scope than the per-task handoff and is subject to managed
 requirements.
 
-For routine commands, use the sandbox for local `git status`, `git log`, `git show`,
-`git rev-parse` and reading or atomically writing the assigned result under writable `/tmp`.
-For approved network reads, the operator can add a `.rules` file under an active Codex
-config layer's `rules/` directory and restart the child. Use a trusted project layer for
-repository-specific rules. For example:
+Run local `git --no-optional-locks status`, `git log`, `git show`, and `git rev-parse`
+inside the sandbox. The status flag skips an optional index refresh in the protected Git
+directory. Use the sandbox for reading the assigned result and for writing a temporary
+sibling and renaming it over `result.json` under writable `/tmp`.
+
+For repeated network reads of a known PR, an operator can put a rule in the trusted target
+project's `.codex/rules/` directory and restart the shared-cache child. Review the rule
+before installing it. Substitute the intended repository and numeric PR number in both
+the rule and the invocations. This example scopes the rule to PR 615:
 
 ```python
-prefix_rule(pattern=["gh", "pr", ["view", "checks"], "--repo", "kadragon/agent-toolkit"], decision="allow")
+prefix_rule(
+    pattern=["gh", "pr", ["view", "checks"], "--repo", "github.com/kadragon/agent-toolkit", "--", "615"],
+    decision="allow",
+)
 ```
 
-Prefix matches allow trailing arguments, including another `--repo` flag. Enable the example
-only if the permitted read commands fit that scope. Use the shown token order and set the tool's
-working directory for direct calls. A rule for `gh pr checks` applies to that outer invocation.
-Run `git fetch origin` through normal approval. A fetch prefix would allow trailing refspecs
-that update local branches. Keep `git push`, PR writes and generic shell or filesystem commands
-under normal approval as well.
+Invoke `gh pr view --repo github.com/kadragon/agent-toolkit -- 615` and
+`gh pr checks --repo github.com/kadragon/agent-toolkit -- 615` directly in non-interactive tool calls.
+Codex matches argument prefixes and permits a suffix. The fixed numeric selector scopes the
+read to one PR, and `--` makes every suffix positional. Each GitHub CLI command accepts at
+most one positional argument, so a suffix such as `--web` or a second `--repo` fails argument
+validation. Recheck these parser limits after upgrading GitHub CLI. Wrapper scripts go
+through approval for the outer command.
 
-`codex execpolicy check --rules <file> -- gh pr view --repo kadragon/agent-toolkit 541` shows the
-matched rule and decision. Check the intended invocations and nearby writes such as `git push origin` and
-`gh pr create` before enabling a rule. Rule matching was verified with Codex CLI 0.172.0.
-A dispatched run using these rules through PR creation without routine approval requests is
-unverified. Check that in the child's transcript when enabling the rules for a wave.
+Use `codex execpolicy check --rules <file> -- gh pr view --repo github.com/kadragon/agent-toolkit -- 615`
+to confirm the explicit rule matches. Repeat for `gh pr checks`. Confirm that changing the
+selector, inserting `--web` before `--`, or using `gh pr create` or `git push origin` misses
+the rule. Also verify that GitHub CLI rejects an appended option. Rule matching and argument
+validation were checked with Codex CLI 0.172.0 and GitHub CLI 2.45.0.
+
+Use the reservation's pinned base at dispatched intake. It supplies the worktree base
+without another child fetch. When a later step needs a fresh ref, run `git fetch origin`
+through normal approval. Fetch writes `FETCH_HEAD` and can update remote-tracking refs.
+An allow rule for the fetch prefix would also accept explicit refspecs that update local refs.
+Keep Git pushes and PR writes under normal approval.
+
+Rule inspection verifies matching. The approval path through PR creation remains unverified
+with this rule installed. For a live check, record the Codex version and child transcript
+through PR creation. Check that local reads, assigned result I/O and any permitted PR reads
+ran without an approval review. Record any fetch as a Git write.
 
 Sources: [Codex command rules](https://developers.openai.com/codex/rules) and
 [configuration reference](https://developers.openai.com/codex/config-reference).
