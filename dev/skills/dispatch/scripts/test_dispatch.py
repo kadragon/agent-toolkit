@@ -919,7 +919,7 @@ class DispatchReceiptTests(DispatchTestCase):
         head = "a" * 40
         pr = "https://github.com/acme/widget/pull/595"
         merged = {"state": "MERGED", "headRefOid": head, "mergeCommit": {"oid": "b" * 40}}
-        for outcome in ("merged", "recorded", "open", "different_head", "pre_merge_head_changed",
+        for outcome in ("merged", "working_merged", "working_open", "recorded", "open", "different_head", "pre_merge_head_changed",
                         "active", "resumed", "replaced_result", "reviews_missing", "lookup_failed"):
             with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as directory:
                 receipt = Path(directory) / "run.json"
@@ -928,7 +928,9 @@ class DispatchReceiptTests(DispatchTestCase):
                     "pre_merge_stop": outcome == "pre_merge_head_changed",
                 })
                 result = {
-                    "status": "ready", "phase": "review", "summary": "CI passed", "head": head, "pr": pr,
+                    "status": "working" if outcome.startswith("working_") else "ready",
+                    "phase": "merge" if outcome.startswith("working_") else "review",
+                    "summary": "CI passed", "head": head, "pr": pr,
                     "review": {"head": head, "status": "passed", "sources": ["claude"]},
                 }
                 write_json(receipt.with_name("result.json"), result)
@@ -939,13 +941,14 @@ class DispatchReceiptTests(DispatchTestCase):
                 write_json(timing_path, data)
                 reply = {
                     "open": {**merged, "state": "OPEN", "mergeCommit": None},
+                    "working_open": {**merged, "state": "OPEN", "mergeCommit": None},
                     "different_head": {**merged, "headRefOid": "c" * 40},
                     "pre_merge_head_changed": {"state": "OPEN", "mergeCommit": None, "headRefOid": "c" * 40},
                 }.get(outcome, merged)
                 active = {**terminal, "turn": 2, "status": {"state": "working"}}
                 terminal_reply = active if outcome == "active" else terminal
                 responses = [terminal_reply]
-                if outcome in {"merged", "recorded", "replaced_result"}:
+                if outcome in {"merged", "working_merged", "recorded", "replaced_result"}:
                     responses.append(terminal)
                 elif outcome == "resumed":
                     responses.append(active)
@@ -966,12 +969,12 @@ class DispatchReceiptTests(DispatchTestCase):
                     redirect_stdout(StringIO()) as output,
                 ):
                     args = SimpleNamespace(run=receipt, close=True)
-                    if outcome in {"merged", "recorded"}:
+                    if outcome in {"merged", "working_merged", "recorded"}:
                         collect(args)
                     else:
                         with self.assertRaisesRegex(SystemExit, "left intact"):
                             collect(args)
-                if outcome in {"merged", "recorded"}:
+                if outcome in {"merged", "working_merged", "recorded"}:
                     report = json.loads(output.getvalue())
                     confirmed = 1500 if outcome == "recorded" else 2000
                     self.assertEqual(report["closed_reason"], "final_result")
@@ -1387,18 +1390,23 @@ class DispatchReceiptTests(DispatchTestCase):
     def test_report_review_distinguishes_continuing_merge_from_pause(self):
         head = "a" * 40
         cases = (
-            ("working", head, False, "working", "review", None),
-            ("ready", head, False, "ready", "review", "ready"),
-            ("working", "b" * 40, False, "blocked", "review-state", None),
-            ("working", head, True, "blocked", "review-sources", None),
+            ("working", False, DEFAULT_GIT_LIMITS, head, False, "working", "merge"),
+            ("ready", False, DEFAULT_GIT_LIMITS, head, False, "working", "merge"),
+            ("ready", True, DEFAULT_GIT_LIMITS, head, False, "ready", "review"),
+            ("ready", False, "pr-only", head, False, "ready", "review"),
+            ("working", True, DEFAULT_GIT_LIMITS, head, False, "blocked", "review-state"),
+            ("working", False, DEFAULT_GIT_LIMITS, "b" * 40, False, "blocked", "review-state"),
+            ("working", False, DEFAULT_GIT_LIMITS, head, True, "blocked", "review-sources"),
         )
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
             path = receipt.with_name("result.json")
-            for status, review_head, require_sources, expected, phase, outcome in cases:
-                with self.subTest(status=status, review_head=review_head, require_sources=require_sources):
+            for status, stop, limits, review_head, require_sources, expected, phase in cases:
+                with self.subTest(status=status, stop=stop, limits=limits, review_head=review_head,
+                                  require_sources=require_sources):
                     write_json(receipt, {
-                        **self.RECEIPT, "cli": "claude", "pre_merge_stop": status == "ready",
+                        **self.RECEIPT, "cli": "claude", "pre_merge_stop": stop,
+                        "handoff": {"git_limits": limits},
                         "require_review_sources": require_sources,
                     })
                     result = {
@@ -1415,7 +1423,7 @@ class DispatchReceiptTests(DispatchTestCase):
                     self.assertEqual((saved["status"], saved["phase"]), (expected, phase))
                     self.assertEqual(saved["review"], result["review"])
                     report = {"result": saved, "state": "running", "status": "active"}
-                    self.assertEqual(reached_outcome(report, {"ready", "merged"}), outcome)
+                    self.assertEqual(reached_outcome(report, {"ready", "merged"}), "ready" if expected == "ready" else None)
 
     def test_explicit_review_policy_overrides_the_legacy_source_flag(self):
         self.assertFalse(requires_review_sources({"review_policy": "head-bound", "require_review_sources": True}))

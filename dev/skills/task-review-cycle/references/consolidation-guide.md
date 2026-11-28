@@ -217,8 +217,8 @@ REPORT_JSON
 
 After all required reviews and final gates pass on the current PR head, pass `status: ready`
 when pausing before merge or `status: working` when continuing into merge. A continuing child
-waits for the helper to write `working` before starting the merge, so the parent keeps watching
-for the final outcome. If a gate fails or the child stops before confirming the merge, report
+waits for the helper to write `working` with `phase: merge` before starting the merge, so the parent
+keeps watching for the final outcome. If a gate fails or the child stops before confirming the merge, report
 `status: blocked` with the reason, including a queued, rejected, or unconfirmed merge. Keep the PR
 head in `head` and carry forward the review record and source outcomes in the final report.
 
