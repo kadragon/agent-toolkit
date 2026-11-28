@@ -46,6 +46,7 @@ from dispatch import (
     reached_outcome,
     release,
     report_instruction,
+    report_review,
     requires_review_sources,
     resolve_codex_model,
     resumes_pre_merge_stop,
@@ -396,6 +397,7 @@ class DispatchReceiptTests(DispatchTestCase):
         base = {"request": "Review it", "unit": "PR review", "git_limits": "pr-only", "work_kind": "standalone"}
         for handoff, message, standing in (
             (base, "$task-review --pr 12", True),
+            (base, "Use $task-review to review this branch and merge it once CI is green.", True),
             (base, "Review the pending changes", False),
             ({**base, "no_standing_review_approval": True}, "$task-review --pr 12", False),
             ({**base, "review_transfer_approval": self.REVIEW_APPROVAL}, "$task-review --pr 12", False),
@@ -851,6 +853,50 @@ class DispatchReceiptTests(DispatchTestCase):
                 self.assertEqual(run.call_args.args[0][-1], "/dev:task-next" + self.BLOCK)
                 receipt = json.loads((Path(directory) / "run.json").read_text(encoding="utf-8"))
                 self.assertEqual(receipt["handoff"]["git_limits"], args.git_limits)
+
+    def test_claude_report_uses_review_policy_before_launch_returns(self):
+        head = "a" * 40
+        result = {
+            "status": "ready", "phase": "review", "summary": "CI passed", "head": head, "ci": "success",
+            "review": {"head": head, "status": "passed", "sources": ["claude"]},
+        }
+        owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd())}
+        for previous_fields, policy, status in (
+            (None, "head-bound", "ready"),
+            ({"review_policy": "three-source"}, "three-source", "blocked"),
+            ({"require_review_sources": True}, "three-source", "blocked"),
+        ):
+            with self.subTest(previous=previous_fields), tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "run.json"
+                report = receipt.with_name("result.json")
+                previous = receipt.with_name("previous.json")
+                if previous_fields is not None:
+                    write_json(previous, {**self.RECEIPT, "cli": "codex", **previous_fields})
+
+                def start_child(*_args, **_kwargs):
+                    if previous_fields is None:
+                        working = {**result, "status": "working"}
+                        with patch("sys.stdin", TextIOWrapper(BytesIO(json.dumps(working).encode("utf-8")))):
+                            report_review(SimpleNamespace(result=report, pause=False, resume_merge=False))
+                        early = json.loads(report.read_text(encoding="utf-8"))
+                        self.assertEqual((early["status"], early["phase"]), ("blocked", "review-state"))
+                    with patch("sys.stdin", TextIOWrapper(BytesIO(json.dumps(result).encode("utf-8")))):
+                        report_review(SimpleNamespace(result=report, pause=True, resume_merge=False))
+                    return SimpleNamespace(stdout=json.dumps(self.TERMINAL))
+
+                with (
+                    patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, self.TERMINAL]),
+                    patch("dispatch.warn_linked_worktree"),
+                    patch("dispatch.subprocess.run", side_effect=start_child) as spawn,
+                    patch("dispatch.tempfile.mkdtemp", return_value=directory),
+                    redirect_stdout(StringIO()),
+                ):
+                    launch(self.launch_args(directory, cli="claude", task=None, message="/dev:task-next",
+                                            git_limits="pr-only",
+                                            relaunch_from=previous if previous_fields is not None else None))
+                self.assertEqual(json.loads(receipt.read_text(encoding="utf-8"))["review_policy"], policy)
+                self.assertEqual(json.loads(report.read_text(encoding="utf-8"))["status"], status)
+                self.assertEqual("include review_sources" in spawn.call_args.args[0][-2], policy == "three-source")
 
     def test_collect_reads_result_without_screen_and_only_closes_final_owned_child(self):
         done = {**self.TERMINAL, "status": {"state": "done"}}
@@ -3565,6 +3611,80 @@ class CodexSendTests(DispatchTestCase):
             self.assertNotEqual(saved_attempt, current_attempt)
             self.assertIsNone(started["launches"][0]["review"][0]["finished_ms"])
 
+    def test_standalone_pr_review_sets_policy_before_codex_receives_task(self):
+        terminal = DispatchReceiptTests.TERMINAL
+        message = "$task-review --pr 12"
+        for at_launch in (True, False):
+            with self.subTest(at_launch=at_launch), tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "run.json"
+                sent = False
+
+                def respond(command, *args, timeout=None):
+                    nonlocal sent
+                    if command == "get":
+                        return {**terminal, **(self.WORKING if sent else self.IDLE)}
+                    if command == "read":
+                        return self.screen(self.READY)
+                    self.assertEqual(command, "send")
+                    sent = True
+                    saved = json.loads(receipt.read_text(encoding="utf-8"))
+                    self.assertEqual(saved["review_policy"], "three-source")
+                    self.assertTrue(saved["require_review_sources"])
+                    self.assertIn("include review_sources", " ".join(args))
+                    return {"started": True}
+
+                self.launch_codex(directory, respond, work_kind="standalone", task=message if at_launch else None)
+                if not at_launch:
+                    saved = json.loads(receipt.read_text(encoding="utf-8"))
+                    self.assertEqual(saved["review_policy"], "head-bound")
+                    args = SimpleNamespace(address="t7", message=message, run=receipt)
+                    with patch("dispatch.hc_json", side_effect=respond), redirect_stdout(StringIO()):
+                        send(args)
+                self.assertTrue(sent)
+
+    def test_standalone_pr_review_sets_policy_on_continuation(self):
+        terminal = DispatchReceiptTests.TERMINAL
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            sent = False
+
+            def respond(command, *args, timeout=None):
+                nonlocal sent
+                if command == "get":
+                    state = {**self.IDLE, "turn": 2, "status": {"state": "done"}}
+                    return {**terminal, **(self.WORKING if sent else state)}
+                if command == "read":
+                    return self.screen(self.READY)
+                self.assertEqual(command, "send")
+                sent = True
+                saved = json.loads(receipt.read_text(encoding="utf-8"))
+                self.assertEqual(saved["review_policy"], "three-source")
+                self.assertIn("include review_sources", " ".join(args))
+                return {"started": True}
+
+            self.launch_codex(directory, respond, work_kind="standalone", task=None)
+            saved = json.loads(receipt.read_text(encoding="utf-8"))
+            write_json(receipt, {**saved, "sent": True})
+            args = SimpleNamespace(address="t7", message="$task-review --pr 12", run=receipt, continuation=True)
+            with patch("dispatch.hc_json", side_effect=respond), redirect_stdout(StringIO()):
+                send(args)
+            self.assertTrue(sent)
+
+    def test_standalone_review_uses_three_sources_when_hub_is_available(self):
+        for message, policy in (
+            ("$task-review --auto", "three-source"),
+            ("Use $task-review to review this branch and merge it once CI is green.", "three-source"),
+            ("$task-review --lite", "three-source"),
+            ("$task-review --no-hub", "head-bound"),
+            ("Review the pending changes", "head-bound"),
+        ):
+            with self.subTest(message=message), tempfile.TemporaryDirectory() as directory:
+                with patch("dispatch.send"):
+                    self.launch_codex(directory, lambda *_: DispatchReceiptTests.TERMINAL,
+                                      work_kind="standalone", task=message)
+                saved = json.loads((Path(directory) / "run.json").read_text(encoding="utf-8"))
+                self.assertEqual(saved["review_policy"], policy)
+
     def test_idle_codex_relaunch_carries_pre_merge_stop_until_first_send(self):
         terminal = DispatchReceiptTests.TERMINAL
         sent = False
@@ -5680,12 +5800,43 @@ class ReservedQueueWaveTest(unittest.TestCase):
         self.result("bind-wave", assignments=[delivery])
         request = {"contract": 1, "repo": str(self.repo), **delivery, "base": wave["base"]}
         worktree = Path(unit["worktree"])
+        git_run = subprocess.run
         replace = os.replace
+
+        def fail_checkout(args, **kwargs):
+            if args[:4] == ["git", "-C", str(worktree), "read-tree"]:
+                (worktree / "backlog.md").write_text(self.backlog.read_text(encoding="utf-8"), encoding="utf-8")
+                (worktree / "tasks.md").write_text("# Exist", encoding="utf-8")
+                return subprocess.CompletedProcess(args, 1, "", "injected checkout failure")
+            return git_run(args, **kwargs)
+
+        def fail_hook(args, **kwargs):
+            if args[:6] == ["git", "-C", str(worktree), "hook", "run", "--ignore-missing"]:
+                return subprocess.CompletedProcess(args, 1, "", "injected hook failure")
+            return git_run(args, **kwargs)
 
         def fail_tasks(source, destination):
             if Path(destination) == worktree / "tasks.md":
                 raise OSError("injected publication failure")
             return replace(source, destination)
+
+        with patch.object(queue_backend.subprocess, "run", side_effect=fail_checkout), self.assertRaisesRegex(
+            queue_backend.QueueError, "injected checkout failure",
+        ):
+            queue_backend.handle("claim-reservation", request, {"AGENT_QUEUE_BACKEND": "backlog"})
+        self.assertEqual((worktree / "tasks.md").read_text(encoding="utf-8"), "# Exist")
+        self.assertTrue((worktree / "backlog.md").is_file())
+        self.assertFalse(self.result("release-reservation", reservation=unit["reservation"])["released"])
+
+        with patch.object(queue_backend.subprocess, "run", side_effect=fail_hook), self.assertRaisesRegex(
+            queue_backend.QueueError, "injected hook failure",
+        ):
+            queue_backend.handle("claim-reservation", request, {"AGENT_QUEUE_BACKEND": "backlog"})
+
+        with patch.object(queue_backend.subprocess, "run", side_effect=fail_hook), self.assertRaisesRegex(
+            queue_backend.QueueError, "injected hook failure",
+        ):
+            queue_backend.handle("claim-reservation", request, {"AGENT_QUEUE_BACKEND": "backlog"})
 
         with patch.object(queue_backend.os, "replace", side_effect=fail_tasks), self.assertRaisesRegex(
             OSError, "injected publication failure",
@@ -5727,11 +5878,31 @@ class ReservedQueueWaveTest(unittest.TestCase):
         self.assertIn("- [ ] [FEAT] First item", (Path(unit["worktree"]) / "tasks.md").read_text(encoding="utf-8"))
         self.assertNotIn("First group", self.prepare()["by_title"])
 
+    def test_ordinary_claim_scan_accepts_legacy_worktree_listing(self):
+        sys.path.insert(0, str(QUEUE_BACKEND.parent))
+        import queue_backend
+
+        path = self.repo / ".worktrees" / "legacy"
+        self.git("worktree", "add", "-qb", "legacy", str(path))
+        (path / "tasks.md").write_text(
+            "# First group\n\n## Covers\n- [ ] [FEAT] First item\n", encoding="utf-8",
+        )
+        git_run = subprocess.run
+
+        def legacy_git(args, **kwargs):
+            if args[3:] == ["worktree", "list", "--porcelain", "-z"]:
+                return subprocess.CompletedProcess(args, 129, "", "unsupported -z")
+            return git_run(args, **kwargs)
+
+        with patch.object(queue_backend.subprocess, "run", side_effect=legacy_git):
+            claims = queue_backend.bc.collect_claims(str(self.backlog), None)
+        self.assertIn(str(path), claims)
+
     def test_independent_claims_can_prepare_worktrees_concurrently(self):
         sys.path.insert(0, str(QUEUE_BACKEND.parent))
         import queue_backend
 
-        wave = self.reserve("First group", "Second group")
+        wave = self.reserve("First group", "Existing sprint")
         assignments = []
         for unit in wave["reservations"]:
             ref = unit["candidate"]["ref"]
@@ -5739,7 +5910,12 @@ class ReservedQueueWaveTest(unittest.TestCase):
                                 "delivery": str(self.receipt(unit["branch"].split("/")[-1], ref))})
         self.result("bind-wave", assignments=assignments)
         first_entered, second_entered = Event(), Event()
-        original = queue_backend._materialize_claim
+        partial_metadata, second_lookup = Event(), Event()
+        first_checkout, second_checkout = Event(), Event()
+        materialize = queue_backend._materialize_claim
+        git_run = subprocess.run
+        queue_lock = queue_backend._queue_write_lock
+        first = wave["reservations"][0]
 
         def create(repo, unit, *args):
             if unit["candidate"]["title"] == "First group":
@@ -5748,13 +5924,63 @@ class ReservedQueueWaveTest(unittest.TestCase):
             else:
                 self.assertTrue(first_entered.wait(3))
                 second_entered.set()
-            return original(repo, unit, *args)
+                self.assertTrue(partial_metadata.wait(3), "first worktree did not start")
+            return materialize(repo, unit, *args)
+
+        def run(args, **kwargs):
+            git_args = args[3:] if args[:2] == ["git", "-C"] else []
+            first_add = git_args[:2] == ["worktree", "add"] and first["branch"] in git_args
+            if first_add:
+                # Git publishes gitdir and HEAD before it finishes writing commondir.
+                admin = self.repo / ".git" / "worktrees" / Path(first["worktree"]).name
+                admin.mkdir(parents=True)
+                (admin / "gitdir").write_text(str(Path(first["worktree"]) / ".git") + "\n", encoding="utf-8")
+                (admin / "HEAD").write_text("0" * len(wave["base"]) + "\n", encoding="utf-8")
+                (admin / "commondir").touch()
+                partial_metadata.set()
+                try:
+                    self.assertTrue(second_lookup.wait(3), "second worktree did not attempt discovery")
+                finally:
+                    partial_metadata.clear()
+                    shutil.rmtree(admin)
+            if (first_add and "--no-checkout" not in git_args) or (
+                git_args[:1] == ["read-tree"] and args[2] == first["worktree"]
+            ):
+                first_checkout.set()
+                self.assertTrue(second_checkout.wait(3), "second checkout waited for the first")
+            elif git_args[:1] == ["read-tree"] and args[2] == wave["reservations"][1]["worktree"]:
+                self.assertTrue(first_checkout.wait(3), "first checkout did not start")
+                stages = queue_backend.bc.collect_block_claims(str(self.backlog), None, ref=wave["base"])
+                self.assertEqual(stages, {}, "an unpopulated worktree appeared to remove an open sprint")
+                second_checkout.set()
+            result = git_run(args, **kwargs)
+            if partial_metadata.is_set() and args[:5] == ["git", "-C", str(self.repo), "worktree", "list"]:
+                second_lookup.set()
+            return result
+
+        def lock(repo, name="write.lock", timeout=None):
+            if name == "reservation-worktree.lock" and partial_metadata.is_set():
+                try:
+                    with queue_lock(repo, name, timeout=0):
+                        pass
+                except queue_backend.QueueError as error:
+                    self.assertIn("timed out", str(error))
+                    second_lookup.set()
+            return queue_lock(repo, name, timeout)
 
         def claim(assignment):
             request = {"contract": 1, "repo": str(self.repo), "base": wave["base"], **assignment}
-            return queue_backend.handle("claim-reservation", request, {"AGENT_QUEUE_BACKEND": "backlog"})
+            try:
+                return queue_backend.handle("claim-reservation", request, {"AGENT_QUEUE_BACKEND": "backlog"})
+            except queue_backend.QueueError as error:
+                self.fail(str(error))
 
-        with patch.object(queue_backend, "_materialize_claim", side_effect=create), ThreadPoolExecutor(max_workers=2) as pool:
+        with (
+            patch.object(queue_backend, "_materialize_claim", side_effect=create),
+            patch.object(queue_backend, "_queue_write_lock", side_effect=lock),
+            patch.object(queue_backend.subprocess, "run", side_effect=run),
+            ThreadPoolExecutor(max_workers=2) as pool,
+        ):
             outcomes = list(pool.map(claim, assignments))
         self.assertEqual([code for code, _ in outcomes], [0, 0])
         self.assertTrue(all((Path(unit["worktree"]) / "tasks.md").is_file() for _, unit in outcomes))

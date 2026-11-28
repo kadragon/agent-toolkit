@@ -41,7 +41,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -721,7 +721,7 @@ def github_claims(repo: str, slug: str, issues: list[dict], include_self: bool,
     """
     claims: dict[int, str] = {}
     top = _git(repo, "rev-parse", "--show-toplevel")
-    listing = _git(repo, "worktree", "list", "--porcelain")
+    listing = bc._worktree_listing(repo)
     if top is not None and listing is not None:
         common = _git(repo, "rev-parse", "--git-common-dir")
         for wt in bc._claimants(listing, os.path.realpath(top), include_self):
@@ -785,7 +785,8 @@ def github_list(req: dict, runner=gh_runner, max_pages: int = MAX_PAGES, *, rese
         if not _trusted(issue):  # labels are re-read in full now: the label filter stays authoritative
             continue
         queued[issue["number"]] = issue
-    claims = github_claims(repo, slug, list(queued.values()), bool(req.get("ref")), warnings)
+    with _reservation_worktree_lock(repo) if snapshot else nullcontext():
+        claims = github_claims(repo, slug, list(queued.values()), bool(req.get("ref")), warnings)
     for reservation in reservations:
         candidate = reservation["candidate"]
         for covered_ref in {candidate["ref"], *candidate["item_refs"]}:
@@ -1227,6 +1228,12 @@ def _queue_write_lock(repo: str, name: str = "write.lock", timeout: float | None
         yield
 
 
+def _reservation_worktree_lock(repo):
+    # Git can enumerate another worktree before its commondir has been written.
+    # Keep remote reads and reservation-store writes outside this lock.
+    return _queue_write_lock(repo, "reservation-worktree.lock", RESERVATION_STORE_TIMEOUT)
+
+
 def read_pending(repo: str) -> list[dict]:
     path = pending_path(repo)
     try:
@@ -1296,7 +1303,8 @@ def _wave_snapshot(repo, base, env, runner, *, exclude=()):
     if backend == "github":
         listed = github_list(req, runner, reservations=reservations, snapshot=True)
     elif backend == "backlog":
-        listed = backlog_list(req, reservations, snapshot=True)
+        with _reservation_worktree_lock(repo):
+            listed = backlog_list(req, reservations, snapshot=True)
     else:
         raise QueueError("queue wave reservations require a built-in queue backend")
     if listed.get("incomplete") or any("unbalanced fence" in warning for warning in listed["warnings"]):
@@ -1337,7 +1345,8 @@ def _wave_worktree(repo, candidate):
     branch, warning = branch_name(candidate["title"], candidate["items"])
     if not branch:
         raise QueueError(warning)
-    listing = _git(repo, "worktree", "list", "--porcelain", "-z")
+    with _reservation_worktree_lock(repo):
+        listing = _git(repo, "worktree", "list", "--porcelain", "-z")
     if not listing or not listing.startswith("worktree "):
         raise QueueError(f"cannot resolve the main worktree in {repo}")
     root = Path(listing.split("\x00", 1)[0].removeprefix("worktree "))
@@ -1374,7 +1383,10 @@ def _claim_tasks(repo, unit):
 
 
 def _worktree_record(repo, path):
-    listing = _git(repo, "worktree", "list", "--porcelain", "-z") or ""
+    with _reservation_worktree_lock(repo):
+        listing = _git(repo, "worktree", "list", "--porcelain", "-z")
+    if listing is None:
+        raise QueueError(f"cannot list reserved worktrees in {repo}; retry the operation")
     for record in listing.split("\x00\x00"):
         fields = dict(field.partition(" ")[::2] for field in record.split("\x00") if field)
         if fields.get("worktree") and Path(fields["worktree"]).resolve() == Path(path).resolve():
@@ -1384,19 +1396,49 @@ def _worktree_record(repo, path):
 
 def _claim_status(repo, unit, token, content):
     record = _worktree_record(repo, unit["worktree"])
-    owned = record.get("locked") == f"dispatch reservation {token}"
+    owned = record.get("locked") == bc.RESERVATION_LOCK_REASON + token
     if not (owned or unit.get("published")):
         return False, False
     if record.get("branch") != f"refs/heads/{unit['branch']}" or record.get("HEAD") != unit["base"]:
         raise QueueError(f"reserved worktree changed: {unit['worktree']}")
+    if owned and unit.get("checkout_complete") is False and not _worktree_has_index(unit["worktree"]):
+        return owned, False
     tasks = Path(unit["worktree"]) / "tasks.md"
     actual = tasks.read_text(encoding="utf-8") if tasks.exists() else ""
     if actual == content:
         return owned, True
     original = _read_queue(os.path.join(repo, "tasks.md"), unit["base"], optional=True)
-    if actual != original or unit.get("published"):
+    if unit.get("published") or actual != original:
         raise QueueError(f"reserved task claim changed: {tasks}")
     return owned, False
+
+
+def _worktree_has_index(path):
+    index = _git(path, "rev-parse", "--git-path", "index")
+    if not index:
+        raise QueueError(f"cannot resolve the index of reserved worktree {path}")
+    return (Path(path) / index).is_file()
+
+
+def _checkout_reserved_worktree(path, base):
+    # `worktree add --no-checkout` skips post-checkout as well as materializing files.
+    commands = []
+    if not _worktree_has_index(path):
+        commands.append(["read-tree", "--reset", "-u", "--no-recurse-submodules", base])
+    commands.append(["hook", "run", "--ignore-missing", "post-checkout", "--", "0" * len(base), base, "1"])
+    for args in commands:
+        result = subprocess.run(
+            ["git", "-C", path, *args], capture_output=True, encoding="utf-8", errors="replace", check=False,
+        )
+        if result.returncode:
+            raise QueueError(f"cannot check out reserved worktree {path}: {result.stderr.strip()}")
+
+
+def _record_reservation_progress(repo, token, **progress):
+    with _queue_write_lock(repo, RESERVATION_STORE_LOCK, RESERVATION_STORE_TIMEOUT):
+        units = _read_reservations(repo)
+        units[token].update(progress)
+        _write_queue_json(_reservation_store(repo), {"version": 1, "units": units})
 
 
 def _materialize_claim(repo, unit, token, content, owned):
@@ -1410,13 +1452,18 @@ def _materialize_claim(repo, unit, token, content, owned):
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
             fh.write(content)
         if not owned:
-            result = subprocess.run(
-                ["git", "-C", repo, "worktree", "add", "--lock", "--reason", f"dispatch reservation {token}",
-                 "-b", branch, path, unit["base"]],
-                capture_output=True, encoding="utf-8", errors="replace", check=False,
-            )
+            _record_reservation_progress(repo, token, checkout_complete=False)
+            with _reservation_worktree_lock(repo):
+                result = subprocess.run(
+                    ["git", "-C", repo, "worktree", "add", "--no-checkout", "--lock", "--reason",
+                     bc.RESERVATION_LOCK_REASON + token, "-b", branch, path, unit["base"]],
+                    capture_output=True, encoding="utf-8", errors="replace", check=False,
+                )
             if result.returncode:
                 raise QueueError(f"cannot create reserved worktree {path}: {result.stderr.strip()}")
+        if not owned or unit.get("checkout_complete") is False:
+            _checkout_reserved_worktree(path, unit["base"])
+            _record_reservation_progress(repo, token, checkout_complete=True)
         os.replace(temp, destination)
     finally:
         Path(temp).unlink(missing_ok=True)
@@ -1435,7 +1482,7 @@ def _finish_reservation(op, req, env, runner):
         if unit is not None:
             if release:
                 record = _worktree_record(repo, unit["worktree"])
-                if record.get("locked") == f"dispatch reservation {token}":
+                if record.get("locked") == bc.RESERVATION_LOCK_REASON + token:
                     return {"released": False, "reason": "worktree creation already started; resume the claim"}
             else:
                 _claim_reservation(req, env, runner, token, unit)
@@ -1476,12 +1523,11 @@ def _claim_reservation(req, env, runner, token, unit):
         _materialize_claim(repo, unit, token, content, owned)
         owned = True
     if not unit.get("published"):
-        with _queue_write_lock(repo, RESERVATION_STORE_LOCK, RESERVATION_STORE_TIMEOUT):
-            units = _read_reservations(repo)
-            units[token]["published"] = True
-            _write_queue_json(_reservation_store(repo), {"version": 1, "units": units})
-    if owned and _git(repo, "worktree", "unlock", unit["worktree"]) is None:
-        raise QueueError(f"cannot unlock reserved worktree {unit['worktree']}; retry the claim")
+        _record_reservation_progress(repo, token, published=True)
+    if owned:
+        with _reservation_worktree_lock(repo):
+            if _git(repo, "worktree", "unlock", unit["worktree"]) is None:
+                raise QueueError(f"cannot unlock reserved worktree {unit['worktree']}; retry the claim")
 
 
 def _legacy_file_reservation(candidate):
