@@ -488,13 +488,18 @@ def main() -> int:
                        cwd=hub_repo, check=True)
         bindir = tmp / "gh_bin"
         bindir.mkdir()
-        # `api graphql` answers with the slurped pages in $GH_VIEW (unset → the call fails);
+        # Older gh rejects --slurp and streams one JSON object per page.
         # `pr view` and `pr checks` always report a stale head and failure, so reading either
         # instead of the one snapshot shows up red.
         (bindir / "gh").write_text(
             "#!/usr/bin/env bash\n"
             'case "$1 $2" in\n'
-            '  "api graphql") [ -n "${GH_VIEW:-}" ] || exit 1; printf \'%s\' "$GH_VIEW"; exit 0 ;;\n'
+            '  "api graphql")\n'
+            '    for arg in "$@"; do\n'
+            '      if [[ "$arg" == --slurp ]]; then echo "unknown flag: --slurp" >&2; exit 1; fi\n'
+            '    done\n'
+            '    [ -n "${GH_VIEW:-}" ] || exit 1\n'
+            '    printf \'%s\' "$GH_VIEW"; exit 0 ;;\n'
             '  "pr view") echo "' + "b" * 40 + '"; exit 0 ;;\n'
             "  \"pr checks\") echo '[{\"bucket\": \"fail\"}]'; exit 1 ;;\n"
             "esac\n"
@@ -513,7 +518,7 @@ def main() -> int:
             env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}")
             env.pop("GH_VIEW", None)
             if pages is not None:
-                env["GH_VIEW"] = json.dumps(pages)
+                env["GH_VIEW"] = "\n".join(json.dumps(page_data) for page_data in pages)
             proc = subprocess.run(
                 ["bash", str(SCRIPT.parent / "hub.sh"), "ci-status", "7"], cwd=hub_repo,
                 capture_output=True, text=True, timeout=30, env=env)
@@ -546,8 +551,9 @@ def main() -> int:
               status.get("status") == "failure" and status.get("checks") == 2, f"got {status}")
         status = hub_status(None, pages=[page([run_ctx("SUCCESS")]),
                                          page([run_ctx("FAILURE", name="lint")])])
-        check("a failure on a later page counts",
-              status.get("status") == "failure" and status.get("checks") == 2, f"got {status}")
+        check("older gh reports the head and includes a failure on a later page",
+              status.get("status") == "failure" and status.get("checks") == 2
+              and status.get("head_sha") == "a" * 40, f"got {status}")
         status = hub_status(None, pages=[page([run_ctx("SUCCESS")]),
                                          page([run_ctx("SUCCESS", name="lint")], oid="c" * 40)])
         check("pages from two different heads are not judged",

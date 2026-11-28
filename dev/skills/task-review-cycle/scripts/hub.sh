@@ -229,7 +229,7 @@ case "$SUBCOMMAND" in
       # with the previous commit's failure. The query is `gh pr checks`'s own (it cannot be
       # pinned, and `gh pr view` omits the run event), so buckets and the rerun dedup —
       # latest run per name/workflow/event — mirror it.
-      VIEW=$(gh api graphql --paginate --slurp -F number="$PR_NUMBER" \
+      VIEW=$(gh api graphql --paginate -F number="$PR_NUMBER" \
         -f owner="${OWNER_REPO%%/*}" -f name="${OWNER_REPO#*/}" -f query='
         query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
           repository(owner: $owner, name: $name) { pullRequest(number: $number) {
@@ -242,7 +242,8 @@ case "$SUBCOMMAND" in
                   ... on CheckRun { name status conclusion startedAt
                     checkSuite { workflowRun { event workflow { name } } } }
                 } } } } } } } } }' 2>/dev/null) || VIEW=""
-      SNAPSHOT=$(jq -c '[.[] | .data.repository.pullRequest.commits.nodes[0].commit] as $c
+      # Collect the streamed pages with jq for gh versions without --slurp.
+      SNAPSHOT=$(jq -sc '[.[] | .data.repository.pullRequest.commits.nodes[0].commit] as $c
         | {oids: ([$c[].oid] | unique),
            buckets: [[$c[].statusCheckRollup.contexts.nodes[]?]
              | group_by(if .__typename == "CheckRun"
@@ -254,7 +255,7 @@ case "$SUBCOMMAND" in
              | if $s == "SUCCESS" or $s == "SKIPPED" or $s == "NEUTRAL" then "pass"
                elif $s == "FAILURE" or $s == "ERROR" or $s == "TIMED_OUT" or $s == "ACTION_REQUIRED"
                  or $s == "STARTUP_FAILURE" or $s == "CANCELLED" then "fail"
-               else "pending" end]}' <<<"${VIEW:-null}" 2>/dev/null) || SNAPSHOT='{"oids": [], "buckets": []}'
+               else "pending" end]}' <<<"$VIEW" 2>/dev/null) || SNAPSHOT='{"oids": [], "buckets": []}'
       HEAD_SHA=$(jq -r 'if (.oids | length) == 1 then .oids[0] // empty else empty end' <<<"$SNAPSHOT")
       BUCKETS=$(jq -c '.buckets' <<<"$SNAPSHOT")
       TOTAL=$(jq 'length' <<<"$BUCKETS")
