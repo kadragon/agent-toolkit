@@ -57,8 +57,9 @@ the existing ladder below.
 
 Escalating relaunches the same phase. Check the replacement pair before stopping the current child
 with `launch --dry-run`. If quota refuses it, keep the current child and
-choose a permitted rung or ask the user. For a `--tree` run, read the worktree slug first
-(`hc read --lines 60 <address>`). When authorized to end the old child, run
+choose a permitted rung or ask the user. For a `--tree` run, confirm its worktree slug in the
+result's `worktree` or the terminal history (`hc read --lines 60 <address>` or more) before closing it.
+When authorized to end the old child, run
 `dispatch.py collect <old-receipt> --close --force` and confirm it closed. Launch per SKILL.md
 step 4 with the new pair, the same first message, and `--relaunch-from <old-receipt>` to carry
 phase measurements and unfinished attempts. For a `--tree` run, keep its worktree and use
