@@ -1,6 +1,6 @@
 {
   "name": "guard",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Commit and memory guards, plus session-start maintenance for agent-toolkit.",
   "author": {
     "name": "kadragon"
