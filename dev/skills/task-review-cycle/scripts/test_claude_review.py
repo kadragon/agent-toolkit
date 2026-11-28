@@ -176,16 +176,21 @@ def case_blocking_scope_and_failure_field(tmp):
     consolidation-guide.md keys off both: P2/P3 never gate a merge, and a code-review finding
     with an empty failure field is folded into the low-confidence note.
     """
-    print("\ncase: prompt scopes to merge-blocking findings and requires a failure field")
+    print("\ncase: prompt covers actionable defects and requires a failure field")
     _, prompt = run(tmp, ["main", ""], stdout=envelope("[]"))
     flat = " ".join(prompt.split())
-    check("scoped to merge-blocking problems and touched pre-existing bugs",
-          "merge-blocking problems introduced or worsened by the diff and concrete pre-existing bugs" in flat)
-    check("only P0/P1 plus pre_existing allowed", '"severity":"P0"|"P1"|"pre_existing",' in flat)
+    check("scoped to actionable defects and touched pre-existing bugs",
+          "actionable defects introduced or worsened by the diff and concrete pre-existing bugs" in flat)
+    check("schema distinguishes introduced P2", '"severity":"P0"|"P1"|"P2"|"pre_existing",' in flat)
+    check("introduced P2 stays in the PR", "introduced P2 as in-PR fixes or advisory PR comments without issue filing" in flat)
+    check("pre-existing edge cases without exposure stay in PR comments",
+          "everyday path with its failing condition or cite reproduction evidence from real use" in flat
+          and "With neither, treat the bug as a PR comment only." in flat)
+    check("pre-existing findings include their priority", '"priority":"P0"|"P1"|"P2"|"P3"' in flat)
     check("schema carries a failure field", '"failure":"' in flat, prompt[:800])
     check("failure is defined as a concrete demonstration", "how to show it fails" in flat, prompt[:800])
-    # Blocking-only and the passthrough rule must agree, or the headless run gets two opposite orders.
     check("passthrough never drops a blocking finding", "never re-rank, re-judge, merge, summarize or drop a blocking finding" in flat, prompt[:1600])
+    check("passthrough includes actionable P2", "Include actionable P2 findings as well." in flat)
     check("regular review excludes comment rules", '"source":"comments"' not in prompt and "## Keep list" not in prompt)
 
 

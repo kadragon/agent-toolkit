@@ -13,8 +13,9 @@ orchestrator's inline grading.
 2. **Re-read the diff and base** for each finding. A regression can surface on an unchanged
    line when this branch causes it. A `pre_existing` severity or title tag is advisory: verify the
    same failure existed at the base, the branch did not worsen it, and the diff touches or reads
-   the relevant code. Normalize Codex's `[pre_existing]` title above its numeric priority. Drop
-   unrelated code, inapplicable concerns, and findings with no concrete path to harm.
+   the relevant code. Use confirmed `pre_existing` status to determine scope and keep the
+   finding's P0–P3 priority for filing. Drop unrelated code, inapplicable concerns, and findings
+   with no concrete path to harm.
 3. **Drop low confidence and excluded categories.** Confidence < 50 goes to a collapsed
    "Low confidence (not actioned)" note, not the table. So does a `code-review` finding with an
    empty `failure` — no input, state, test, command, or unmet User Story that shows it fails. Panel findings carry
@@ -30,8 +31,8 @@ orchestrator's inline grading.
 5. **Scope.** In-scope = introduced or made worse by this branch and fixable without widening its
    purpose. Everything else is out-of-scope; when in doubt, out.
 6. **Gate.** Apply in-scope P0/P1 findings eligible under *Fix rounds and re-review*, P0 first.
-   Keep verified in-scope P0/P1 security findings blocking throughout the cycle. Send eligible
-   queue findings to *Recording out-of-scope and non-blocking findings*. Map Codex's structured
+   Keep verified in-scope P0/P1 security findings blocking throughout the cycle. Route remaining
+   findings through *Recording out-of-scope and non-blocking findings*. Map Codex's structured
    `critical`/`high`/`medium`/`low` to P0/P1/P2/P3 respectively. A `contract` finding is
    in-scope P0 by construction and
    bypasses the confidence and `failure` filters and `--auto`. A `comments` finding carries no
@@ -73,14 +74,16 @@ For dispatched work, record each review launch and consolidation per *Dispatch t
 - Apply the normal gate until the one general re-review has been consolidated. If unused,
   keep the normal gate through late reclaim. Record closure in `cycle_state.py note` after
   consolidating the re-review, or when ready without it. Route valid new ordinary findings
-  from later sources to the queue, even at P0/P1. This includes late reclaim and findings
-  incidental to focused confirmation. Retain accepted blockers. A repeat keeps its ID and gate.
+  from later sources through the filing threshold below, even at P0/P1. This includes late
+  reclaim and findings incidental to focused confirmation. Retain accepted blockers. A repeat
+  keeps its ID and gate.
 - For each blocker, check the branch diff for the same failure pattern and fix every in-scope
   instance in one pass. During repairs, run the tests or checks covering the changed behavior.
   If a targeted check fails, fix forward once within the finding's scope. If it still fails,
   stop on contract or blocking security findings. For other findings, withdraw only its edits
-  and queue it if the remaining candidate can still satisfy the contract and final checks. Keep advisory
-  edits separable and use `comment-rules.md` for their disposition.
+  and route it through the filing threshold if the remaining candidate can still satisfy the
+  contract and final checks. Keep advisory edits separable and use `comment-rules.md` for their
+  disposition.
 - Confirm fixed contract and security blockers against their original criteria or failure
   paths, including those first surfaced after the cap. Batch ready findings and give the
   permitted reviewer their stable IDs, changed scope, and targeted evidence. Allow one focused
@@ -171,8 +174,9 @@ Keep pending results available for resume and follow the existing review budget 
 
 After final verification, pass the pre-merge report as UTF-8 JSON on stdin to the installed
 dispatch script. Use the assigned path beside the current dispatch receipt. The helper exits 0 even
-when it rewrites the report as `blocked`; check that the call itself succeeded, then re-read `result.json` and proceed only when this call wrote `status: ready`. The helper applies
-the receipt's reviewer requirements, so Claude continuations report the independent reviews
+when it rewrites the report as `blocked`. Check that the call succeeded, then re-read
+`result.json` and check for the requested success status. On any mismatch, publish `blocked` with
+the reason and stop. The helper applies the receipt's reviewer requirements, so Claude continuations report the independent reviews
 required by their review route. A report without a receipt uses the three-source gate.
 Include the full PR head SHA in `head` and the usual PR, CI and evidence fields. Record the commit
 the independent results cover in `review.head` (use `null` when unavailable) and list the reviewers in
@@ -214,11 +218,15 @@ python3 -I "$DISPATCH" report-review "$RESULT" <<'REPORT_JSON'
 REPORT_JSON
 ```
 
-For a pre-merge stop, pass `status: ready` once all required reviews and final gates pass on
-the reported head. For a failed gate, pass `status: blocked` and state the blocker. A child
-authorized to merge proceeds to the merge helper only when the review and final gates pass on
-the current PR head. In the confirmed merge report, keep that PR head in `head` and carry forward
-the review record and source outcomes.
+After all required reviews and final gates pass on the current PR head, pass `status: ready`
+with `--pause` when pausing before merge, or pass `status: working` when continuing into merge. A continuing child
+waits for the helper to write `working` with `phase: merge` before starting the merge, so the parent
+keeps watching for the final outcome. If the user or authorized home session explicitly releases
+a dispatch pre-merge stop, pass `--resume-merge` with the `working` report. The option applies to
+the report and still requires the archived merge authority. If a gate fails or the child stops
+before confirming the merge, report
+`status: blocked` with the reason, including a queued, rejected, or unconfirmed merge. Keep the PR
+head in `head` and carry forward the review record and source outcomes in the final report.
 
 ## Record finding dispositions
 
@@ -235,8 +243,8 @@ Review disposition {"head":"<reviewed commit>","id":"<stable finding ID within t
 - `dropped` requires one reason: `wrong` for a mismatched or unsupported claim, `intentional`
   for verified deliberate behavior, `not-matter` for a valid observation with immaterial impact,
   or `out-of-scope` for a valid item deferred or outside the change, including verified
-  `pre_existing` and advisory cleanup deferred to the queue. Use the actual adjudication for
-  low-confidence findings. Filing counts as deferred, not applied.
+  `pre_existing` and findings left in a PR comment or filed in the queue. Use the actual
+  adjudication for low-confidence findings.
 
 Reuse the ID on re-review, resume, and late reclaim when the same defect appears again. Take the
 last record for an ID within the cycle and retain all contributing sources, including any newly
@@ -266,15 +274,38 @@ for each verdict. A newly approved scope starts a fresh sequence.
 
 ## Recording out-of-scope and non-blocking findings
 
-Verified `pre_existing`, valid out-of-scope findings, in-scope P2/P3, and ordinary findings
-deferred by the window in *Fix rounds and re-review* go here. This includes advisory comment
-follow-ups and qualifying late findings. Use `queue_backend.py` (bundled with
-`dev:task-next`) → *Filing findings* in `../task-next/references/queue-backend-contract.md`
-(paths relative to the skill). Classify security findings before recording or reporting them.
+Classify security findings first and apply *Public security findings* before writing any
+comment or queue entry. Apply the following order to the remaining verified findings, including
+late results and unapplied advisory comment findings.
 
-Read `rejected` before filing ordinary findings. Withhold a matching finding unless this
-cycle's evidence meets the entry's re-file bar. List each withheld finding and its matching entry
-in the cycle report. Then call `create` for the remaining findings.
+| Finding | Disposition |
+| --- | --- |
+| P3, a nit, or an unapplied `comments` finding | At most a PR comment. The `comments` source uses a placeholder severity. |
+| P2 introduced or worsened by this branch | Fix in this PR with explicit approval for the in-scope fix. Otherwise leave a PR comment. `--auto` applies to the blocking gate. |
+| Verified pre-existing defect above P3 | File only if it occurs on an everyday path or has reproduction evidence from real use. Otherwise leave a PR comment. |
+| P0/P1 introduced or worsened by this branch | Apply the blocking gate. Preserve the existing queue route when scope, the review window, or withdrawal of a failed fix under *Fix rounds and re-review* defers the finding. |
+| Other advisory findings | At most a PR comment. |
+
+For a pre-existing defect, name the everyday command or workflow and explain why the failing
+condition occurs during ordinary use, or cite a real incident, user report, or reproduction
+from actual use. A synthetic test or a hypothetical supported input can establish the
+defect. Eligibility also requires evidence of exposure or an everyday path.
+For legacy pre-existing findings without a priority, assign a priority from verified impact
+or leave a PR comment if the impact is unclear.
+
+On hub, authorize `pr-write` before posting non-sensitive comment-only findings on the PR.
+Include the finding ID, priority, file:line and concrete failure. On resume or late reclaim,
+post only IDs that have not already been commented on. Without a PR or comment authority,
+include those findings in the final cycle report and record their dispositions. For sensitive
+findings, use the existing authorized disclosure route where applicable and report only a
+withheld count otherwise. Keep comment-only findings out of `create`, file-queue edits, and
+pending drafts for both backends.
+
+When any findings qualify for filing, use `queue_backend.py` (bundled with `dev:task-next`) →
+*Filing findings* in `../../task-next/references/queue-backend-contract.md`. Read `rejected`
+before filing ordinary findings. Withhold a matching finding unless this cycle's evidence
+meets the entry's re-file bar. List each withheld finding and its matching entry in the cycle
+report. Call `create` only with the remaining eligible findings.
 
 - **GitHub:** one finding becomes one issue. For two or more, include a parent
   `Review follow-ups — PR #N` and set each finding's `parent_key` to the parent's key. Without a PR,
@@ -293,8 +324,8 @@ path):
 ```
 
 Tags: `[debt]` code quality · `[doc]` documentation · `[constraint]` missing test or rule ·
-`[harness]` tooling/CI. An in-scope P2/P3 line ends with `(introduced here)`. Append to an
-existing section; never overwrite earlier groups. Mark a verified pre-existing bug `(pre_existing)`.
+`[harness]` tooling/CI. Append to an existing section and preserve earlier groups.
+Mark a verified pre-existing bug `(pre_existing)`.
 
 On private or non-GitHub file queues, use the existing format and flag security findings as
 `[security]` (the `security` label on GitHub).
