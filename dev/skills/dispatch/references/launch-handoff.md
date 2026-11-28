@@ -74,9 +74,9 @@ archived contract and owns the branch's worktree. The home session only requests
 *Continue with another phase* and never commits to or pushes the child's branch. In its feature
 worktree the child runs `cycle_state.py authorize --action commit` and `--action feature-push`, then
 `task-review-cycle/scripts/pre_merge_resync.py --base <BASE_BRANCH>`, which fetches, merges the base,
-reapplies the version bump and queue entries, and pushes. It stops on a failed check or a
-`conflict`, `denied` or `error` result, and then resumes at final verification
-(`task-review-cycle` → *Dispatch pre-merge report*).
+reapplies the version bump and queue entries, and pushes. On a failed check or a
+`conflict`, `denied` or `error` result it stops and reports to the home session. After `resynced` it resumes
+at final verification (`task-review-cycle` → *Dispatch pre-merge report*).
 
 ## Home merges a child PR
 
