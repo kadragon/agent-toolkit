@@ -40,6 +40,7 @@ from dispatch import (
     main,
     peek,
     pick,
+    pre_merge_stop,
     prepare_codex,
     release,
     report_instruction,
@@ -180,6 +181,17 @@ class DispatchReceiptTests(DispatchTestCase):
         ):
             with self.subTest(message=message):
                 self.assertEqual(first_prompt("codex", message, self.HANDOFF), message + self.BLOCK)
+
+    def test_pre_merge_stop_requires_parallel_worktree_task(self):
+        for cli, prefix in (("claude", "/dev:"), ("codex", "$")):
+            for kind, command in (("queue", "task-next"), ("new", "task-new")):
+                with self.subTest(cli=cli, kind=kind):
+                    handoff = {"work_kind": kind}
+                    task = f"{prefix}{command} --tree unit"
+                    mode = "\nDispatch mode: parallel-worktree"
+                    self.assertTrue(pre_merge_stop(cli, task + mode, handoff))
+                    self.assertFalse(pre_merge_stop(cli, task, handoff))
+                    self.assertFalse(pre_merge_stop(cli, task.replace("--tree", "--all") + mode, handoff))
 
     def launch_args(self, cwd, **overrides):
         args = dict(cwd=str(cwd), name="repo", parent="t6", cli="codex", model="gpt-6.1-terra",
@@ -847,6 +859,101 @@ class DispatchReceiptTests(DispatchTestCase):
                 with self.assertRaisesRegex(SystemExit, "terminal identity changed"):
                     collect(args)
                 hc.assert_called_once_with("get", "t7")
+
+    def test_collect_closes_ready_child_with_recorded_pre_merge_stop(self):
+        terminal = {**self.TERMINAL, "status": {"state": "idle"}}
+        finished = {**terminal, "state": "finished"}
+        head = "a" * 40
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            write_json(receipt, {**self.RECEIPT, "cli": "claude", "pre_merge_stop": True})
+            write_json(receipt.with_name("result.json"), {
+                "status": "ready", "phase": "review", "summary": "CI passed", "head": head,
+                "review": {"head": head, "status": "passed", "sources": ["claude"]},
+            })
+            with (
+                patch("dispatch.hc_json", side_effect=[terminal, terminal, {}, finished, {}]) as hc,
+                redirect_stdout(StringIO()) as output,
+            ):
+                collect(SimpleNamespace(run=receipt, close=True))
+            report = json.loads(output.getvalue())
+            self.assertEqual(report["closed_reason"], "final_result")
+            self.assertIsNone(report["timing"]["merge"])
+            self.assertEqual(hc.call_args_list, [
+                call("get", "t7"), call("get", "t7"), call("kill", "t7"),
+                call("get", "t7", timeout=ANY), call("rm", "t7"),
+            ])
+
+    def test_collect_closes_ready_child_after_same_head_merge(self):
+        terminal = {**self.TERMINAL, "turn": 1, "status": {"state": "idle"}}
+        finished = {**terminal, "state": "finished"}
+        head = "a" * 40
+        pr = "https://github.com/acme/widget/pull/595"
+        merged = {"state": "MERGED", "headRefOid": head, "mergeCommit": {"oid": "b" * 40}}
+        for outcome in ("merged", "recorded", "open", "different_head", "active",
+                        "resumed", "reviews_missing", "lookup_failed"):
+            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as directory:
+                receipt = Path(directory) / "run.json"
+                write_json(receipt, {
+                    **self.RECEIPT, "cli": "claude", "require_review_sources": outcome == "reviews_missing",
+                })
+                result = {
+                    "status": "ready", "phase": "review", "summary": "CI passed", "head": head, "pr": pr,
+                    "review": {"head": head, "status": "passed", "sources": ["claude"]},
+                }
+                write_json(receipt.with_name("result.json"), result)
+                data = phase_timing.new_launch(phase_timing.empty_history(), 1000)
+                if outcome == "recorded":
+                    phase_timing.merged(data, head, 1500)
+                timing_path = receipt.with_name("timing.json")
+                write_json(timing_path, data)
+                reply = {
+                    "open": {**merged, "state": "OPEN", "mergeCommit": None},
+                    "different_head": {**merged, "headRefOid": "c" * 40},
+                }.get(outcome, merged)
+                active = {**terminal, "turn": 2, "status": {"state": "working"}}
+                terminal_reply = active if outcome == "active" else terminal
+                responses = [terminal_reply]
+                if outcome in {"merged", "recorded"}:
+                    responses.append(terminal)
+                elif outcome == "resumed":
+                    responses.append(active)
+                responses += [{}, finished, {}]
+                query_error = FileNotFoundError("gh") if outcome == "lookup_failed" else None
+                with (
+                    patch("dispatch.hc_json", side_effect=responses) as hc,
+                    patch("dispatch.subprocess.run", return_value=SimpleNamespace(stdout=json.dumps(reply)),
+                          side_effect=query_error) as gh,
+                    patch("dispatch.phase_timing.now_ms", return_value=2000),
+                    redirect_stdout(StringIO()) as output,
+                ):
+                    args = SimpleNamespace(run=receipt, close=True)
+                    if outcome in {"merged", "recorded"}:
+                        collect(args)
+                    else:
+                        with self.assertRaisesRegex(SystemExit, "left intact"):
+                            collect(args)
+                if outcome in {"merged", "recorded"}:
+                    report = json.loads(output.getvalue())
+                    confirmed = 1500 if outcome == "recorded" else 2000
+                    self.assertEqual(report["closed_reason"], "final_result")
+                    self.assertEqual(report["result"], result)
+                    self.assertEqual(report["timing"]["merge"], {
+                        "head": head, "confirmed_ms": confirmed, "elapsed_ms": confirmed - 1000,
+                    })
+                    self.assertEqual(phase_timing.read(timing_path)["merge"]["confirmed_ms"], confirmed)
+                    self.assertIn(call("kill", "t7"), hc.call_args_list)
+                elif outcome == "resumed":
+                    self.assertEqual(phase_timing.read(timing_path)["merge"]["head"], head)
+                    self.assertEqual(hc.call_args_list, [call("get", "t7")] * 2)
+                else:
+                    self.assertIsNone(phase_timing.read(timing_path)["merge"])
+                    hc.assert_called_once_with("get", "t7")
+                if outcome in {"recorded", "active", "reviews_missing"}:
+                    gh.assert_not_called()
+                else:
+                    gh.assert_called_once()
+                    self.assertEqual(gh.call_args.args[0][:4], ["gh", "pr", "view", pr])
 
     def test_collect_accepts_and_closes_legacy_pr_completion_reports(self):
         terminal = {**self.TERMINAL, "status": {"state": "done"}}

@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 3.11.1
+version: 3.11.2
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo listed in
   the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to
@@ -231,7 +231,10 @@ from `origin/<base>`, and nothing is stashed. Anything that fails a check stays;
 
 Run `dispatch.py collect <receipt> --close` before cleaning up the child's worktree. For a live child with a final
 result, it ends the program, waits up to 10 seconds for Herdr to report `state: finished`, then removes the terminal
-and records `closed_reason` in the receipt. A finished terminal closes without a final result. If the result file is
+and records `closed_reason` in the receipt. An idle or done child with a current, review-verified `ready` result
+can close when its receipt records a parallel worktree pre-merge stop or its reported PR head has a confirmed merge.
+The close uses an existing [merge timing record](references/phase-timing.md) for that head or checks the PR on GitHub
+and records the merge confirmation. A finished terminal closes without a final result. If the result file is
 unreadable, reconfirm `state: finished` and use `collect --close --force`. For a live child, use `--force` only when
 authorized to close it irrespective of its reported status.
 
