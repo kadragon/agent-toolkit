@@ -5583,6 +5583,7 @@ class ReservedQueueWaveTest(unittest.TestCase):
         def fail_checkout(args, **kwargs):
             if args[:4] == ["git", "-C", str(worktree), "read-tree"]:
                 (worktree / "backlog.md").write_text(self.backlog.read_text(encoding="utf-8"), encoding="utf-8")
+                (worktree / "tasks.md").write_text("# Exist", encoding="utf-8")
                 return subprocess.CompletedProcess(args, 1, "", "injected checkout failure")
             return git_run(args, **kwargs)
 
@@ -5600,7 +5601,7 @@ class ReservedQueueWaveTest(unittest.TestCase):
             queue_backend.QueueError, "injected checkout failure",
         ):
             queue_backend.handle("claim-reservation", request, {"AGENT_QUEUE_BACKEND": "backlog"})
-        self.assertFalse((worktree / "tasks.md").exists())
+        self.assertEqual((worktree / "tasks.md").read_text(encoding="utf-8"), "# Exist")
         self.assertTrue((worktree / "backlog.md").is_file())
         self.assertFalse(self.result("release-reservation", reservation=unit["reservation"])["released"])
 

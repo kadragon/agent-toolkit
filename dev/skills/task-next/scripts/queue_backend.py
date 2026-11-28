@@ -1401,13 +1401,14 @@ def _claim_status(repo, unit, token, content):
         return False, False
     if record.get("branch") != f"refs/heads/{unit['branch']}" or record.get("HEAD") != unit["base"]:
         raise QueueError(f"reserved worktree changed: {unit['worktree']}")
+    if owned and unit.get("checkout_complete") is False and not _worktree_has_index(unit["worktree"]):
+        return owned, False
     tasks = Path(unit["worktree"]) / "tasks.md"
     actual = tasks.read_text(encoding="utf-8") if tasks.exists() else ""
     if actual == content:
         return owned, True
     original = _read_queue(os.path.join(repo, "tasks.md"), unit["base"], optional=True)
-    pending_checkout = owned and unit.get("checkout_complete") is False and not tasks.exists()
-    if unit.get("published") or (actual != original and not pending_checkout):
+    if unit.get("published") or actual != original:
         raise QueueError(f"reserved task claim changed: {tasks}")
     return owned, False
 
