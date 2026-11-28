@@ -107,7 +107,10 @@ CODEX_STATUS_LINE = re.compile(
     r"\S+ · (?:[^·]+ · )*Context \d+% used(?: · |$))",
     re.IGNORECASE,
 )
-CODEX_SHORTCUT_LINE = re.compile(r"^ {2,}(?:← for agents · )?\? for shortcuts\b(?: {2,}\S.*)?", re.IGNORECASE)
+CODEX_SHORTCUT_LINE = re.compile(
+    rf"^ {{2,}}(?:← for agents · )?\? for shortcuts\b(?: {{2,}}(?:IDE context\b|{WARNING_FOOTER.pattern}))*",
+    re.IGNORECASE,
+)
 CODEX_OUTPUT_MARKERS = ("•", "■", "─ Worked for")
 CODEX_PROGRESS = re.compile(r"^\s*(?:[•◦] )?.+ \(\d[\d hms]* • esc to interrupt\)(?:\s.*)?$")
 CLAUDE_PROGRESS = re.compile(r"^[✢✳✶✻✽] .+… \(\d[\d hms]*(?: · [^)]*)?\)$")

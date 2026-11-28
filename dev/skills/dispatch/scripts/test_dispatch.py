@@ -3379,6 +3379,7 @@ class CodexSendTests(DispatchTestCase):
         for status, hint in (
             ("main · weekly 54% left", "← for agents · ? for shortcuts"),
             ("GPT-6.2-Sol is the model", "← for agents · ? for shortcuts in this example."),
+            ("GPT-6.2-Sol is the model", "← for agents · ? for shortcuts  in this example."),
         ):
             with self.subTest(status=status, hint=hint):
                 status_like_draft = f"› Summarize this\n\n  {status}\n  {hint}"
