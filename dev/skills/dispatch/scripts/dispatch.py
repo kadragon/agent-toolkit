@@ -2053,7 +2053,7 @@ def watch_stop_reason(report):
     return report["stop_reason"] or ("plugin_drift" if report.get("plugin_drift") else None)
 
 
-def brief_report(report):
+def brief_report(report, *, outcome=None):
     result = report["result"] or {}
 
     def field(value):
@@ -2061,7 +2061,9 @@ def brief_report(report):
         return lines[0].strip() if lines else ""
 
     status = result.get("status")
-    if not status or (status == "done" and report["status"] == "working"):
+    if outcome == "idle" and status == "working":
+        status = outcome
+    elif not status or (status == "done" and report["status"] == "working"):
         status = "finished" if report["state"] == "finished" else report["status"]
     fields = (status, result.get("phase"), result.get("summary"), result.get("pr"), watch_stop_reason(report))
     if warning := result.get("review_warning"):
@@ -2095,9 +2097,13 @@ def reached_outcome(report, outcomes):
     result = report["result"] or {}
     reported = result.get("status")
     stopped = report["state"] == "finished" or report["status"] in {"idle", "done"}
-    return ((reported in outcomes and (reported != "done" or stopped))
-            or ("idle" in outcomes and report["status"] == "idle")
-            or ("stop" in outcomes and (watch_stop_reason(report) or report["state"] == "finished")))
+    if reported in outcomes and (reported != "done" or stopped):
+        return reported
+    if "idle" in outcomes and report["status"] == "idle":
+        return "idle"
+    if "stop" in outcomes and (watch_stop_reason(report) or report["state"] == "finished"):
+        return "stop"
+    return None
 
 
 def remaining_wait(deadline):
@@ -2126,7 +2132,9 @@ def wait(args):
             for path in pending:
                 report = collect_result(path, False, False, args.stall_minutes, warn_drift=False, deadline=deadline)
                 outcome = reached_outcome(report, args.until)
-                line = brief_report(report)
+                if outcome == "stop":
+                    remaining_wait(deadline)
+                line = brief_report(report, outcome=outcome)
                 if args.first and outcome:
                     print(f"{path} · {line}", flush=True)
                     return
@@ -2214,13 +2222,14 @@ def screen_stop_reason(snapshot, cli):
     return None
 
 
-def last_commit_ms(cwd):
+def last_commit_ms(cwd, *, deadline=None):
     if not cwd:
         return 0
     try:
+        timeout = min(2, remaining_wait(deadline)) if deadline is not None else 2
         commit = subprocess.run(
             ["git", "log", "-1", "--format=%ct", "HEAD", "--"], cwd=cwd, capture_output=True,
-            text=True, check=True, timeout=2, env={**os.environ, "GIT_NO_LAZY_FETCH": "1"},
+            text=True, check=True, timeout=timeout, env={**os.environ, "GIT_NO_LAZY_FETCH": "1"},
         )
         return int(commit.stdout) * 1000
     except (OSError, ValueError, subprocess.SubprocessError):
@@ -2257,7 +2266,7 @@ def child_stop_reason(terminal, run, result, written, stall_minutes, drift=((), 
             worktree = (result or {}).get("worktree")
             cwd = ((worktree if isinstance(worktree, str) else None)
                    or (terminal.get("foreground") or {}).get("cwd") or terminal.get("cwd"))
-            stale = last_commit_ms(cwd) <= cutoff_ms
+            stale = last_commit_ms(cwd, deadline=deadline) <= cutoff_ms
     if not stale and not changed and state not in {"blocked", "error", "idle", "done"}:
         return None, 0
     try:
