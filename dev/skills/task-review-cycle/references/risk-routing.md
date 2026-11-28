@@ -5,7 +5,10 @@ judgment table that may only escalate above it. The reviewer count follows the p
 
 Evaluate on every run, including explicit path flags.
 
-**Floor** — capture first, then read the captures:
+**Floor** — fill in `DISPATCH_RUN` inside this block each time it runs, including the
+Step 6 lite recheck. Use the absolute `run.json` path beside the assigned `result.json` for
+a dispatched run and an empty string for a non-dispatched run. Capture first, then read
+the captures:
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
@@ -19,7 +22,19 @@ MODE_OR_RENAME=$(git diff "${BASE_BRANCH}...HEAD" --summary | grep -E '^ (mode c
 SCRIPT_HIT=$(echo "$CHANGED_FILES" | grep -E '^(dev|prod|guard|mods)/.*\.(sh|py|ps1|cjs|ts|tsx)$' | head -1 || true)
 # a linked worktree (`../../task-next/references/cycle.md` → *Worktree cycle*): the lite merge's `git checkout <base>` cannot run here
 WORKTREE_HIT=$([[ "$(git rev-parse --path-format=absolute --git-dir)" != "$(git rev-parse --path-format=absolute --git-common-dir)" ]] && echo linked-worktree || true)
-FLOOR_HIT="${SECURITY_HIT}${BINARY_HIT}${MODE_OR_RENAME}${SCRIPT_HIT}${WORKTREE_HIT}"
+DISPATCH_RUN="<assigned absolute run.json path, or empty for a non-dispatched run>"
+DISPATCH_REVIEW_HIT=""
+if [[ -n "$DISPATCH_RUN" ]]; then
+  if [[ -f "$DISPATCH_RUN" ]]; then
+    DISPATCH_REVIEW_HIT=$(jq -er '
+      (if has("review_policy") then .review_policy != "head-bound" else (.require_review_sources // false) != false end)
+      | if . then "three-source-review" else "" end
+    ' "$DISPATCH_RUN") || exit 1
+  else
+    DISPATCH_REVIEW_HIT="three-source-review"
+  fi
+fi
+FLOOR_HIT="${SECURITY_HIT}${BINARY_HIT}${MODE_OR_RENAME}${SCRIPT_HIT}${WORKTREE_HIT}${DISPATCH_REVIEW_HIT}"
 ```
 
 `FLOOR_HIT` non-empty means some row below forces hub. A lite route re-runs this block after
@@ -31,6 +46,10 @@ Step 5 commits a Step 4 fix (SKILL.md Step 6): a review fix can add the script t
 | `SECURITY_HIT` | also `EFFORT="high"` in Step 2 |
 | `SCRIPT_HIT` | **hub** with required CI; `--lite` cannot bypass |
 | `WORKTREE_HIT` | **hub**; `--lite` cannot bypass — the lite merge checks out the base, which the main worktree holds |
+| `DISPATCH_REVIEW_HIT` | **hub** with required CI when Git authority permits it, including a resumed lite review |
+
+An assigned result without a receipt keeps the three-source default. Local-only authority
+still stops before merge.
 
 A shipped script forces hub so the panel reviews it: quoting, shell-expansion and interpreter-shim
 defects are where the non-Claude engines earn their slot.

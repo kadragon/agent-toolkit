@@ -190,7 +190,7 @@ def child_name(repo, title):
     return f"{base}-{slug}"[:TERMINAL_NAME_LIMIT].rstrip("-")
 
 
-def child_argv(cli, model, effort, message, keep_connectors, result=None, *, trust_hooks=False):
+def child_argv(cli, model, effort, message, keep_connectors, result=None, *, trust_hooks=False, require_review_sources=False):
     if cli == "codex":
         if message:
             raise SystemExit("codex takes no first message at launch; use dispatch.py send")
@@ -213,7 +213,7 @@ def child_argv(cli, model, effort, message, keep_connectors, result=None, *, tru
                                   str(result.with_name("run.json")), "delivered"])
         report = ["--append-system-prompt", f"On receipt of the task, before starting work, run `{acknowledge}`. "
                   "If the acknowledgment fails, report unavailable startup timing and continue the task. "
-                  + report_instruction(result)]
+                  + report_instruction(result, require_review_sources=require_review_sources)]
     return ["claude", "--model", model, "--effort", effort,
             "--settings", json.dumps(settings, separators=(",", ":")), *report, message]
 
@@ -396,12 +396,15 @@ def write_atomic(path, content):
     temporary.replace(path)
 
 
-def load_run(path):
+def load_run(path, *, allow_pending=False):
     try:
         run = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(run, dict) or not isinstance(run.get("address"), str):
-            raise ValueError("expected a Herdr terminal receipt")
-        return run
+        if isinstance(run, dict):
+            if isinstance(run.get("address"), str):
+                return run
+            if allow_pending and run.get("launch_pending") is True and "review_policy" in run:
+                return run
+        raise ValueError("expected a Herdr terminal receipt")
     except (OSError, ValueError) as error:
         raise SystemExit(f"cannot read dispatch receipt {path}: {error}") from None
 
@@ -590,6 +593,26 @@ def requires_review_sources(run):
     return run.get("require_review_sources", False)
 
 
+def review_invocation(message):
+    invocation = (message or "").lstrip().splitlines()
+    words = invocation[0].split() if invocation else []
+    if words[:4] == ["Use", "$task-review", "to", "review"]:
+        return words[1:]
+    return words
+
+
+def standalone_hub_review(message, handoff):
+    command = review_invocation(message)
+    return (handoff.get("work_kind") == "standalone"
+            and command[:1] == ["$task-review"] and "--no-hub" not in command[1:])
+
+
+def review_policy_fields(three_source):
+    if three_source:
+        return {"review_policy": "three-source", "require_review_sources": True}
+    return {"review_policy": "head-bound"}
+
+
 def review_problem(result, *, require_review_sources=False):
     review = review_record(result)
     status = review.get("status")
@@ -645,7 +668,7 @@ def report_review(args):
             raise ValueError("report-review expects a working, ready, or blocked report")
         receipt = path.with_name("run.json")
         # Preserve the three-source gate for callers that do not have a dispatch receipt.
-        run = load_run(receipt) if receipt.exists() else None
+        run = load_run(receipt, allow_pending=True) if receipt.exists() else None
         required = requires_review_sources(run) if run is not None else True
         pre_merge_stop = dispatch_pre_merge_stop(run or {}) and not args.resume_merge
         raw_limits = ((run or {}).get("handoff") or {}).get("git_limits")
@@ -832,7 +855,7 @@ def first_prompt(cli, message, handoff):
               "Git limits": handoff["git_limits"]}
     if "additional_git_limits" in handoff:
         fields["Additional Git limits (verbatim)"] = handoff["additional_git_limits"]
-    review_command = message.split(maxsplit=1)[0] in REVIEW_COMMANDS
+    review_command = review_invocation(message)[0] in REVIEW_COMMANDS
     if (handoff.get("review_transfer_standing") or (review_command and "review_transfer_approval" not in handoff
                                                     and not handoff.get("no_standing_review_approval"))):
         fields["Review transfer approval (standing)"] = STANDING_REVIEW_TRANSFER
@@ -1217,9 +1240,13 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
     child = None
     previous = getattr(args, "relaunch_from", None)
     resume = None
+    three_source = args.cli == "codex" and (
+        handoff["work_kind"] != "standalone" or standalone_hub_review(args.task, handoff)
+    )
     if previous:
         previous = Path(previous).expanduser().resolve()
         previous_run = load_run(previous)
+        three_source = three_source or requires_review_sources(previous_run)
         resume = pre_merge_resume(previous, previous_run, cwd.resolve())
         try:
             history = phase_timing.read(timing_path(previous))
@@ -1228,6 +1255,14 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
             history = phase_timing.empty_history()
     else:
         history = phase_timing.empty_history()
+    launch_policy = review_policy_fields(three_source)
+    if args.cli == "claude":
+        if pre_merge_stop("claude", args.message, handoff) or resumes_pre_merge_stop(
+            resume, cwd.resolve(), "claude", args.message,
+        ):
+            launch_policy["pre_merge_stop"] = True
+    elif resume is not None:
+        launch_policy["pre_merge_resume"] = resume
     if wave:
         codex_args = child_argv(args.cli, model, args.effort, message, args.keep_connectors)
         child = [wave["binary"], *codex_args[1:]]
@@ -1251,7 +1286,7 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
     warn_linked_worktree(cwd)
     if child is None:
         child = child_argv(args.cli, model, args.effort, message, args.keep_connectors, result_path,
-                           trust_hooks=trust_hooks)
+                           trust_hooks=trust_hooks, require_review_sources=three_source)
     labels = {"title": title} if title else {}
     shared_home = codex_home().resolve() if args.cli == "codex" and not wave else None
     shared_label = shared_codex.cache_label(shared_home) if shared_home is not None else None
@@ -1299,6 +1334,11 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
             print(f"dispatch timing unavailable: {error}", file=sys.stderr)
 
     if args.cli == "claude":
+        # The first prompt can report before Herdr returns a terminal address.
+        try:
+            write_json(receipt, {"launch_pending": True, "handoff": handoff, **launch_policy})
+        except OSError as error:
+            raise SystemExit(f"Claude launch withheld; could not publish review policy: {error}") from None
         save_launch_timing()
     launched_ms = started_ms - 1000  # slack for clock rounding between processes
     try:
@@ -1372,17 +1412,7 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
             run["shared_guard_enabled_at_launch"] = guard_enabled_at_launch
     if title:
         run["title"] = title
-    three_source = args.cli == "codex" and handoff["work_kind"] != "standalone"
-    run["review_policy"] = "three-source" if three_source else "head-bound"
-    if three_source:
-        run["require_review_sources"] = True
-    if args.cli == "claude":
-        if pre_merge_stop("claude", args.message, handoff) or resumes_pre_merge_stop(
-            resume, cwd.resolve(), "claude", args.message,
-        ):
-            run["pre_merge_stop"] = True
-    elif resume is not None:
-        run["pre_merge_resume"] = resume
+    run.update(launch_policy)
     if args.cli != "claude":
         save_launch_timing()
     try:
@@ -1990,6 +2020,8 @@ def send_task(args, run_path):
         verify_delivery_turn(run, terminal)
         message = args.message
         if run:
+            if standalone_hub_review(message, run.get("handoff", {})):
+                run.update(review_policy_fields(True))
             if not continuation:
                 if "handoff" in run:
                     message = first_prompt("codex", message, run["handoff"])
@@ -2832,7 +2864,7 @@ def main(argv):
     launch_parser.add_argument("--review-transfer-approval", help="verbatim user grant for reviewer data transfer")
     launch_parser.add_argument("--no-standing-review-approval", action="store_true",
                                help="omit the standing review transfer approval (the user restricted reviewer transfers)")
-    launch_parser.add_argument("--relaunch-from", help="previous dispatch receipt to carry timing across a relaunch")
+    launch_parser.add_argument("--relaunch-from", help="previous dispatch receipt to carry timing and review requirements across a relaunch")
     launch_parser.add_argument("--name")
     launch_parser.add_argument("--title", help="short task title; hc label title=TEXT, and the name source without --name")
     launch_parser.add_argument("--parent")
