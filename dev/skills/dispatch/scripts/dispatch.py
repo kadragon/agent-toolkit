@@ -620,6 +620,10 @@ def gate_review_result(result, *, require_review_sources):
     return {**result, "review_warning": f"{warning} | {reason}" if warning else reason}
 
 
+def dispatch_pre_merge_stop(run):
+    return run.get("pre_merge_stop") is True or bool((run.get("handoff") or {}).get("queue_reservation"))
+
+
 def report_review(args):
     path = Path(args.result)
     if path.name != "result.json":
@@ -630,16 +634,36 @@ def report_review(args):
             raise ValueError("result exceeds 8 KiB")
         result = json.loads(raw.decode("utf-8-sig"))
         validate_result(result)
-        if result["status"] not in {"ready", "blocked"}:
-            raise ValueError("report-review expects a ready or blocked report")
+        if result["status"] not in {"working", "ready", "blocked"}:
+            raise ValueError("report-review expects a working, ready, or blocked report")
         receipt = path.with_name("run.json")
         # Preserve the three-source gate for callers that do not have a dispatch receipt.
-        required = requires_review_sources(load_run(receipt)) if receipt.exists() else True
-        gated = gate_review_result(result, require_review_sources=required)
+        run = load_run(receipt) if receipt.exists() else None
+        required = requires_review_sources(run) if run is not None else True
+        pre_merge_stop = dispatch_pre_merge_stop(run or {}) and not args.resume_merge
+        raw_limits = ((run or {}).get("handoff") or {}).get("git_limits")
+        limits = " ".join(raw_limits.casefold().split()) if isinstance(raw_limits, str) else ""
+        if args.resume_merge and result["status"] != "working":
+            raise ValueError("--resume-merge expects a working report")
+        if args.pause and result["status"] != "ready":
+            raise ValueError("--pause expects a ready report")
+        review_gate_candidate = {**result, "status": "ready"} if result["status"] == "working" else result
+        gated = gate_review_result(review_gate_candidate, require_review_sources=required)
+        if gated["status"] == "ready":
+            if result["status"] == "working" and (pre_merge_stop or limits in {"pr-only", "no-push", "implementation-only"}):
+                gated = {**result, "status": "blocked", "phase": "review-state",
+                         "summary": "Dispatch receipt does not permit reporting a continuing merge"}
+            elif result["status"] == "working" or (
+                raw_limits == DEFAULT_GIT_LIMITS and not pre_merge_stop and not args.pause
+            ):
+                gated = {**result, "status": "working", "phase": "merge"}
         serialized = serialize_result(gated)
         if gated is not result and len(serialized.encode("utf-8")) > RESULT_LIMIT:
+            if gated["status"] == "working":
+                gated.update(status="blocked", phase="review-state", summary="Continuing merge report exceeds 8 KiB")
             phase = gated["phase"]
-            names = ", ".join(missing_reviews(result)) if phase == "review-sources" else "Independent review"
+            names = ", ".join(missing_reviews(result)) if phase == "review-sources" else gated["summary"]
+            names = " ".join(names.split())[:160]
             gated["summary"] = f"{names}: see review record"
             serialized = serialize_result(gated)
             if len(serialized.encode("utf-8")) > RESULT_LIMIT:
@@ -768,7 +792,7 @@ def pre_merge_stop(cli, message, handoff):
 
 def pre_merge_resume(path, run, cwd):
     reservation = (run.get("handoff") or {}).get("queue_reservation") or {}
-    if run.get("cwd") != str(cwd) or not (run.get("pre_merge_stop") is True or reservation):
+    if run.get("cwd") != str(cwd) or not dispatch_pre_merge_stop(run):
         return None
     worktree = reservation.get("worktree")
     with suppress(SystemExit):
@@ -1355,7 +1379,7 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
     if args.cli != "claude":
         save_launch_timing()
     try:
-        write_json(receipt, {**run, "handoff": handoff} if args.cli == "codex" else run)
+        write_json(receipt, {**run, "handoff": handoff})
     except OSError as error:
         raise SystemExit(f"{address}: the child may be running, but the launch receipt could not be "
                          f"written to {receipt}: {error}. Inspect the terminal before retrying.") from None
@@ -2411,10 +2435,10 @@ def recent_missing_codex_hook(address):
     return False
 
 
-def confirm_ready_merge(path, result):
+def confirm_ready_merge(path, result, *, allow_recorded_merge=True):
     head = result["head"]
     merge = timing_report(path, result)["merge"]
-    if merge and merge["head"] == head:
+    if allow_recorded_merge and merge and merge["head"] == head:
         return "merged"
     pr = result.get("pr")
     if not isinstance(pr, str) or not GITHUB_PR_URL.fullmatch(pr):
@@ -2450,8 +2474,9 @@ def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadli
             raise
         print(error, file=sys.stderr)
         result, written = None, None
+    required = requires_review_sources(run)
     if result:
-        result = gate_review_result(result, require_review_sources=requires_review_sources(run))
+        result = gate_review_result(result, require_review_sources=required)
     timeout = remaining_wait(deadline) if deadline is not None else None
     if deadline is not None and run.get("closed_reason"):
         return {"address": run["address"], "status": None, "state": "finished", "result": result,
@@ -2490,11 +2515,16 @@ def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadli
               "stop the child before its next Git write", file=sys.stderr)
     if close:
         ready = False
-        if not force and result and result["status"] == "ready" and (finished or status in {"idle", "done"}):
-            merge_status = confirm_ready_merge(path, result)
-            reserved = (run.get("handoff") or {}).get("queue_reservation")
-            pre_merge = run.get("pre_merge_stop") is True or bool(reserved)
-            ready = merge_status == "merged" or (merge_status is None and pre_merge)
+        if not force and result and (finished or status in {"idle", "done"}):
+            paused = result["status"] == "ready"
+            merging = (result["status"] == "working" and result["phase"] == "merge"
+                       and not review_problem(result, require_review_sources=required)
+                       and (not required or not missing_reviews(result)))
+            if paused or merging:
+                merge_status = confirm_ready_merge(path, result, allow_recorded_merge=paused)
+                ready = merge_status == "merged" or (
+                    merge_status is None and paused and dispatch_pre_merge_stop(run)
+                )
             if ready and not finished:
                 current = hc_json("get", run["address"])
                 verify_terminal(run, current)
@@ -2830,6 +2860,10 @@ def main(argv):
     peek_parser.set_defaults(func=peek)
     report_parser = sub.add_parser("report-review", help="write a gated pre-merge review result")
     report_parser.add_argument("result")
+    report_mode = report_parser.add_mutually_exclusive_group()
+    report_mode.add_argument("--pause", action="store_true", help="preserve an explicit ready report")
+    report_mode.add_argument("--resume-merge", action="store_true",
+                             help="report a continuing merge after an explicitly released dispatch stop")
     report_parser.set_defaults(func=report_review)
     timing_parser = sub.add_parser("timing", help="inspect or record dispatch phase timings")
     timing_parser.add_argument("run")
