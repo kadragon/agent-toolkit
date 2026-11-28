@@ -640,16 +640,18 @@ def report_review(args):
         # Preserve the three-source gate for callers that do not have a dispatch receipt.
         run = load_run(receipt) if receipt.exists() else None
         required = requires_review_sources(run) if run is not None else True
-        pre_merge_stop = dispatch_pre_merge_stop(run or {})
-        limits = ((run or {}).get("handoff") or {}).get("git_limits")
-        # A continuing merge must pass the same review gate as a pre-merge stop.
-        candidate = {**result, "status": "ready"} if result["status"] == "working" else result
-        gated = gate_review_result(candidate, require_review_sources=required)
+        pre_merge_stop = dispatch_pre_merge_stop(run or {}) and not args.resume_merge
+        raw_limits = ((run or {}).get("handoff") or {}).get("git_limits")
+        limits = " ".join(raw_limits.casefold().split()) if isinstance(raw_limits, str) else ""
+        if args.resume_merge and result["status"] != "working":
+            raise ValueError("--resume-merge expects a working report")
+        review_gate_candidate = {**result, "status": "ready"} if result["status"] == "working" else result
+        gated = gate_review_result(review_gate_candidate, require_review_sources=required)
         if gated["status"] == "ready":
-            if result["status"] == "working" and (pre_merge_stop or limits == "pr-only"):
+            if result["status"] == "working" and (pre_merge_stop or limits in {"pr-only", "no-push", "implementation-only"}):
                 gated = {**result, "status": "blocked", "phase": "review-state",
-                         "summary": "Dispatch receipt requires a pre-merge stop"}
-            elif result["status"] == "working" or (limits == DEFAULT_GIT_LIMITS and not pre_merge_stop):
+                         "summary": "Dispatch receipt does not permit reporting a continuing merge"}
+            elif result["status"] == "working" or (raw_limits == DEFAULT_GIT_LIMITS and not pre_merge_stop):
                 gated = {**result, "status": "working", "phase": "merge"}
         serialized = serialize_result(gated)
         if gated is not result and gated["status"] == "blocked" and len(serialized.encode("utf-8")) > RESULT_LIMIT:
@@ -1370,7 +1372,7 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
     if args.cli != "claude":
         save_launch_timing()
     try:
-        write_json(receipt, {**run, "handoff": handoff} if args.cli == "codex" else run)
+        write_json(receipt, {**run, "handoff": handoff})
     except OSError as error:
         raise SystemExit(f"{address}: the child may be running, but the launch receipt could not be "
                          f"written to {receipt}: {error}. Inspect the terminal before retrying.") from None
@@ -2426,10 +2428,10 @@ def recent_missing_codex_hook(address):
     return False
 
 
-def confirm_ready_merge(path, result):
+def confirm_ready_merge(path, result, *, allow_recorded_merge=True):
     head = result["head"]
     merge = timing_report(path, result)["merge"]
-    if merge and merge["head"] == head:
+    if allow_recorded_merge and merge and merge["head"] == head:
         return "merged"
     pr = result.get("pr")
     if not isinstance(pr, str) or not GITHUB_PR_URL.fullmatch(pr):
@@ -2512,7 +2514,7 @@ def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadli
                        and not review_problem(result, require_review_sources=required)
                        and (not required or not missing_reviews(result)))
             if paused or merging:
-                merge_status = confirm_ready_merge(path, result)
+                merge_status = confirm_ready_merge(path, result, allow_recorded_merge=paused)
                 ready = merge_status == "merged" or (
                     merge_status is None and paused and dispatch_pre_merge_stop(run)
                 )
@@ -2851,6 +2853,8 @@ def main(argv):
     peek_parser.set_defaults(func=peek)
     report_parser = sub.add_parser("report-review", help="write a gated pre-merge review result")
     report_parser.add_argument("result")
+    report_parser.add_argument("--resume-merge", action="store_true",
+                               help="report a continuing merge after an explicitly released dispatch stop")
     report_parser.set_defaults(func=report_review)
     timing_parser = sub.add_parser("timing", help="inspect or record dispatch phase timings")
     timing_parser.add_argument("run")

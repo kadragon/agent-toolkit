@@ -849,6 +849,8 @@ class DispatchReceiptTests(DispatchTestCase):
                 with self.assertRaisesRegex(SystemExit, "Claude may have received its launch prompt"):
                     launch(args)
                 self.assertEqual(run.call_args.args[0][-1], "/dev:task-next" + self.BLOCK)
+                receipt = json.loads((Path(directory) / "run.json").read_text(encoding="utf-8"))
+                self.assertEqual(receipt["handoff"]["git_limits"], args.git_limits)
 
     def test_collect_reads_result_without_screen_and_only_closes_final_owned_child(self):
         done = {**self.TERMINAL, "status": {"state": "done"}}
@@ -935,7 +937,7 @@ class DispatchReceiptTests(DispatchTestCase):
                 }
                 write_json(receipt.with_name("result.json"), result)
                 data = phase_timing.new_launch(phase_timing.empty_history(), 1000)
-                if outcome == "recorded":
+                if outcome in {"recorded", "working_open"}:
                     phase_timing.merged(data, head, 1500)
                 timing_path = receipt.with_name("timing.json")
                 write_json(timing_path, data)
@@ -987,6 +989,9 @@ class DispatchReceiptTests(DispatchTestCase):
                 elif outcome in {"resumed", "replaced_result"}:
                     self.assertEqual(phase_timing.read(timing_path)["merge"]["head"], head)
                     self.assertEqual(hc.call_args_list, [call("get", "t7")] * 2)
+                elif outcome == "working_open":
+                    self.assertEqual(phase_timing.read(timing_path)["merge"]["confirmed_ms"], 1500)
+                    hc.assert_called_once_with("get", "t7")
                 else:
                     self.assertIsNone(phase_timing.read(timing_path)["merge"])
                     hc.assert_called_once_with("get", "t7")
@@ -1390,23 +1395,27 @@ class DispatchReceiptTests(DispatchTestCase):
     def test_report_review_distinguishes_continuing_merge_from_pause(self):
         head = "a" * 40
         cases = (
-            ("working", False, DEFAULT_GIT_LIMITS, head, False, "working", "merge"),
-            ("ready", False, DEFAULT_GIT_LIMITS, head, False, "working", "merge"),
-            ("ready", True, DEFAULT_GIT_LIMITS, head, False, "ready", "review"),
-            ("ready", False, "pr-only", head, False, "ready", "review"),
-            ("working", True, DEFAULT_GIT_LIMITS, head, False, "blocked", "review-state"),
-            ("working", False, DEFAULT_GIT_LIMITS, "b" * 40, False, "blocked", "review-state"),
-            ("working", False, DEFAULT_GIT_LIMITS, head, True, "blocked", "review-sources"),
+            ("working", False, False, DEFAULT_GIT_LIMITS, head, False, "working", "merge"),
+            ("ready", False, False, DEFAULT_GIT_LIMITS, head, False, "working", "merge"),
+            ("ready", True, False, DEFAULT_GIT_LIMITS, head, False, "ready", "review"),
+            ("ready", False, False, "pr-only", head, False, "ready", "review"),
+            ("working", True, False, DEFAULT_GIT_LIMITS, head, False, "blocked", "review-state"),
+            ("working", True, True, DEFAULT_GIT_LIMITS, head, False, "working", "merge"),
+            ("working", True, True, " PR-ONLY ", head, False, "blocked", "review-state"),
+            ("working", False, False, "no-push", head, False, "blocked", "review-state"),
+            ("working", False, False, "implementation-only", head, False, "blocked", "review-state"),
+            ("working", False, False, DEFAULT_GIT_LIMITS, "b" * 40, False, "blocked", "review-state"),
+            ("working", False, False, DEFAULT_GIT_LIMITS, head, True, "blocked", "review-sources"),
         )
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / "run.json"
             path = receipt.with_name("result.json")
-            for status, stop, limits, review_head, require_sources, expected, phase in cases:
+            for status, stop, resume, limits, review_head, require_sources, expected, phase in cases:
                 with self.subTest(status=status, stop=stop, limits=limits, review_head=review_head,
-                                  require_sources=require_sources):
+                                  require_sources=require_sources, resume=resume):
                     write_json(receipt, {
                         **self.RECEIPT, "cli": "claude", "pre_merge_stop": stop,
-                        "handoff": {"git_limits": limits},
+                        "handoff": {"git_limits": limits, **({"queue_reservation": {"ref": "#1"}} if stop else {})},
                         "require_review_sources": require_sources,
                     })
                     result = {
@@ -1414,8 +1423,11 @@ class DispatchReceiptTests(DispatchTestCase):
                         "pr": "example-pr", "head": head, "ci": "success",
                         "review": {"head": review_head, "sources": ["codex"], "status": "passed"},
                     }
+                    command = [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "report-review", str(path)]
+                    if resume:
+                        command.append("--resume-merge")
                     completed = subprocess.run(
-                        [sys.executable, "-I", str(SCRIPTS / "dispatch.py"), "report-review", str(path)],
+                        command,
                         input=json.dumps(result), text=True, check=False, capture_output=True,
                     )
                     self.assertEqual(completed.returncode, 0, completed.stderr)
