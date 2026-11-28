@@ -2757,6 +2757,30 @@ class DispatchWatchTests(unittest.TestCase):
         self.assertEqual(printed, f"{Path('b.json').resolve()} · t8 · ready · - · - · #10 · -\n")
         self.assertEqual(statuses, "t7 · idle · - · - · - · -\n")
 
+    def test_wait_prints_selected_idle_over_a_saved_working_report(self):
+        working = {"address": "t7", "status": "working", "state": "live", "stop_reason": None,
+                   "result": {"status": "working", "phase": "implement", "summary": "working"}}
+        idle = {**working, "status": "idle"}
+        for first in (False, True):
+            with self.subTest(first=first), \
+                 patch("dispatch.collect_result", side_effect=[working, idle]), \
+                 patch("dispatch.hc_rpc", return_value={"result": {}}), patch("dispatch.time.sleep"), \
+                 redirect_stdout(StringIO()) as output, redirect_stderr(StringIO()):
+                args = SimpleNamespace(first=first, runs=["run.json"], until={"idle"}, timeout=30, stall_minutes=30)
+                wait(args)
+                prefix = f"{Path('run.json').resolve()} · " if first else ""
+                self.assertEqual(output.getvalue().splitlines()[-1],
+                                 f"{prefix}t7 · idle · implement · working · - · -")
+
+    def test_wait_preserves_saved_done_when_the_default_wait_selects_idle(self):
+        idle = {"address": "t7", "status": "idle", "state": "live", "stop_reason": None,
+                "result": {"status": "done", "phase": "implement", "summary": "complete"}}
+        with TextIOWrapper(BytesIO(), encoding="utf-8") as output, redirect_stdout(output), \
+             patch("dispatch.collect_result", return_value=idle):
+            main(["wait", "run.json"])
+            output.seek(0)
+            self.assertEqual(output.read(), "t7 · done · implement · complete · - · -\n")
+
     def test_wait_requires_all_receipts_and_a_stopped_terminal_for_done(self):
         working = {"address": "t7", "status": "working", "state": "live", "stop_reason": None,
                    "result": {"status": "done", "phase": "implement", "summary": "phase complete"}}
@@ -2809,6 +2833,70 @@ class DispatchWatchTests(unittest.TestCase):
                 wait(args)
         self.assertGreater(hc.call_args.kwargs["timeout"], 0)
         self.assertLessEqual(hc.call_args.kwargs["timeout"], 1)
+
+    def test_wait_times_out_during_stall_probes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            terminal = {**DispatchReceiptTests.TERMINAL, "status": {"state": "working"},
+                        "status_ms": 1, "cwd": directory}
+            write_json(receipt, {**DispatchReceiptTests.RECEIPT, "cli": "claude", "sent": True})
+            args = SimpleNamespace(first=False, runs=[receipt], until={"stop"}, timeout=1, stall_minutes=30)
+            for expired_probe in ("git", "read"):
+                now = 0
+
+                def git_probe(*args, **kwargs):
+                    nonlocal now
+                    now = 2 if expired_probe == "git" else 0.5
+                    return SimpleNamespace(stdout="1")
+
+                def herdr_probe(command, *args, **kwargs):
+                    nonlocal now
+                    if command == "get":
+                        return terminal
+                    now = 2
+                    raise subprocess.TimeoutExpired("hc read", kwargs["timeout"])
+
+                with self.subTest(expired_probe=expired_probe), \
+                     patch("dispatch.time.monotonic", side_effect=lambda: now), \
+                     patch("dispatch.subprocess.run", side_effect=git_probe) as git, \
+                     patch("dispatch.hc_json", side_effect=herdr_probe) as hc, redirect_stdout(StringIO()) as output:
+                    with self.assertRaisesRegex(SystemExit, "timed out"):
+                        wait(args)
+                    self.assertEqual(output.getvalue(), "")
+                    self.assertEqual(git.call_args.kwargs["timeout"], 1)
+                    if expired_probe == "git":
+                        self.assertEqual(hc.call_count, 1)
+                    else:
+                        self.assertEqual(hc.call_args.kwargs["timeout"], 0.5)
+
+    def test_wait_keeps_blocked_report_when_screen_read_times_out(self):
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            result = receipt.with_name("result.json")
+            write_json(receipt, {**DispatchReceiptTests.RECEIPT, "cli": "claude", "sent": True})
+            write_json(result, {"status": "blocked", "phase": "review", "summary": "blocked"})
+            os.utime(result, (1, 1))
+            args = SimpleNamespace(first=False, runs=[receipt], until={"blocked"}, timeout=1, stall_minutes=30)
+            for state in ("idle", "working"):
+                now = 0
+                terminal = {**DispatchReceiptTests.TERMINAL, "status": {"state": state},
+                            "status_ms": 1, "cwd": directory}
+
+                def herdr_probe(command, *args, **kwargs):
+                    nonlocal now
+                    if command == "get":
+                        return terminal
+                    now = 2
+                    raise subprocess.TimeoutExpired("hc read", kwargs["timeout"])
+
+                with self.subTest(state=state), patch("dispatch.time.monotonic", side_effect=lambda: now), \
+                     patch("dispatch.subprocess.run", return_value=SimpleNamespace(stdout="1")), \
+                     patch("dispatch.hc_json", side_effect=herdr_probe), redirect_stdout(StringIO()) as output:
+                    try:
+                        wait(args)
+                    except SystemExit as error:
+                        self.fail(f"The saved blocked outcome should be reported: {error}")
+                    self.assertEqual(output.getvalue().split(" · ")[:4], ["t7", "blocked", "review", "blocked"])
 
     def test_wait_times_out_when_no_selected_outcome_occurs(self):
         report = {"address": "t7", "status": "idle", "state": "live", "stop_reason": None, "result": None}
