@@ -71,17 +71,15 @@ Use `wait --first` after delivery and keep merges into the base sequential.
 
 After each merge into the base, the home session asks every open sibling PR's child to resync,
 through *Continue with another phase*, before collecting that PR's pre-merge report. The child
-performs the resync. It holds the `commit` and `feature-push` authority through its archived
-contract and owns the branch's worktree; the home session never commits to or pushes the child's
-branch. In its feature worktree the child runs, from the installed dev plugin's absolute path,
-`cycle_state.py authorize --action commit` and `--action feature-push`, then
-`task-review-cycle/scripts/pre_merge_resync.py --base <BASE_BRANCH>`, which fetches, merges the
-base, reapplies the version bump and queue entries, and pushes. A rebase-only repository skips the
-resync, as in `task-review-cycle` *Step 6*. After `resynced` the child resumes at final
-verification (`task-review-cycle` → *Dispatch pre-merge report*). A failed check, `denied` or
-`error` stops it and reports to the home session. On `conflict` in a file queue the child, within
-its own authority, resolves it keeping the entries from both sides, then reruns the check and
-the resync; any other conflict is reported.
+performs the resync; the home session never commits to or pushes the child's branch. The child
+holds the `commit` and `feature-push` authority through its archived contract. In its feature
+worktree it runs, from the installed dev plugin's absolute path, `python3 cycle_state.py authorize
+--action commit` and `--action feature-push`, then `python3 task-review-cycle/scripts/pre_merge_resync.py
+--base <BASE_BRANCH>`. When the base is already merged or merges without conflict, the helper
+commits, reapplies any needed version bump and pushes the feature branch, and the child resumes at
+final verification (`task-review-cycle` → *Dispatch pre-merge report*). On a conflict, a failed
+check, `denied` or `error`, the child does not resolve or push anything: it stops and reports to
+the home session. A rebase-only repository skips the resync and reports a behind branch the same way.
 
 ## Home merges a child PR
 
