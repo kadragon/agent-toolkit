@@ -185,6 +185,19 @@ A failed check or a version mismatch holds startup. Close the wave before
 preparing another one. Standalone Codex startup and dispatch versions predating the label can
 still refresh the cache.
 
+When another home session's live wave holds startup, choose one of these paths.
+
+- Wait for the labeled children to finish if the current wave is nearly done.
+- Use a [verified wave](#verified-wave) when the work needs Codex and the required guards can be
+  preserved in the isolated home.
+- For a unit that can launch directly in Claude, use the Claude launch command in Step 4 with
+  `--bias-exception 'shared-cache hold'`. Pick the Claude pair for the same task tier from Step 3
+  and pass the first message as the positional `MESSAGE`. Use the current Herdr home address
+  (`HC_TERMINAL_ID` or `--parent`). Dispatch checks that a live child with the same cache label
+  belongs to another home and records the exception in `run.json`. This also applies when Codex
+  has expiring passes. Critical Claude quota still requires explicit approval. Use the wait or
+  verified wave path for units that require reserved Codex delivery.
+
 Codex 0.172.0 starts a configured-marketplace upgrade on every startup, and a new marketplace
 commit force-reinstalls the plugins and deletes the previous version directories. A `ref` set to a
 full commit SHA stops that: Codex resolves it without contacting the remote, and an installed
