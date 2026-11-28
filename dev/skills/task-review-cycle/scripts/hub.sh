@@ -104,11 +104,44 @@ require_forgejo_token() {
 
 current_branch() { git branch --show-current; }
 
-# Map gh `pr checks` exit/buckets and Forgejo combined status to one vocabulary.
 # head_sha (ci-status only) names the commit the checks describe; omitted when unknown.
 emit_status() {
   jq -n --arg s "$1" --argjson n "${2:-0}" --arg sha "${HEAD_SHA:-}" \
     '{status: $s, checks: $n} + (if $sha == "" then {} else {head_sha: $sha} end)'
+}
+
+github_ci_snapshot() {
+  # Separate GitHub requests could pair a new head SHA with the previous commit's failure.
+  local pr_number="$1" view
+  view=$(gh api graphql --paginate -F number="$pr_number" \
+    -f owner="${OWNER_REPO%%/*}" -f name="${OWNER_REPO#*/}" -f query='
+    query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
+      repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+        commits(last: 1) { nodes { commit { oid statusCheckRollup {
+          contexts(first: 100, after: $endCursor) {
+            pageInfo { hasNextPage endCursor }
+            nodes {
+              __typename
+              ... on StatusContext { context state createdAt link: targetUrl }
+              ... on CheckRun { name status conclusion startedAt databaseId link: detailsUrl
+                checkSuite { app { id } workflowRun { event workflow { name } } } }
+            } } } } } } } } }' 2>/dev/null) || view=""
+  # Collect the streamed pages with jq for gh versions without --slurp.
+  jq -sc '[.[] | .data.repository.pullRequest.commits.nodes[0].commit] as $c
+    | {oids: ([$c[].oid] | unique),
+       checks: [[$c[].statusCheckRollup.contexts.nodes[]?]
+         | group_by(if .__typename == "CheckRun"
+             then [.name, .checkSuite.app.id, .checkSuite.workflowRun.workflow.name, .checkSuite.workflowRun.event]
+             else [.context] end)[]
+         | max_by(if .__typename == "CheckRun" then [.databaseId // 0, .startedAt // ""]
+                  else .createdAt // "" end)
+         | (if .__typename == "CheckRun" then (if .status == "COMPLETED" then .conclusion else "PENDING" end)
+            else .state end) as $s
+         | {name: (.name // .context), link: .link, state: $s,
+            bucket: (if $s == "SUCCESS" or $s == "SKIPPED" or $s == "NEUTRAL" then "pass"
+              elif $s == "FAILURE" or $s == "ERROR" or $s == "TIMED_OUT" or $s == "ACTION_REQUIRED"
+                or $s == "STARTUP_FAILURE" or $s == "CANCELLED" or $s == "STALE" then "fail"
+              else "pending" end)}]}' <<<"$view" 2>/dev/null || printf '%s\n' '{"oids": [], "checks": []}'
 }
 
 case "$SUBCOMMAND" in
@@ -225,39 +258,9 @@ case "$SUBCOMMAND" in
   ci-status)
     PR_NUMBER="${1:?Usage: hub.sh ci-status <pr_number>}"
     if [ "$HUB_TYPE" = "github" ]; then
-      # One snapshot for both the head and its checks: two requests could pair a new head SHA
-      # with the previous commit's failure. Extend the `gh pr checks` query with app and run
-      # IDs to keep different providers separate and order reruns before they start.
-      VIEW=$(gh api graphql --paginate -F number="$PR_NUMBER" \
-        -f owner="${OWNER_REPO%%/*}" -f name="${OWNER_REPO#*/}" -f query='
-        query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
-          repository(owner: $owner, name: $name) { pullRequest(number: $number) {
-            commits(last: 1) { nodes { commit { oid statusCheckRollup {
-              contexts(first: 100, after: $endCursor) {
-                pageInfo { hasNextPage endCursor }
-                nodes {
-                  __typename
-                  ... on StatusContext { context state createdAt }
-                  ... on CheckRun { name status conclusion startedAt databaseId
-                    checkSuite { app { id } workflowRun { event workflow { name } } } }
-                } } } } } } } } }' 2>/dev/null) || VIEW=""
-      # Collect the streamed pages with jq for gh versions without --slurp.
-      SNAPSHOT=$(jq -sc '[.[] | .data.repository.pullRequest.commits.nodes[0].commit] as $c
-        | {oids: ([$c[].oid] | unique),
-           buckets: [[$c[].statusCheckRollup.contexts.nodes[]?]
-             | group_by(if .__typename == "CheckRun"
-                 then [.name, .checkSuite.app.id, .checkSuite.workflowRun.workflow.name, .checkSuite.workflowRun.event]
-                 else [.context] end)[]
-             | max_by(if .__typename == "CheckRun" then [.databaseId // 0, .startedAt // ""]
-                      else .createdAt // "" end)
-             | (if .__typename == "CheckRun" then (if .status == "COMPLETED" then .conclusion else "PENDING" end)
-                else .state end) as $s
-             | if $s == "SUCCESS" or $s == "SKIPPED" or $s == "NEUTRAL" then "pass"
-               elif $s == "FAILURE" or $s == "ERROR" or $s == "TIMED_OUT" or $s == "ACTION_REQUIRED"
-                 or $s == "STARTUP_FAILURE" or $s == "CANCELLED" or $s == "STALE" then "fail"
-               else "pending" end]}' <<<"$VIEW" 2>/dev/null) || SNAPSHOT='{"oids": [], "buckets": []}'
+      SNAPSHOT=$(github_ci_snapshot "$PR_NUMBER")
       HEAD_SHA=$(jq -r 'if (.oids | length) == 1 then .oids[0] // empty else empty end' <<<"$SNAPSHOT")
-      BUCKETS=$(jq -c '.buckets' <<<"$SNAPSHOT")
+      BUCKETS=$(jq -c '.checks | map(.bucket)' <<<"$SNAPSHOT")
       TOTAL=$(jq 'length' <<<"$BUCKETS")
       if [ "$(jq '.oids | length' <<<"$SNAPSHOT")" -gt 1 ]; then
         # The head moved between pages: no single commit to judge, so poll again.
@@ -293,8 +296,9 @@ case "$SUBCOMMAND" in
   ci-logs)
     PR_NUMBER="${1:?Usage: hub.sh ci-logs <pr_number>}"
     if [ "$HUB_TYPE" = "github" ]; then
-      FAILED_CHECKS=$(gh pr checks "$PR_NUMBER" --json name,state,link \
-        --jq '[.[] | select(.state == "FAILURE")]' 2>/dev/null || echo '[]')
+      SNAPSHOT=$(github_ci_snapshot "$PR_NUMBER")
+      FAILED_CHECKS=$(jq -c 'if (.oids | length) == 1 then [.checks[] | select(.bucket == "fail")]
+                            else [] end' <<<"$SNAPSHOT")
       if [ "$FAILED_CHECKS" = "[]" ] || [ -z "$FAILED_CHECKS" ]; then
         echo '{"failed_checks": [], "count": 0, "logs_available": true, "message": "No failed checks found"}'
         exit 0
@@ -302,7 +306,8 @@ case "$SUBCOMMAND" in
       RESULTS="[]"
       while IFS= read -r check; do
         NAME=$(jq -r '.name' <<<"$check")
-        LINK=$(jq -r '.link' <<<"$check")
+        LINK=$(jq -r '.link // empty' <<<"$check")
+        CHECK_STATE=$(jq -r '.state' <<<"$check")
         RUN_ID=$(printf '%s' "$LINK" | grep -oE '/runs/[0-9]+' | grep -oE '[0-9]+' | head -1 || true)
         LOGS=""
         if [ -n "$RUN_ID" ]; then
@@ -311,8 +316,8 @@ case "$SUBCOMMAND" in
         else
           LOGS="Could not extract run ID from link: $LINK"
         fi
-        RESULTS=$(jq --arg name "$NAME" --arg run_id "${RUN_ID:-unknown}" --arg logs "$LOGS" \
-          '. + [{"name": $name, "run_id": $run_id, "logs": $logs}]' <<<"$RESULTS")
+        RESULTS=$(jq --arg name "$NAME" --arg state "$CHECK_STATE" --arg run_id "${RUN_ID:-unknown}" --arg logs "$LOGS" \
+          '. + [{name: $name, state: $state, run_id: $run_id, logs: $logs}]' <<<"$RESULTS")
       done < <(jq -c '.[]' <<<"$FAILED_CHECKS")
       jq '{failed_checks: ., count: length, logs_available: true}' <<<"$RESULTS"
     else

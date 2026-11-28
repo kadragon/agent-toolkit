@@ -512,7 +512,7 @@ def main() -> int:
             return {"data": {"repository": {"pullRequest": {"commits": {"nodes": [
                 {"commit": {"oid": oid, "statusCheckRollup": rollup}}]}}}}}
 
-        def hub_status(rollup, pages=None):
+        def hub_output(rollup, pages=None, command="ci-status"):
             if pages is None and rollup is not None:
                 pages = [page(rollup)]
             env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}")
@@ -520,7 +520,7 @@ def main() -> int:
             if pages is not None:
                 env["GH_VIEW"] = "\n".join(json.dumps(page_data) for page_data in pages)
             proc = subprocess.run(
-                ["bash", str(SCRIPT.parent / "hub.sh"), "ci-status", "7"], cwd=hub_repo,
+                ["bash", str(SCRIPT.parent / "hub.sh"), command, "7"], cwd=hub_repo,
                 capture_output=True, text=True, timeout=30, env=env)
             try:
                 return json.loads(proc.stdout)
@@ -533,29 +533,29 @@ def main() -> int:
                     "conclusion": conclusion, "startedAt": started,
                     "checkSuite": {"workflowRun": {"event": event, "workflow": {"name": "ci"}}}}
 
-        status = hub_status([run_ctx("FAILURE")])
+        status = hub_output([run_ctx("FAILURE")])
         check("ci-status carries headRefOid as head_sha",
               status.get("status") == "failure" and status.get("head_sha") == "a" * 40,
               f"got {status}")
-        status = hub_status([run_ctx("", status="IN_PROGRESS")])
+        status = hub_output([run_ctx("", status="IN_PROGRESS")])
         check("checks come from the same snapshot as the head, not a second request",
               status.get("status") == "pending" and status.get("head_sha") == "a" * 40,
               f"got {status}")
-        status = hub_status([run_ctx("FAILURE", started="2026-01-01T00:00:00Z"),
+        status = hub_output([run_ctx("FAILURE", started="2026-01-01T00:00:00Z"),
                              run_ctx("SUCCESS", started="2026-01-01T00:05:00Z")])
         check("a rerun supersedes the older failure of the same check",
               status.get("status") == "success" and status.get("checks") == 1, f"got {status}")
-        status = hub_status([run_ctx("FAILURE", started="2026-01-01T00:00:00Z"),
+        status = hub_output([run_ctx("FAILURE", started="2026-01-01T00:00:00Z"),
                              run_ctx("SUCCESS", started="2026-01-01T00:05:00Z", event="push")])
         check("a later push run does not hide the pull_request run's failure",
               status.get("status") == "failure" and status.get("checks") == 2, f"got {status}")
         queued = dict(run_ctx(None, status="QUEUED", started=None), databaseId=2)
         completed = dict(run_ctx("SUCCESS"), databaseId=1)
         for runs in ([queued, completed], [completed, queued]):
-            status = hub_status(runs)
+            status = hub_output(runs)
             check("a newer queued rerun keeps the check pending regardless of listing order",
                   status.get("status") == "pending" and status.get("checks") == 1, f"got {status}")
-        status = hub_status([dict(queued, databaseId=1), dict(completed, databaseId=2)])
+        status = hub_output([dict(queued, databaseId=1), dict(completed, databaseId=2)])
         check("an older queued run does not hide the newer completed check",
               status.get("status") == "success" and status.get("checks") == 1, f"got {status}")
         app_checks = [
@@ -563,37 +563,49 @@ def main() -> int:
             dict(run_ctx("SUCCESS", started="2026-01-01T00:05:00Z"),
                  checkSuite={"app": {"id": "app-2"}}),
         ]
-        status = hub_status(app_checks)
+        status = hub_output(app_checks)
         check("same-named checks from distinct GitHub apps count independently",
               status.get("status") == "failure" and status.get("checks") == 2, f"got {status}")
-        status = hub_status([run_ctx("STALE")])
+        status = hub_output([run_ctx("STALE")])
         check("a completed stale check is a failure",
               status.get("status") == "failure" and status.get("checks") == 1, f"got {status}")
-        status = hub_status(None, pages=[page([run_ctx("SUCCESS")]),
+        stale_check = dict(run_ctx("STALE", name="stale"), link="https://example.test/checks/stale")
+        logs = hub_output([stale_check], command="ci-logs")
+        check("the stale check appears in failure diagnostics",
+              logs.get("count") == 1 and logs["failed_checks"][0].get("name") == "stale"
+              and logs["failed_checks"][0].get("state") == "STALE", f"got {logs}")
+        app_checks[0]["link"] = "https://example.test/checks/first"
+        app_checks[1]["link"] = "https://example.test/checks/second"
+        logs = hub_output(app_checks, command="ci-logs")
+        check("a passing same-name check from another app does not hide a failing check in diagnostics",
+              logs.get("count") == 1 and logs["failed_checks"][0].get("state") == "FAILURE"
+              and "https://example.test/checks/first" in logs["failed_checks"][0].get("logs", ""),
+              f"got {logs}")
+        status = hub_output(None, pages=[page([run_ctx("SUCCESS")]),
                                          page([run_ctx("FAILURE", name="lint")])])
         check("older gh reports the head and includes a failure on a later page",
               status.get("status") == "failure" and status.get("checks") == 2
               and status.get("head_sha") == "a" * 40, f"got {status}")
-        status = hub_status(None, pages=[page([run_ctx("SUCCESS")]),
+        status = hub_output(None, pages=[page([run_ctx("SUCCESS")]),
                                          page([run_ctx("SUCCESS", name="lint")], oid="c" * 40)])
         check("pages from two different heads are not judged",
               status.get("status") == "pending", f"got {status}")
-        status = hub_status([run_ctx("SUCCESS"), run_ctx("SKIPPED", name="lint"),
+        status = hub_output([run_ctx("SUCCESS"), run_ctx("SKIPPED", name="lint"),
                              {"__typename": "StatusContext", "context": "ext", "state": "SUCCESS"}])
         check("skipped checks and status contexts count as passing",
               status.get("status") == "success" and status.get("checks") == 3, f"got {status}")
-        status = hub_status([run_ctx("CANCELLED"),
+        status = hub_output([run_ctx("CANCELLED"),
                              {"__typename": "StatusContext", "context": "ext", "state": "PENDING"}])
         check("a pending status context outranks a cancelled check",
               status.get("status") == "pending", f"got {status}")
-        status = hub_status([{"__typename": "StatusContext", "context": "ext", "state": "ERROR"}])
+        status = hub_output([{"__typename": "StatusContext", "context": "ext", "state": "ERROR"}])
         check("an errored status context is a failure", status.get("status") == "failure",
               f"got {status}")
-        status = hub_status(None, pages=[page(None)])
+        status = hub_output(None, pages=[page(None)])
         check("an empty rollup reports none with the head",
               status.get("status") == "none" and status.get("head_sha") == "a" * 40,
               f"got {status}")
-        status = hub_status(None)
+        status = hub_output(None)
         check("a failed view reports none without a head",
               status.get("status") == "none" and "head_sha" not in status, f"got {status}")
 
