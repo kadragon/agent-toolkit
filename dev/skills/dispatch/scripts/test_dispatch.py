@@ -649,33 +649,43 @@ class DispatchReceiptTests(DispatchTestCase):
 
     def test_collect_close_after_drift(self):
         change = ["dev 5.0.1 -> 5.0.4"]
-        hook_failure = {"how": "screen", "text": "• Hook failed\n  └ failed to spawn hook (os error 2)"
-                                                "\n\n› Ask Codex to do anything"}
+        composer = "\n\n› Ask Codex to do anything"
+        missing_hook = "• Hook failed\n  └ failed to spawn hook (os error 2)"
         cases = (
-            ("idle", "ready", change, ["dev"], None, "hooks_broken"),
-            ("idle", "ready", change, [], None, "plugin_drift"),
-            ("idle", "ready", [], [], hook_failure, "hooks_broken"),
-            ("done", "merged", change, ["dev"], None, "hooks_broken"),
-            ("working", "ready", change, ["dev"], None, None),
-            ("idle", "working", change, ["dev"], None, None),
-            ("idle", None, change, ["dev"], None, None),
+            ("idle", "ready", change, ["dev"], None, None, "hooks_broken"),
+            ("idle", "ready", change, [], None, None, "plugin_drift"),
+            ("idle", "ready", [], [], missing_hook + composer, ("idle", 10), "hooks_broken"),
+            ("idle", "ready", [], [], missing_hook + composer, ("working", 11), None),
+            ("idle", "ready", [], [], missing_hook + composer, ("idle", 12), None),
+            ("idle", "ready", [], [], missing_hook + "\n\n• Review finished" + composer, None, None),
+            ("idle", "ready", [], [], "• Hook failed\n  └ hook exited 1" + composer, None, None),
+            ("done", "merged", change, ["dev"], None, None, "hooks_broken"),
+            ("working", "ready", change, ["dev"], None, None, None),
+            ("idle", "working", change, ["dev"], None, None, None),
+            ("idle", None, change, ["dev"], None, None, None),
         )
-        for state, status, changed, removed, screen, reason in cases:
-            with self.subTest(state=state, result=status, reason=reason), tempfile.TemporaryDirectory() as directory:
+        for state, status, changed, removed, screen, next_state, reason in cases:
+            with self.subTest(state=state, result=status, screen=screen, next_state=next_state, reason=reason), \
+                 tempfile.TemporaryDirectory() as directory:
                 receipt = Path(directory) / "run.json"
                 write_json(receipt, self.RECEIPT)
                 if status:
                     write_json(receipt.with_name("result.json"), {
                         "status": status, "phase": "review", "summary": "Review result",
                     })
-                terminal = {**self.TERMINAL, "status": {"state": state}}
+                terminal = {**self.TERMINAL, "status": {"state": state}, "status_ms": 10}
                 replies = [terminal]
                 calls = [call("get", "t7")]
                 if screen:
-                    replies.append(screen)
+                    replies.append({"how": "screen", "text": screen})
                     calls.append(call("read", "--lines", "0", "t7", timeout=ANY))
-                if reason:
+                if next_state:
+                    current_state, status_ms = next_state
+                    replies.append({**terminal, "status": {"state": current_state}, "status_ms": status_ms})
+                    calls.append(call("get", "t7"))
+                if reason or screen:
                     replies.extend([{}, {**terminal, "state": "finished"}, {}])
+                if reason:
                     calls.extend([call("kill", "t7"), call("get", "t7", timeout=ANY), call("rm", "t7")])
                 output = StringIO()
                 with (
@@ -695,6 +705,28 @@ class DispatchReceiptTests(DispatchTestCase):
                             collect(SimpleNamespace(run=receipt, close=True))
                     self.assertEqual(hc.call_args_list, calls)
                 self.assertEqual(json.loads(receipt.read_text(encoding="utf-8")).get("closed_reason"), reason)
+
+    def test_collect_close_does_not_treat_unverifiable_wave_as_drift(self):
+        terminal = {**self.TERMINAL, "status": {"state": "idle"}}
+        screen = {"how": "screen", "text": "› Ask Codex to do anything"}
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / "run.json"
+            write_json(receipt, {**self.RECEIPT, "wave": str(Path(directory) / "wave.json")})
+            write_json(receipt.with_name("result.json"), {
+                "status": "ready", "phase": "review", "summary": "Review result",
+            })
+            with (
+                patch("dispatch.pinned_wave.wave_path", return_value=Path(directory) / "wave.json"),
+                patch("dispatch.pinned_wave.read_wave", side_effect=OSError("unreadable wave")),
+                patch("dispatch.hc_json", side_effect=[terminal, screen, {**terminal, "state": "finished"}, {}]) as hc,
+                redirect_stderr(StringIO()),
+            ):
+                with self.assertRaisesRegex(SystemExit, "left intact"):
+                    collect(SimpleNamespace(run=receipt, close=True))
+            self.assertEqual(hc.call_args_list, [
+                call("get", "t7"), call("read", "--lines", "0", "t7", timeout=ANY),
+            ])
+            self.assertNotIn("closed_reason", json.loads(receipt.read_text(encoding="utf-8")))
 
     def test_collect_gates_ready_and_warns_on_completed_reports(self):
         terminal = {**self.TERMINAL, "status": {"state": "done"}}

@@ -63,6 +63,7 @@ PLUGIN_HOOK_FAILURE = re.compile(
     re.IGNORECASE | re.MULTILINE)
 # A hook failure event, not a prompt or command output that quotes the phrase.
 CODEX_HOOK_FAILED = re.compile(r"^• Hook failed\b[^\n]*\n[ \t]*└", re.MULTILINE)
+CODEX_MISSING_HOOK = re.compile(r"failed to spawn.*?\bos error 2\b", re.DOTALL)
 WARNING_FOOTER = re.compile(r"⚠\ufe0f?\s*(\d+)\s+warnings?\s*·\s*f2 to view\b", re.IGNORECASE)
 HOOK_BYPASS_NOTICE = ("`--dangerously-bypass-hook-trust` is enabled. "
                       "Enabled hooks may run without review for this invocation.")
@@ -1597,6 +1598,26 @@ def repeated_review_categories(result):
     return sorted(set(earlier["categories"]).intersection(later["categories"]))
 
 
+def recent_missing_codex_hook(address):
+    try:
+        snapshot = hc_json("read", "--lines", "0", address, timeout=2)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+    if snapshot.get("how") != "screen":
+        return False
+    lines = (snapshot.get("text") or "").splitlines()
+    composer = next((index for index in reversed(range(len(lines))) if lines[index].startswith("›")), None)
+    if composer is None or lines[composer][1:].strip() not in {"", "Ask Codex to do anything"}:
+        return False
+    for index in reversed(range(composer)):
+        if lines[index].startswith("›"):
+            break
+        if lines[index].startswith(CODEX_OUTPUT_MARKERS):
+            event = "\n".join(lines[index:composer])
+            return bool(CODEX_HOOK_FAILED.match(event) and CODEX_MISSING_HOOK.search(event))
+    return False
+
+
 def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadline=None):
     run = load_run(path)
     try:
@@ -1628,6 +1649,7 @@ def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadli
     closed = {}
     reason, reads = None, 0
     changed, removed = [], []
+    cache_drift = None
     if run["cli"] == "codex" and not finished:
         if run.get("wave"):
             try:
@@ -1638,6 +1660,10 @@ def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadli
                 changed = removed = [f"pinned wave unverifiable: {error}"]
         else:
             changed, removed = plugin_drift(run)
+            if removed:
+                cache_drift = STOP_HOOKS
+            elif changed:
+                cache_drift = "plugin_drift"
     if changed and warn_drift:
         print(f"{run['address']}: Codex plugin changed since launch ({', '.join(changed)}); "
               "stop the child before its next Git write", file=sys.stderr)
@@ -1649,18 +1675,20 @@ def collect_result(path, close, force, stall_minutes, *, warn_drift=True, deadli
         else:
             result_status = result["status"] if result else None
             final = result_status in {"done", "merged"} and status == "done"
-            drift_reason = None
+            closed_reason = "final_result" if final else None
             if status in {"idle", "done"} and result_status in {"done", "merged", "ready"} and run["cli"] == "codex":
-                if removed:
-                    drift_reason = STOP_HOOKS
-                elif changed:
-                    drift_reason = "plugin_drift"
+                if cache_drift:
+                    closed_reason = cache_drift
                 elif not final:
-                    detected, reads = child_stop_reason(terminal, run, result, written, stall_minutes,
-                                                        deadline=deadline)
-                    if detected == STOP_HOOKS:
-                        drift_reason = detected
-            closed_reason = drift_reason or ("final_result" if final else None)
+                    reads = 1
+                    if recent_missing_codex_hook(run["address"]):
+                        current = hc_json("get", run["address"])
+                        verify_terminal(run, current)
+                        if current["state"] == "finished":
+                            finished, closed_reason = True, "finished"
+                        elif ((current.get("status") or {}).get("state") in {"idle", "done"}
+                              and current.get("status_ms") == terminal.get("status_ms")):
+                            closed_reason = STOP_HOOKS
         if not closed_reason:
             raise SystemExit("terminal has no final result or is still running; left intact")
         if not finished:
