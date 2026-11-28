@@ -133,28 +133,36 @@ requires review. A dev-only or prod-only release preserves the guard approval.
 Dispatch holds task delivery when the installed dev has moved its hooks and guard is missing
 from the shared cache.
 
-Before starting a shared-cache child while another is mid-cycle, fetch agent-toolkit and
-compare the plugin versions in `origin/main` with
-`~/.codex/plugins/cache/kadragon/<plugin>/<version>`. A changed version can remove files
-that a running session still uses. Launch only after the fetch succeeds and all versions
-match. Treat a live agent-toolkit child that may merge as a mismatch.
-If a wave needs multiple Codex children, launch all of them idle (omit `--task`), then
-send tasks with `dispatch.py send --run <receipt> -- <address> '<first message>'`.
+From the home session, prepare the cache for the trusted target directory:
 
-When a plugin version may have changed, wait for active Codex cycles to finish, then prepare the wave:
+```sh
+python3 -I "<dispatch>/scripts/dispatch.py" prepare-codex --repo "<agent-toolkit checkout>" --cwd "<target repo>"
+```
 
-1. Start an idle Codex child and wait for the plugin update at startup. Close the child.
-2. After installing or updating guard, start a second idle Codex child if a task child will
-   rely on persisted trust. Use **Review hooks** in the startup dialog or `/hooks` to check
-   that the guard hooks are trusted and active, then close the child.
-3. Launch the task children once the warm-up children are closed. Pass `--trust-hooks` at
-   launch for each child authorized to use it.
+The command fetches the checkout's default remote branch, compares installed kadragon plugin
+versions, upgrades that marketplace if needed, then starts and closes an idle Herdr child.
+Read `pending_hooks` in its JSON for the exact enabled hooks Codex marks untrusted or modified.
+`hook_content_diffs` compares the affected kadragon plugin's hook manifest and bundled hook
+files with a previously observed trusted copy in this Codex home. A first run with no available
+trusted copy reports that gap. Third-party pending hooks appear in `pending_hooks` with their
+native source paths and review status.
 
-Close an idle warm-up with `dispatch.py collect <receipt> --close --force` after verifying that
-it is the idle child started for this preparation.
+If hooks need approval, launch the first task child idle and use **Review hooks** or `/hooks`
+in that child. Start all other children idle after the review, then deliver tasks with
+`dispatch.py send --run <receipt> -- <address> '<first message>'`. Confirm the installed
+versions match the prepared versions before starting another child in the same wave.
 
-Before a long wave, run `codex plugin marketplace upgrade` and then the warm-up above, so no
-startup during the wave finds a newer plugin to install.
+Preparation and dispatch startup share a local lock scoped to the Codex home. Prepared
+launches carry a Herdr label for that cache. While a labeled child is live, preparation is
+held, and launches from a different home session are warned and held. The first home may
+launch siblings. Close the wave before preparing another shared-cache wave. Standalone Codex
+startup and dispatch versions predating the label can still refresh the cache.
+
+Startup update deferral is unverified on Codex 0.172.0. Its source starts a configured-marketplace
+upgrade when plugins are enabled. The `auto_update` field describes checks during plugin
+listing. Use a [verified wave](#verified-wave) when concurrent work needs a fixed plugin version.
+[Codex startup implementation](https://github.com/openai/codex/blob/rust-v0.172.0/codex-rs/core-plugins/src/manager.rs#L3139-L3181),
+[marketplace config type](https://github.com/openai/codex/blob/rust-v0.172.0/codex-rs/config/src/types.rs#L1291-L1299).
 
 ## Plugin update during a shared-cache wave
 

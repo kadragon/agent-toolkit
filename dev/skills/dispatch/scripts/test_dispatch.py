@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from unittest.mock import ANY, call, patch
 
 import pinned_wave
+import shared_codex
 from dispatch import (
     POST_SEND_SETTLE_SECONDS,
     QUEUE_BACKEND,
@@ -30,6 +31,7 @@ from dispatch import (
     lock_run,
     main,
     pick,
+    prepare_codex,
     release,
     report_instruction,
     resolve_codex_model,
@@ -472,7 +474,8 @@ class DispatchReceiptTests(DispatchTestCase):
             owner = {"address": "t6", "state": "live", "cwd": str(home.parent)}
             live_owner = {**owner, "foreground": {"cwd": str(home)}}
             child = SimpleNamespace(stdout=json.dumps(self.TERMINAL))
-            calls = [{"terminals": [owner]}, live_owner, self.TERMINAL]
+            sibling = {"address": "t9", "state": "live", "parent": "t6"}
+            calls = [{"terminals": [owner, sibling]}, live_owner, {"terminals": [sibling]}, self.TERMINAL]
             with (
                 patch("dispatch.Path.cwd", return_value=home),
                 patch("dispatch.hc_json", side_effect=calls),
@@ -487,6 +490,7 @@ class DispatchReceiptTests(DispatchTestCase):
             argv = launch_call.args[0]
             self.assertEqual(argv[:3], ["hc", "run", "--bg"])
             self.assertIn("--no-notify", argv)
+            self.assertTrue(any(arg.startswith(f"{shared_codex.LABEL}=") for arg in argv))
             self.assertEqual(argv[argv.index("--parent") + 1], "t6")
             self.assertIn("--dangerously-bypass-hook-trust", argv[argv.index("codex") + 1:])
             payload = json.loads(output.call_args.args[0])
@@ -517,7 +521,8 @@ class DispatchReceiptTests(DispatchTestCase):
                          "foreground": {"cwd": str(home)}}
                 with (
                     patch("dispatch.Path.cwd", return_value=home),
-                    patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, lookup]),
+                    patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner,
+                                                               *([{"terminals": []}] if cli == "codex" else []), lookup]),
                     patch("dispatch.subprocess.run",
                           return_value=SimpleNamespace(stdout=json.dumps(self.TERMINAL))),
                     patch("dispatch.tempfile.mkdtemp", return_value=directory),
@@ -558,7 +563,7 @@ class DispatchReceiptTests(DispatchTestCase):
         owner = {"address": "t6", "state": "live", "cwd": str(Path.cwd().parent),
                  "foreground": {"cwd": str(Path.cwd())}}
         with tempfile.TemporaryDirectory() as directory, (
-            patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner])
+            patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, {"terminals": []}])
         ), patch("dispatch.subprocess.run", return_value=SimpleNamespace(stdout="{}")), (
             patch("dispatch.tempfile.mkdtemp", return_value=directory)
         ), patch("dispatch.send") as submit:
@@ -567,7 +572,7 @@ class DispatchReceiptTests(DispatchTestCase):
             submit.assert_not_called()
         failed = subprocess.TimeoutExpired(["hc", "run"], 30)
         with tempfile.TemporaryDirectory() as directory, (
-            patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner])
+            patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, {"terminals": []}])
         ), patch("dispatch.subprocess.run", side_effect=[SimpleNamespace(stdout=""), failed]), (
             patch("dispatch.tempfile.mkdtemp", return_value=directory)
         ):
@@ -582,7 +587,7 @@ class DispatchReceiptTests(DispatchTestCase):
                      "foreground": {"cwd": str(Path.cwd())}}
             child = SimpleNamespace(stdout=json.dumps(self.TERMINAL))
             with (
-                patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, self.TERMINAL]),
+                patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, {"terminals": []}, self.TERMINAL]),
                 patch("dispatch.subprocess.run", return_value=child) as run,
                 patch("dispatch.tempfile.mkdtemp", return_value=directory),
                 patch("dispatch.send"),
@@ -980,6 +985,19 @@ class DispatchReceiptTests(DispatchTestCase):
                         result={"status": "merged", "phase": "merge", "summary": "Merged"})
                 self.assertIsNone(report["stop_reason"])
 
+    def test_another_home_cannot_launch_into_a_live_shared_codex_wave(self):
+        args = self.launch_args(Path.cwd(), parent="t8")
+        owner = {"address": "t8", "state": "live", "cwd": str(Path.cwd())}
+        first_home_child = {"address": "t7", "state": "live", "parent": "t6"}
+        with patch("dispatch.hc_json", side_effect=[
+            {"terminals": [owner, first_home_child]}, owner, {"terminals": [first_home_child]},
+        ]) as hc, patch("dispatch.subprocess.run") as run:
+            with self.assertRaisesRegex(SystemExit, r"live wave uses this cache \(t7\)"):
+                launch(args)
+        self.assertEqual(hc.call_args.args[:2], ("ls", "--label"))
+        self.assertTrue(hc.call_args.args[2].startswith(f"{shared_codex.LABEL}="))
+        self.assertTrue(all(entry.args[0][0] != "hc" for entry in run.call_args_list))
+
     def test_launch_records_the_installed_codex_plugin_versions(self):
         with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as home:
             cache = Path(home) / "plugins" / "cache" / "kadragon"
@@ -991,7 +1009,7 @@ class DispatchReceiptTests(DispatchTestCase):
             child = SimpleNamespace(stdout=json.dumps(self.TERMINAL))
             with (
                 patch.dict(os.environ, {"CODEX_HOME": home}),
-                patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, self.TERMINAL]),
+                patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, {"terminals": []}, self.TERMINAL]),
                 patch("dispatch.subprocess.run", return_value=child),
                 patch("dispatch.tempfile.mkdtemp", return_value=directory),
                 patch("dispatch.send"),
@@ -1517,7 +1535,8 @@ class CodexModelTests(DispatchTestCase):
                      "foreground": {"cwd": str(Path.cwd())}}
             child = SimpleNamespace(stdout=json.dumps(DispatchReceiptTests.TERMINAL))
             with (
-                patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, DispatchReceiptTests.TERMINAL]),
+                patch("dispatch.hc_json", side_effect=[{"terminals": [owner]}, owner, {"terminals": []},
+                                                               DispatchReceiptTests.TERMINAL]),
                 patch("dispatch.subprocess.run", return_value=child) as run,
                 patch("dispatch.tempfile.mkdtemp", return_value=directory),
                 patch("dispatch.send"),
@@ -1562,6 +1581,128 @@ class SharedGuardMigrationTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "restart the idle Codex child"):
                 verify_delivery_turn({"plugin_versions": {"dev": "5.0.1"}}, {})
             verify_delivery_turn({"plugin_versions": {"dev": "5.0.1", "guard": "1.0.0"}}, {})
+
+
+class SharedCodexPreparationTests(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.home = self.root / "codex"
+        self.cache = self.home / "plugins/cache/kadragon/guard"
+        self.enterContext(patch.dict(os.environ, {"CODEX_HOME": str(self.home)}))
+        self.args = SimpleNamespace(repo=self.root, cwd=self.root, parent="t6")
+        self.terminal = {"address": "t7", "parent": "t6", "state": "live",
+                         "name": "dispatch-warmup-00112233", "created_ms": 2000}
+        self.events = []
+        self.enterContext(patch("dispatch.secrets.token_hex", return_value="00112233"))
+        self.enterContext(patch("dispatch.time.time_ns", return_value=2_000_000_000))
+
+    def install(self, version, content):
+        root = self.cache / version
+        (root / "hooks").mkdir(parents=True)
+        (root / ".codex-plugin").mkdir()
+        (root / ".codex-plugin/plugin.json").write_text('{"hooks":"hooks.json"}', encoding="utf-8")
+        (root / "hooks.json").write_text("{}", encoding="utf-8")
+        (root / "hooks/guard.py").write_text(content + "\n", encoding="utf-8")
+
+    def codex(self, argv, **kwargs):
+        if argv[0] == "codex":
+            self.events.append(argv)
+            self.assertEqual(kwargs["cwd"], self.root)
+            self.install("1.1.0", "new guard")
+            shutil.rmtree(self.cache / "1.0.0")
+            return ""
+        git = argv[3:]
+        if git == ["fetch", "origin"]:
+            self.events.append("git fetch")
+            return ""
+        if git[0] == "symbolic-ref":
+            return "origin/main\n"
+        if git[0] == "rev-parse":
+            self.assertEqual(git[-1], "origin/main^{commit}")
+            return "abc\n"
+        if git == ["show", "abc:" + pinned_wave.CATALOG]:
+            plugins = [{"name": name, "source": {"source": "local", "path": f"./{name}"}} for name in pinned_wave.PLUGINS]
+            return json.dumps({"name": "kadragon", "plugins": plugins})
+        self.assertEqual(git, ["show", "abc:guard/" + pinned_wave.MANIFEST])
+        return json.dumps({"version": self.expected})
+
+    def hooks(self, binary, home, method, params, **kwargs):
+        self.assertEqual((binary, home, method, params), ("codex", self.home, "hooks/list", {"cwds": [str(self.root)]}))
+        self.assertTrue(kwargs["experimental"])
+        version = next(self.cache.iterdir()).name
+        self.events.append(f"hooks {version}")
+        hook = {"pluginId": "guard@kadragon", "source": "plugin", "key": "hook-key", "enabled": True,
+                "eventName": "preToolUse", "matcher": "Bash", "command": "python guard.py",
+                "sourcePath": str(self.cache / version / "hooks.json"),
+                "trustStatus": "trusted" if version == "1.0.0" else "modified"}
+        return {"data": [{"cwd": str(self.root), "errors": [], "warnings": [], "hooks": [
+            hook, {**hook, "key": "disabled", "enabled": False, "trustStatus": "untrusted"},
+        ]}]}
+
+    def hc(self, command, *args, **kwargs):
+        if command == "ls":
+            self.assertEqual(args, ("--label", shared_codex.cache_label(self.home)))
+            return {"terminals": []}
+        if command == "run":
+            self.events.append("hc run")
+            self.assertEqual(args[-3:], ("codex", "--no-daemon", "--no-alt-screen"))
+            self.assertIn("--no-notify", args)
+            return {"address": "t7"}
+        self.assertEqual(args[-1], "t7")
+        if command == "get":
+            return self.terminal
+        if command == "read":
+            return {"text": "  Hooks need review", "how": "screen", "complete": True}
+        self.events.append(f"hc {command}")
+        if command == "kill":
+            self.terminal["state"] = "finished"
+        return {}
+
+    def prepare(self, expected):
+        self.expected = expected
+        with (patch("dispatch.hc_json", side_effect=self.hc),
+              patch("shared_codex.command", side_effect=self.codex),
+              patch("shared_codex.request", side_effect=self.hooks), redirect_stdout(StringIO()) as output):
+            prepare_codex(self.args)
+        return json.loads(output.getvalue())
+
+    def test_upgrade_reports_exact_pending_hooks_and_retains_trusted_baseline(self):
+        self.install("1.0.0", "trusted guard")
+        report = self.prepare("1.1.0")
+        self.assertEqual(self.events, ["git fetch", "hooks 1.0.0",
+                                       ["codex", "plugin", "marketplace", "upgrade", "kadragon"],
+                                       "hc run", "hc kill", "hc rm", "hooks 1.1.0"])
+        self.assertTrue(report["upgraded"])
+        self.assertEqual(report["installed"], {"guard": "1.1.0"})
+        self.assertEqual([(hook["key"], hook["trustStatus"]) for hook in report["pending_hooks"]],
+                         [("hook-key", "modified")])
+        diff = report["hook_content_diffs"]["guard"]
+        self.assertEqual(diff["trusted_version"], "1.0.0")
+        self.assertIn("-trusted guard\n+new guard", diff["diff"])
+
+        self.events.clear()
+        self.terminal["state"] = "live"
+        report = self.prepare("1.1.0")
+        self.assertFalse(report["upgraded"])
+        self.assertEqual(report["hook_content_diffs"]["guard"], diff)
+
+    def test_equal_versions_without_a_trusted_baseline_still_report_pending_hooks(self):
+        self.install("1.1.0", "new guard")
+        report = self.prepare("1.1.0")
+        self.assertFalse(report["upgraded"])
+        self.assertEqual(self.events, ["git fetch", "hooks 1.1.0", "hc run", "hc kill", "hc rm", "hooks 1.1.0"])
+        self.assertEqual(report["hook_content_diffs"]["guard"],
+                         {"reason": "no locally recorded trusted hook contents"})
+
+    def test_preparation_leaves_live_wave_untouched_even_from_its_home(self):
+        terminals = {"terminals": [{"address": "t7", "state": "live", "parent": "t6"}]}
+        with (patch("dispatch.hc_json", return_value=terminals) as hc,
+              patch("shared_codex.command") as cmd, patch("shared_codex.request") as hooks):
+            with self.assertRaisesRegex(SystemExit, "live wave uses this cache"):
+                prepare_codex(self.args)
+        hc.assert_called_once_with("ls", "--label", shared_codex.cache_label(self.home), timeout=ANY)
+        cmd.assert_not_called()
+        hooks.assert_not_called()
 
 
 class PinnedWaveTests(unittest.TestCase):
@@ -2061,7 +2202,7 @@ class CodexSendTests(DispatchTestCase):
 
         def hc(command, *args, timeout=None):
             if command == "ls":
-                return {"terminals": [owner]}
+                return {"terminals": [] if args else [owner]}
             if command == "get" and args == ("t6",):
                 return owner
             return respond(command, *args)

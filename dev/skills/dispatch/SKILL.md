@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 3.4.0
+version: 3.5.0
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo listed in
   the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to
@@ -158,7 +158,7 @@ answer that with `hc keys <address> down enter` only after telling the user.
 
 For independent Codex waves, use `references/codex-readiness.md` → *Verified wave* to pin
 the reviewed plugin version and send through receipts. For shared-cache launches, follow
-*Before a shared-cache Codex wave*, then launch and send a single child in one invocation:
+*Before a shared-cache Codex wave* for `prepare-codex` and live-wave holds, then launch:
 
 ```sh
 python3 -I "<dispatch>/scripts/dispatch.py" launch --cli codex --model <codex family> \
