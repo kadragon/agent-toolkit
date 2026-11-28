@@ -8,9 +8,11 @@ import sys
 import tempfile
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from io import BytesIO, StringIO, TextIOWrapper
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 from unittest.mock import ANY, call, patch
 
@@ -26,6 +28,7 @@ from dispatch import (
     codex_screen,
     collect,
     composer_draft,
+    deliver_reserved,
     filtered_transcript,
     first_prompt,
     free_name,
@@ -39,6 +42,7 @@ from dispatch import (
     report_instruction,
     resolve_codex_model,
     send,
+    send_wave,
     terminal_name,
     timing,
     transcript_echoed,
@@ -1448,6 +1452,31 @@ class PickTests(unittest.TestCase):
             out, err = StringIO(), StringIO()
             with patch("dispatch.queue_op", side_effect=queue_op), redirect_stdout(out), redirect_stderr(err):
                 pick(SimpleNamespace(repo=str(repo), tree=False, full_scan=True))
+
+            git = ["git", "-c", "core.hooksPath=no-hooks", "-c", "commit.gpgsign=false",
+                   "-c", "user.name=Test", "-c", "user.email=test@example.invalid"]
+            subprocess.run([*git, "commit", "--allow-empty", "-qm", "base"], cwd=repo, check=True)
+            subprocess.run([*git, "update-ref", "refs/remotes/origin/HEAD", "HEAD"], cwd=repo, check=True)
+            request = {"contract": 1, "repo": str(repo)}
+            snapshot = queue_op("prepare-wave", request)
+            single, parent = snapshot["candidates"]
+            wave = queue_op("reserve-wave", {**request, "base": snapshot["base"], "units": [single, parent]})
+            unit, grouped = wave["reservations"]
+            self.assertEqual(grouped["covers"], ["- #4 [DOCS] Child one", "- #6 [DOCS] Child two", "- #3 Parent"])
+            listing = queue_op("list", {**request, "full_scan": True})
+            self.assertEqual({c["ref"] for c in listing["claimed"]}, {"#1", "#3", "#4", "#5", "#6"})
+            delivery = {"reservation": unit["reservation"], "ref": "#1", "delivery": str(repo / "run.json")}
+            issues[0]["body"] = "Edited scope, same title"
+            with self.assertRaisesRegex(queue_backend.QueueError, "#1: selection changed"):
+                queue_op("bind-wave", {**request, "assignments": [delivery]})
+            issues[0]["body"] = ""
+            queue_op("bind-wave", {**request, "assignments": [delivery]})
+            issues[0]["blockedBy"] = connection([{"number": 3, "state": "OPEN", "repository": repository}])
+            with self.assertRaisesRegex(queue_backend.QueueError, "#1: blocked: #3"):
+                queue_op("claim-reservation", {**request, **delivery, "base": wave["base"]})
+            self.assertFalse((repo / ".worktrees").exists())
+            self.assertEqual(queue_op("release-reservation", {**request, "reservation": unit["reservation"]}),
+                             {"released": True})
 
         self.assertTrue(any("visibility } }" in q for q in calls), "the missing backlog.md asks for the backend")
         candidates = json.loads(out.getvalue())
@@ -3893,6 +3922,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from threading import Event
 
 assert sys.argv[1:] == ["app-server"], sys.argv
 home = Path(os.environ["CODEX_HOME"])
@@ -4232,6 +4262,328 @@ class QuotaTests(unittest.TestCase):
             out = json.loads(subprocess.check_output(command, cwd=root, env=env))
             self.assertEqual(out["claude"]["used"], 42)
             self.assertNotIn("five_hour_used", out["claude"])
+
+
+class ReservedQueueWaveTest(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory(prefix="dispatch reserved wave ")
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.repo = self.root / "repo"
+        self.repo.mkdir()
+        self.git("init", "-q")
+        self.backlog = self.repo / "backlog.md"
+        self.backlog.write_text(
+            "# Backlog\n\n## First group\n\n- [ ] [FEAT] First item\n"
+            "  with a continuation.\n\n## Second group\n\n- [ ] [FIX] Second item\n"
+            "\n## Third group\n\n- [ ] [DOCS] Third item\n", encoding="utf-8",
+        )
+        (self.repo / "tasks.md").write_text(
+            "# Existing sprint\n\n## Scope\nstatus: open\n\nKeep this content.\n", encoding="utf-8",
+        )
+        self.git("add", "backlog.md", "tasks.md")
+        self.git("commit", "-qm", "base")
+        self.git("update-ref", "refs/remotes/origin/HEAD", "HEAD")
+
+    def git(self, *args):
+        command = ["git", "-c", "core.hooksPath=no-hooks", "-c", "commit.gpgsign=false",
+                   "-c", "user.name=Test", "-c", "user.email=test@example.invalid"]
+        return subprocess.check_output([*command, *args], cwd=self.repo, encoding="utf-8").strip()
+
+    def queue(self, op, **data):
+        request = {"contract": 1, "repo": str(self.repo), **data}
+        return subprocess.run([sys.executable, "-I", str(QUEUE_BACKEND), op], input=json.dumps(request),
+                              capture_output=True, encoding="utf-8", check=False,
+                              env={**os.environ, "AGENT_QUEUE_BACKEND": "backlog"})
+
+    def result(self, op, **data):
+        result = self.queue(op, **data)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
+    def prepare(self):
+        snapshot = self.result("prepare-wave")
+        snapshot["by_title"] = {candidate["title"]: candidate for candidate in snapshot["candidates"]}
+        return snapshot
+
+    def reserve(self, *titles):
+        snapshot = self.prepare()
+        return self.result("reserve-wave", base=snapshot["base"], units=[snapshot["by_title"][t] for t in titles])
+
+    def receipt(self, name, ref):
+        path = self.root / name / "run.json"
+        path.parent.mkdir()
+        write_json(path, {"address": name, "cli": "codex", "sent": False, "cwd": str(self.repo),
+                          "handoff": {"unit": ref, "request": "Run both independent queue items",
+                                      "git_limits": "pr-only" if name == "first" else "no-push",
+                                      "work_kind": "queue"}})
+        return path
+
+    def test_concurrent_reservations_reject_overlap_without_reserving_the_other_unit(self):
+        snapshot = self.prepare()
+        first, second, third = (snapshot["by_title"][f"{name} group"] for name in ("First", "Second", "Third"))
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            pending = [pool.submit(self.queue, "reserve-wave", base=snapshot["base"], units=[first, other])
+                       for other in (second, third)]
+            results = [future.result() for future in pending]
+        self.assertEqual(sorted(r.returncode for r in results), [0, 1])
+        winner = json.loads(next(r.stdout for r in results if r.returncode == 0))
+        self.assertEqual(len(winner["reservations"]), 2)
+        rejected = next(r for r in results if r.returncode)
+        self.assertIn(first["ref"], rejected.stderr)
+        remaining = self.prepare()["by_title"]
+        self.assertNotIn("First group", remaining)
+        self.assertEqual(len({"Second group", "Third group"}.intersection(remaining)), 1)
+        claims = self.result("list", full_scan=True)["claimed"]
+        for reservation in winner["reservations"]:
+            self.assertTrue(any(reservation["reservation"] in claim["by"] for claim in claims))
+        self.assertFalse((self.repo / ".worktrees").exists())
+
+    def test_changed_or_duplicate_selections_fail_before_reservation(self):
+        snapshot = self.prepare()
+        candidate = snapshot["by_title"]["First group"]
+        result = self.queue("reserve-wave", base=snapshot["base"], units=[candidate, candidate])
+        self.assertIn("overlapping queue units", result.stderr)
+        changed = dict(candidate, items=["First item with different scope"])
+        result = self.queue("reserve-wave", base=snapshot["base"], units=[changed])
+        self.assertIn("selection changed", result.stderr)
+        self.backlog.write_text(self.backlog.read_text(encoding="utf-8").replace(
+            "First item\n", "First item *(blocked by: second)*\n"), encoding="utf-8")
+        self.git("commit", "-qam", "Block an item")
+        self.git("update-ref", "refs/remotes/origin/HEAD", "HEAD")
+        result = self.queue("reserve-wave", base=snapshot["base"], units=[candidate])
+        self.assertIn("origin/HEAD changed", result.stderr)
+        self.assertNotIn("First group", self.prepare()["by_title"])
+
+    def test_claim_replaces_reservation_and_release_preserves_active_worktree(self):
+        wave = self.reserve("First group", "Second group")
+        first, second = wave["reservations"]
+        ref = first["candidate"]["ref"]
+        receipt = self.receipt("first", ref)
+        delivery = {"reservation": first["reservation"], "ref": ref, "delivery": str(receipt)}
+        claim = {**delivery, "base": wave["base"]}
+        self.assertIn("assigned to another delivery", self.queue("claim-reservation", **claim).stderr)
+        self.result("bind-wave", assignments=[delivery])
+        self.assertIn("does not match", self.queue("claim-reservation", **dict(claim, ref="#99")).stderr)
+        original_backlog = self.backlog.read_text(encoding="utf-8")
+        self.backlog.write_text(original_backlog.replace("# Backlog\n", "# Backlog\n\nIntro.\n"), encoding="utf-8")
+        self.git("commit", "-qam", "Shift queue lines after binding")
+        self.git("update-ref", "refs/remotes/origin/HEAD", "HEAD")
+        active = self.result("claim-reservation", **claim)
+        path = Path(active["worktree"])
+        original = (path / "tasks.md").read_text(encoding="utf-8")
+        self.assertIn("status: open", original)
+        self.assertIn("# First group\nstatus: active\n\n## Covers\n- [ ] [FEAT] First item\n", original)
+        self.assertEqual(self.git("-C", str(path), "rev-parse", "HEAD"), wave["base"])
+        self.assertEqual(active["covers"], ["- [ ] [FEAT] First item"])
+        self.assertEqual(self.result("release-reservation", reservation=first["reservation"]), {"released": False})
+        self.assertEqual(self.result("release-reservation", reservation=second["reservation"]), {"released": True})
+        self.assertEqual((path / "tasks.md").read_text(encoding="utf-8"), original)
+        listed = self.prepare()
+        self.assertEqual(listed["claimed"][0]["by"], str(path))
+        self.assertIn("Second group", listed["by_title"])
+        self.assertNotIn("First group", listed["by_title"])
+        self.assertFalse(list((self.repo / ".git/agent-queue").glob("reservation-[0-9a-f]*.lock")))
+
+    def test_reserved_sprint_preserves_other_sections(self):
+        wave = self.reserve("Existing sprint")
+        [unit] = wave["reservations"]
+        ref = unit["candidate"]["ref"]
+        delivery = {"reservation": unit["reservation"], "ref": ref, "delivery": str(self.receipt("first", ref))}
+        self.result("bind-wave", assignments=[delivery])
+        claimed = self.result("claim-reservation", **delivery, base=wave["base"])
+        self.assertEqual((Path(claimed["worktree"]) / "tasks.md").read_text(encoding="utf-8"),
+                         "# Existing sprint\n\n## Scope\nstatus: active\n\nKeep this content.\n")
+
+    def test_claim_rejects_a_file_item_blocked_after_binding(self):
+        wave = self.reserve("First group")
+        [unit] = wave["reservations"]
+        ref = unit["candidate"]["ref"]
+        delivery = {"reservation": unit["reservation"], "ref": ref, "delivery": str(self.receipt("first", ref))}
+        self.result("bind-wave", assignments=[delivery])
+        self.backlog.write_text(self.backlog.read_text(encoding="utf-8").replace(
+            "First item\n", "First item *(blocked by: second)*\n"), encoding="utf-8")
+        self.git("commit", "-qam", "Block queued item after binding")
+        self.git("update-ref", "refs/remotes/origin/HEAD", "HEAD")
+        result = self.queue("claim-reservation", **delivery, base=wave["base"])
+        self.assertIn("no longer eligible on origin/HEAD", result.stderr)
+        self.assertFalse(Path(unit["worktree"]).exists())
+
+    def test_file_fast_path_preserves_order_with_pending_reservations(self):
+        with self.backlog.open("a", encoding="utf-8") as stream:
+            stream.write("\n### Later nested group\n\n- [ ] [FEAT] Nested item\n")
+        self.git("commit", "-qam", "Add a nested priority item")
+        self.git("update-ref", "refs/remotes/origin/HEAD", "HEAD")
+        self.reserve("Existing sprint")
+        fast = self.result("list")
+        self.assertEqual(fast["candidates"][0]["title"], "First group")
+        self.assertTrue(any("full-scan" in warning for warning in fast["warnings"]))
+        full = self.result("list", full_scan=True)
+        self.assertEqual(full["candidates"][0]["title"], "Later nested group")
+
+    def test_interrupted_claim_resumes_only_its_own_worktree(self):
+        sys.path.insert(0, str(QUEUE_BACKEND.parent))
+        import queue_backend
+
+        wave = self.reserve("First group")
+        [unit] = wave["reservations"]
+        ref = unit["candidate"]["ref"]
+        delivery = {"reservation": unit["reservation"], "ref": ref, "delivery": str(self.receipt("first", ref))}
+        self.result("bind-wave", assignments=[delivery])
+        request = {"contract": 1, "repo": str(self.repo), **delivery, "base": wave["base"]}
+        worktree = Path(unit["worktree"])
+        replace = os.replace
+
+        def fail_tasks(source, destination):
+            if Path(destination) == worktree / "tasks.md":
+                raise OSError("injected publication failure")
+            return replace(source, destination)
+
+        with patch.object(queue_backend.os, "replace", side_effect=fail_tasks), self.assertRaisesRegex(
+            OSError, "injected publication failure",
+        ):
+            queue_backend.handle("claim-reservation", request, {"AGENT_QUEUE_BACKEND": "backlog"})
+        self.assertIn(f"locked dispatch reservation {unit['reservation']}", self.git("worktree", "list", "--porcelain"))
+        kept = self.result("release-reservation", reservation=unit["reservation"])
+        self.assertFalse(kept["released"])
+        self.assertTrue(worktree.is_dir())
+        active = self.result("claim-reservation", **delivery, base=wave["base"])
+        self.assertEqual(Path(active["worktree"]), worktree)
+        self.assertNotIn("locked dispatch reservation", self.git("worktree", "list", "--porcelain"))
+        self.assertIn("- [ ] [FEAT] First item", (worktree / "tasks.md").read_text(encoding="utf-8"))
+
+    def test_release_retires_published_reservation_after_ledger_failure(self):
+        sys.path.insert(0, str(QUEUE_BACKEND.parent))
+        import queue_backend
+
+        wave = self.reserve("First group")
+        [unit] = wave["reservations"]
+        token = unit["reservation"]
+        ref = unit["candidate"]["ref"]
+        delivery = {"reservation": token, "ref": ref, "delivery": str(self.receipt("first", ref))}
+        self.result("bind-wave", assignments=[delivery])
+        request = {"contract": 1, "repo": str(self.repo), **delivery, "base": wave["base"]}
+        write_state = queue_backend._write_queue_json
+
+        def fail_retire(path, data):
+            if token not in data["units"]:
+                raise OSError("injected retirement failure")
+            write_state(path, data)
+
+        with patch.object(queue_backend, "_write_queue_json", side_effect=fail_retire), self.assertRaisesRegex(
+            OSError, "injected retirement failure",
+        ):
+            queue_backend.handle("claim-reservation", request, {"AGENT_QUEUE_BACKEND": "backlog"})
+        self.assertNotIn("locked dispatch reservation", self.git("worktree", "list", "--porcelain"))
+        self.assertEqual(self.result("release-reservation", reservation=token), {"released": True})
+        self.assertIn("- [ ] [FEAT] First item", (Path(unit["worktree"]) / "tasks.md").read_text(encoding="utf-8"))
+        self.assertNotIn("First group", self.prepare()["by_title"])
+
+    def test_independent_claims_can_prepare_worktrees_concurrently(self):
+        sys.path.insert(0, str(QUEUE_BACKEND.parent))
+        import queue_backend
+
+        wave = self.reserve("First group", "Second group")
+        assignments = []
+        for unit in wave["reservations"]:
+            ref = unit["candidate"]["ref"]
+            assignments.append({"reservation": unit["reservation"], "ref": ref,
+                                "delivery": str(self.receipt(unit["branch"].split("/")[-1], ref))})
+        self.result("bind-wave", assignments=assignments)
+        first_entered, second_entered = Event(), Event()
+        original = queue_backend._materialize_claim
+
+        def create(repo, unit, *args):
+            if unit["candidate"]["title"] == "First group":
+                first_entered.set()
+                self.assertTrue(second_entered.wait(3), "second worktree waited for the first")
+            else:
+                self.assertTrue(first_entered.wait(3))
+                second_entered.set()
+            return original(repo, unit, *args)
+
+        def claim(assignment):
+            request = {"contract": 1, "repo": str(self.repo), "base": wave["base"], **assignment}
+            return queue_backend.handle("claim-reservation", request, {"AGENT_QUEUE_BACKEND": "backlog"})
+
+        with patch.object(queue_backend, "_materialize_claim", side_effect=create), ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(claim, assignments))
+        self.assertEqual([code for code, _ in outcomes], [0, 0])
+        self.assertTrue(all((Path(unit["worktree"]) / "tasks.md").is_file() for _, unit in outcomes))
+
+    def test_withheld_receipt_is_reusable_and_unreadable_receipt_has_an_outcome(self):
+        path = self.receipt("first", "#1")
+        metadata = {"ref": "#1", "reservation": "test-reservation"}
+        run = json.loads(path.read_text(encoding="utf-8"))
+        run["handoff"]["queue_reservation"] = metadata
+        write_json(path, run)
+        failed = subprocess.CompletedProcess([], 1, "", "send failed")
+        with patch("dispatch.subprocess.run", return_value=failed):
+            result = deliver_reserved(path, metadata, "first")
+            self.assertEqual(result["delivery"], "withheld")
+            self.assertIn("$task-next --tree #1", result["prompt"])
+            self.assertNotIn("queue_reservation", json.loads(path.read_text(encoding="utf-8"))["handoff"])
+            path.write_text("{", encoding="utf-8")
+            result = deliver_reserved(path, metadata, "first")
+            self.assertEqual(result["delivery"], "unconfirmed")
+            self.assertIn("cannot read dispatch receipt", result["diagnostics"])
+
+    def test_send_wave_delivers_second_prompt_during_first_child_intake(self):
+        wave = self.reserve("First group", "Second group")
+        first, second = wave["reservations"]
+        receipts = [self.receipt(name, unit["candidate"]["ref"]) for name, unit in zip(
+            ("first", "second"), wave["reservations"], strict=True,
+        )]
+        request = {"deliveries": [{"reservation": unit["reservation"], "run": str(receipt)}
+                                  for unit, receipt in zip(wave["reservations"], receipts, strict=True)]}
+        first_started, second_started = Event(), Event()
+        real_run = subprocess.run
+        prompts = {}
+
+        def run_child(args, **kwargs):
+            if args[5] != "send":
+                return real_run(args, **kwargs)
+            _, _, receipt, _, address, message = args[5:]
+            handoff = json.loads(Path(receipt).read_text(encoding="utf-8"))["handoff"]
+            prompts[address] = first_prompt("codex", message, handoff)
+            if address == "first":
+                first_started.set()
+                self.assertTrue(second_started.wait(3), "second submission waited for the first child")
+            else:
+                self.assertTrue(first_started.wait(3))
+                second_started.set()
+            return subprocess.CompletedProcess(args, 0, json.dumps({"address": address}), "")
+
+        with (
+            patch("dispatch.read_wave_request", return_value=request),
+            patch("dispatch.subprocess.run", side_effect=run_child),
+            patch.dict(os.environ, {"AGENT_QUEUE_BACKEND": "backlog"}),
+            redirect_stdout(StringIO()) as output,
+        ):
+            send_wave(SimpleNamespace(repo=self.repo))
+        self.assertFalse((self.repo / ".worktrees").exists(), "delivery does not wait for a worktree")
+        self.assertEqual([result["delivery"] for result in json.loads(output.getvalue())["deliveries"]],
+                         ["submitted", "submitted"])
+        self.assertIn(first["reservation"], prompts["first"])
+        self.assertIn(second["reservation"], prompts["second"])
+        self.assertIn('"Git limits": "pr-only"', prompts["first"])
+        self.assertIn('"Git limits": "no-push"', prompts["second"])
+
+    def test_mismatched_receipt_prevents_every_delivery(self):
+        wave = self.reserve("First group", "Second group")
+        first, second = wave["reservations"]
+        receipts = [self.receipt("first", first["candidate"]["ref"]), self.receipt("second", "#99")]
+        request = {"deliveries": [{"reservation": unit["reservation"], "run": str(receipt)}
+                                  for unit, receipt in zip(wave["reservations"], receipts, strict=True)]}
+        with (
+            patch("dispatch.read_wave_request", return_value=request),
+            patch("dispatch.deliver_reserved") as deliver,
+            patch.dict(os.environ, {"AGENT_QUEUE_BACKEND": "backlog"}),
+            self.assertRaisesRegex(SystemExit, "receipt is for another unit"),
+        ):
+            send_wave(SimpleNamespace(repo=self.repo))
+        deliver.assert_not_called()
+        self.assertEqual(self.result("release-reservation", reservation=second["reservation"]), {"released": True})
 
 
 if __name__ == "__main__":

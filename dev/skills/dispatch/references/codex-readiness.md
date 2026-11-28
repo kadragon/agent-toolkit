@@ -22,8 +22,9 @@ home, settings and trust decisions intact.
 2. In the native hook dialog, review and approve each required hook individually. Check the
    hook paths and commands in the pinned cache. Close the review child with
    `collect <child receipt> --close --force`. The restart runs SessionStart with approval.
-3. Start the task children idle with the same `--wave`. Use `send --run <child receipt>`
-   for each task. Launch never accepts `--trust-hooks` with a wave. A warning, a changed or
+3. Start the task children idle with the same `--wave`. Use `send-wave` for
+   [reserved queue assignments](launch-handoff.md#reserved-queue-waves), or
+   `send --run <child receipt>` for an individual task. Launch never accepts `--trust-hooks` with a wave. A warning, a changed or
    incomplete hook inventory, a missing snapshot, or an unverifiable Herdr process holds delivery.
 4. Close each child with `collect --close` when it stops. Retain those receipts until
    `dispatch.py release <wave receipt>` removes the private home and snapshot. An uncertain
@@ -150,7 +151,8 @@ native source paths and review status.
 
 If hooks need approval, launch an idle child and use **Review hooks** or `/hooks`. Close the
 review child and restart so approved SessionStart hooks can run. Start the task children idle,
-then deliver tasks with `dispatch.py send --run <receipt> -- <address> '<first message>'`.
+then use [Reserved queue waves](launch-handoff.md#reserved-queue-waves) for independent queue units
+or `dispatch.py send --run <receipt> -- <address> '<first message>'` for an individual task.
 
 Preparation and dispatch startup share a local lock scoped to the Codex home. Prepared
 launches carry a Herdr label for that cache. While a labeled child is live, preparation is
