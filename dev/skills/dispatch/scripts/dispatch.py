@@ -33,7 +33,8 @@
       A Codex child whose hooks fail, or whose launch-time kadragon plugin version directory
       was removed, reports stop_reason hooks_broken; any plugin version change warns on stderr.
   dispatch.py prepare-codex --repo PATH --cwd PATH [--parent ADDRESS]
-      Prepare the shared marketplace and report the native hooks awaiting review.
+      Pin the shared marketplace to the remote head commit, upgrade it, and report the native
+      hooks awaiting review.
   dispatch.py pin --repo PATH --commit SHA --codex PATH
       Create an isolated Codex wave. Launch idle children with launch --wave WAVE.
   dispatch.py release WAVE
@@ -304,7 +305,14 @@ def verify_shared_cache_versions(home, installed):
     try:
         prepared = json.loads((home / "dispatch-prepared-cache.json").read_text(encoding="utf-8"))
         repo = Path(prepared["repo"])
-        expected = shared_codex.remote_versions(repo, prepared["versions"])
+        pin = shared_codex.marketplace_pin(home)
+        if pin is None:
+            print("warning: the shared Codex marketplace is not pinned to a commit, so any Codex startup can "
+                  "refresh it and delete the plugin caches live children use; run prepare-codex between waves to pin it",
+                  file=sys.stderr)
+        if pin is not None:
+            shared_codex.ensure_commit(repo, pin)
+        expected = shared_codex.remote_versions(repo, prepared["versions"], pin)
     except (OSError, ValueError, KeyError, TypeError, pinned_wave.PinError, subprocess.SubprocessError) as error:
         raise SystemExit("shared-cache Codex startup withheld: cannot verify marketplace versions for the live wave; "
                          f"prepare the cache between waves or use a pinned wave ({error})") from None
@@ -1021,7 +1029,9 @@ def prepare_codex(args):
         with lock_shared_cache(home):
             require_shared_cache_available(shared_cache_children(label), preparing=True)
             before = installed_plugin_versions()
-            expected = shared_codex.remote_versions(repo, before)
+            commit = shared_codex.remote_head(repo)
+            expected = shared_codex.remote_versions(repo, before, commit)
+            pinned = shared_codex.marketplace_pin(home)
             baseline_path = home / "dispatch-trusted-hooks.json"
             baseline = json.loads(baseline_path.read_text(encoding="utf-8")) if baseline_path.exists() else {}
             try:
@@ -1034,9 +1044,17 @@ def prepare_codex(args):
             baseline.update({name: info for name, info in old_hooks.items() if info["trusted"]})
             write_json(baseline_path, baseline)
             current = installed_plugin_versions()
-            if any(current.get(name) != version for name, version in expected.items()):
-                shared_codex.command([binary, "plugin", "marketplace", "upgrade", shared_codex.MARKET],
-                                     cwd=cwd, timeout=MARKETPLACE_UPGRADE_SECONDS)
+            if pinned != commit or any(current.get(name) != version for name, version in expected.items()):
+                # A full-SHA ref makes later Codex startup refreshes no-ops until the next preparation moves it.
+                previous = shared_codex.pin_marketplace(home, commit) if pinned != commit else None
+                try:
+                    shared_codex.command([binary, "plugin", "marketplace", "upgrade", shared_codex.MARKET],
+                                         cwd=cwd, timeout=MARKETPLACE_UPGRADE_SECONDS)
+                except (OSError, subprocess.SubprocessError):
+                    # The snapshot did not move, so a new ref would make the next Codex startup do the upgrade.
+                    if previous is not None:
+                        shared_codex.write_config(home / "config.toml", previous)
+                    raise
             warmup_codex(binary, cwd, parent, label)
             installed = installed_plugin_versions()
             if any(installed.get(name) != version for name, version in expected.items()):
@@ -1051,6 +1069,7 @@ def prepare_codex(args):
     except (OSError, ValueError, KeyError, TypeError, pinned_wave.PinError, subprocess.SubprocessError) as error:
         raise SystemExit(f"cannot prepare shared-cache Codex: {error}") from None
     print(json.dumps({"before": before, "expected": expected, "installed": installed, "upgraded": before != installed,
+                      "pinned": commit, "previously_pinned": pinned,
                       "pending_hooks": pending, "hook_content_diffs": diffs}, ensure_ascii=False))
 
 
@@ -1194,6 +1213,7 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
         except OSError as error:
             raise SystemExit(f"pinned launch withheld; could not register child: {error}") from None
     versions = {}
+    guard_enabled_at_launch = None
     started_ms = phase_timing.now_ms()
     try:
         phase_timing.new_launch(history, started_ms)
@@ -1219,6 +1239,11 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
                     children = shared_cache_children(shared_label)
                     require_shared_cache_available(children, parent=home)
                     versions = installed_plugin_versions()
+                    if "guard" in versions:
+                        try:
+                            guard_enabled_at_launch = shared_codex.guard_enabled(shared_home, cwd.resolve())
+                        except (OSError, ValueError, AttributeError):
+                            guard_enabled_at_launch = False
                     if children:
                         verify_shared_cache_versions(shared_home, versions)
                 stdout = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", check=True,
@@ -1272,6 +1297,8 @@ def launch_child(args, wave_path=None, wave=None, pinned_startup=None):
         run.update(wave=str(wave_path), wave_trusted_at_start=pinned_startup)
     elif versions:
         run["plugin_versions"] = versions
+        if guard_enabled_at_launch is not None:
+            run["shared_guard_enabled_at_launch"] = guard_enabled_at_launch
     if title:
         run["title"] = title
     three_source = args.cli == "codex" and handoff["work_kind"] != "standalone"
@@ -1614,11 +1641,11 @@ def verify_pinned_delivery(run, terminal):
         raise SystemExit(f"{run['address']}: pinned task withheld; {error}") from None
 
 
-def require_shared_guard(run):
+def require_shared_guard(run, terminal):
     versions = installed_plugin_versions()
     started = (run or {}).get("plugin_versions") or {}
     dev = versions.get("dev")
-    if not dev or ("guard" in versions and (not started or "guard" in started)):
+    if not dev:
         return
     manifest = plugin_cache() / "dev" / dev / pinned_wave.MANIFEST
     try:
@@ -1627,14 +1654,32 @@ def require_shared_guard(run):
         return
     except (OSError, ValueError) as error:
         raise SystemExit(f"task withheld; can't read the installed dev plugin manifest: {error}") from None
-    if "hooks" not in installed:
+    if "hooks" in installed:
+        return
+    if "guard" not in versions or (started and "guard" not in started):
         raise SystemExit("task withheld; install guard@kadragon, restart the idle Codex child, and review its hooks")
+    if ("guard" in started and not (plugin_cache() / "guard" / started["guard"]).is_dir()
+            or (run or {}).get("shared_guard_enabled_at_launch") is False):
+        raise SystemExit("task withheld; enable guard@kadragon, restart the idle Codex child, and review its hooks")
+
+    # Starting an app server here could refresh the cache used by live children.
+    target = ((terminal.get("foreground") or {}).get("cwd") or (run or {}).get("cwd")
+              or terminal.get("cwd"))
+    if not target:
+        raise SystemExit("task withheld; cannot locate the target directory to verify guard@kadragon")
+    try:
+        cwd = Path(target).resolve(strict=True)
+        enabled = shared_codex.guard_enabled(codex_home(), cwd)
+    except (OSError, ValueError, TypeError, AttributeError) as error:
+        raise SystemExit(f"task withheld; cannot verify guard@kadragon settings: {error}") from None
+    if not enabled:
+        raise SystemExit("task withheld; enable guard@kadragon, restart the idle Codex child, and review its hooks")
 
 
 def verify_delivery_turn(run, terminal):
     verify_pinned_delivery(run, terminal)
     if not run or not run.get("wave"):
-        require_shared_guard(run)
+        require_shared_guard(run, terminal)
     else:
         current = hc_json("get", run["address"])
         verify_terminal(run, current)

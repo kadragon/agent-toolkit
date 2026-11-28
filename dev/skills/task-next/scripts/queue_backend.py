@@ -321,6 +321,7 @@ def backlog_list(req: dict, reservations=(), *, snapshot=False) -> dict:
     tasks_lines = tasks_raw.splitlines()
     task_headings = bc._headings(task_tokens, (1,))
     task_by_line = {h["line"]: h for h in task_headings}
+    markup_ends = bc.markup_line_ends(backlog_raw) if snapshot else {}
     candidates = []
     for c in raw:
         label = c["source"]
@@ -345,6 +346,8 @@ def backlog_list(req: dict, reservations=(), *, snapshot=False) -> dict:
                 candidate["body_digest"] = hashlib.sha256(body.encode("utf-8")).hexdigest()
             else:
                 candidate["covers"] = [backlog_lines[item["line"] - 1] for item in selection]
+                bodies = [_backlog_item_body(backlog_lines, item["line"], markup_ends) for item in selection]
+                candidate["body_digest"] = hashlib.sha256(json.dumps(bodies).encode("utf-8")).hexdigest()
         candidates.append(candidate)
 
     parked = []
@@ -379,6 +382,23 @@ def _strip_marker(m: re.Match) -> str:
     return m.group(0) if m.group(1).lower() == "blocked by" and bc._is_placeholder_payload(m.group(2)) else " "
 
 
+def _backlog_item_body(lines: list[str], line: int, markup_ends: dict[int, int]) -> str:
+    """Read the checkbox and indented Markdown, including content inside nested blocks."""
+    indent = len(lines[line - 1]) - len(lines[line - 1].lstrip())
+    end = markup_ends.get(line, line)
+    index = end
+    while index < len(lines):
+        content = lines[index]
+        index += 1
+        if not content.strip():
+            continue
+        if len(content) - len(content.lstrip()) <= indent:
+            break
+        end = markup_ends.get(index, index)
+        index = end
+    return "\n".join(lines[line - 1:end])
+
+
 def backlog_show(req: dict) -> dict:
     label, line = _parse_ref(req.get("ref"))
     backlog, tasks = _paths(req)
@@ -401,11 +421,6 @@ def backlog_show(req: dict) -> dict:
             "labels": [], "blocked_by": [], "parent": _ref(label, outer[-1]["line"]) if outer else None,
             "url": "",
         }
-    body_lines = [lines[line - 1]]
-    for nxt in lines[line:]:
-        if not (nxt[:1].isspace() and nxt.strip()):
-            break
-        body_lines.append(nxt)
     blocked_by = [
         m.group(2).strip() for m in bc._BLOCK_MARKER_RE.finditer(token["text"])
         if m.group(1).lower() == "blocked by" and not bc._is_placeholder_payload(m.group(2))
@@ -413,7 +428,7 @@ def backlog_show(req: dict) -> dict:
     above = [h for h in headings if h["line"] < line]
     return {
         "ref": _ref(label, line), "title": " ".join(bc._BLOCK_MARKER_RE.sub(_strip_marker, token["text"]).split()),
-        "body": "\n".join(body_lines), "labels": [], "blocked_by": blocked_by,
+        "body": _backlog_item_body(lines, line, bc.markup_line_ends(raw)), "labels": [], "blocked_by": blocked_by,
         "parent": _ref(label, above[-1]["line"]) if above else None, "url": "",
     }
 
@@ -1450,6 +1465,10 @@ def _claim_reservation(req, env, runner, token, unit):
         snapshot = _wave_snapshot(repo, base, env, runner, exclude=(token,))
         if snapshot["backend"] != unit["backend"]:
             raise QueueError("the reserved queue backend changed")
+        if _legacy_file_reservation(candidate):
+            pinned = snapshot if base == unit["base"] else _wave_snapshot(
+                repo, unit["base"], env, runner, exclude=(token,))
+            candidate = _restore_file_body_digest(pinned, candidate)
         if unit["backend"] == "backlog" and base != unit["base"]:
             _match_shifted_file_unit(snapshot, candidate)
         else:
@@ -1463,6 +1482,22 @@ def _claim_reservation(req, env, runner, token, unit):
             _write_queue_json(_reservation_store(repo), {"version": 1, "units": units})
     if owned and _git(repo, "worktree", "unlock", unit["worktree"]) is None:
         raise QueueError(f"cannot unlock reserved worktree {unit['worktree']}; retry the claim")
+
+
+def _legacy_file_reservation(candidate):
+    return "covers" in candidate and "body_digest" not in candidate
+
+
+def _restore_file_body_digest(pinned, candidate):
+    """Recover an older reservation's digest only from its original base."""
+    if _legacy_file_reservation(candidate):
+        for current in pinned["candidates"]:
+            if current["ref"] == candidate["ref"]:
+                legacy = {key: value for key, value in current.items() if key != "body_digest"}
+                if legacy == candidate:
+                    return current
+                break
+    return candidate
 
 
 def _match_shifted_file_unit(snapshot, candidate):
@@ -1551,6 +1586,8 @@ def _bind_wave(req, env, runner, units, store):
     snapshot = _wave_snapshot(req["repo"], base, env, runner, exclude=bound)
     if any(unit["backend"] != snapshot["backend"] for unit in bound.values()):
         raise QueueError("the reserved queue backend changed")
+    for unit in bound.values():
+        unit["candidate"] = _restore_file_body_digest(snapshot, unit["candidate"])
     _match_wave_units(snapshot, [unit["candidate"] for unit in bound.values()])
     for unit in bound.values():
         if _wave_worktree(req["repo"], unit["candidate"]) != (unit["worktree"], unit["branch"]):

@@ -104,17 +104,18 @@ MERGE_OK=$(jq -r '.merge_ok // false' <<<"$MERGE_RESULT" 2>/dev/null || echo fal
 MERGE_OUTPUT=$(jq -r '.merge_output // ""' <<<"$MERGE_RESULT" 2>/dev/null || printf '%s' "$MERGE_RESULT")
 QUEUED=$(jq -r '.queued // false' <<<"$MERGE_RESULT" 2>/dev/null || echo false)
 UNCONFIRMED=$(jq -r '.unconfirmed // false' <<<"$MERGE_RESULT" 2>/dev/null || echo false)
+MERGED_HEAD=$(jq -r '.head_sha // empty' <<<"$MERGE_RESULT" 2>/dev/null || true)
 if [ "$MERGE_OK" = "true" ]; then
+  MERGED_HEAD="${EXPECTED_HEAD:-$MERGED_HEAD}"
   MERGE_MSG="PR #${PR_NUMBER} merged with ${MERGE_METHOD}"
   if [ -n "$DISPATCH_RUN" ]; then
     TIMING_PY=$(command -v python3 || command -v python || true)
     if [ -z "$TIMING_PY" ]; then
       echo "WARN: dispatch merge timing unavailable without Python" >&2
     else
-      MERGED_HEAD=$(jq -r '.head_sha // empty' <<<"$MERGE_RESULT")
       TIMING=("$TIMING_PY" -I "$SCRIPT_DIR/../../dispatch/scripts/dispatch.py" timing "$DISPATCH_RUN" merged)
-      if [ -n "${EXPECTED_HEAD:-$MERGED_HEAD}" ]; then
-        TIMING+=("${EXPECTED_HEAD:-$MERGED_HEAD}")
+      if [ -n "$MERGED_HEAD" ]; then
+        TIMING+=("$MERGED_HEAD")
       fi
       "${TIMING[@]}" || true
     fi
@@ -130,6 +131,25 @@ fi
 # --- Local cleanup (only if merge succeeded) ---
 CLEANUP_MSG=""
 WORKTREE_MSG=""
+
+branch_worktree() {
+  local repo_git_dir checked_out git_dir
+  checked_out=$(git branch --list --format='%(worktreepath)' -- "$FEATURE_BRANCH") || return 1
+  if [ -n "$checked_out" ]; then
+    printf '%s\n' "$checked_out"
+    return
+  fi
+  # A detached worktree can still own a branch during rebase or bisect.
+  repo_git_dir=$(git rev-parse --path-format=absolute --git-common-dir) || return 1
+  for git_dir in "$repo_git_dir" "$repo_git_dir"/worktrees/*; do
+    if grep -Fxq -e "$FEATURE_REF" -e "$FEATURE_BRANCH" -- \
+      "$git_dir/rebase-merge/head-name" "$git_dir/rebase-apply/head-name" \
+      "$git_dir/rebase-merge/update-refs" "$git_dir/BISECT_START" 2>/dev/null; then
+      printf '%s\n' "$git_dir"
+      return
+    fi
+  done
+}
 
 # hub.sh merge deletes the remote head only (both hubs); this block is the sole owner of the
 # local branch and worktree.
@@ -175,7 +195,6 @@ if [ "$MERGE_OK" = "true" ]; then
     fi
   fi
   if [ "$CAN_CLEAN" = "true" ]; then
-    # Worktree first: a worktree holding the feature branch blocks `git branch -D`.
     if [ -n "$WORKTREE_PATH" ]; then
       PY=$(command -v python3 || command -v python || true)
       BROKER_NOTE=""
@@ -191,7 +210,11 @@ if [ "$MERGE_OK" = "true" ]; then
             ;;
         esac
       fi
-      if [ -n "$HOLDER" ] || [ -n "$BROKER_NOTE" ]; then
+      WORKTREE_GIT_DIR=$(git -C "$WORKTREE_PATH" rev-parse --absolute-git-dir 2>/dev/null || true)
+      if [ -n "$WORKTREE_GIT_DIR" ] && { [ -d "$WORKTREE_GIT_DIR/rebase-merge" ] ||
+        [ -d "$WORKTREE_GIT_DIR/rebase-apply" ] || [ -f "$WORKTREE_GIT_DIR/BISECT_START" ]; }; then
+        WORKTREE_MSG="WARNING: Could not remove worktree '${WORKTREE_PATH}': rebase or bisect is in progress"
+      elif [ -n "$HOLDER" ] || [ -n "$BROKER_NOTE" ]; then
         WORKTREE_MSG="WARNING: Could not remove worktree '${WORKTREE_PATH}': ${BROKER_NOTE} ${HOLDER}"
       elif REMOVE_ERR=$(git worktree remove "$WORKTREE_PATH" 2>&1); then
         WORKTREE_MSG="Worktree '${WORKTREE_PATH}' removed"
@@ -203,13 +226,23 @@ if [ "$MERGE_OK" = "true" ]; then
       fi
     fi
 
-    # squash/rebase merges change commit hash so -d sees "not fully merged"; -D is safe here
-    # because we already confirmed merge_ok above.
+    # Squash/rebase changes commit IDs. Compare and delete the exact merged
+    # head in one ref update so a concurrent local commit keeps its branch.
+    FEATURE_REF="refs/heads/${FEATURE_BRANCH}"
     if [[ "$WORKTREE_MSG" == WARNING:* ]] && [ -d "$WORKTREE_PATH" ]; then
       CLEANUP_MSG="Local branch '${FEATURE_BRANCH}' kept with its worktree"
-    elif ! git show-ref --verify --quiet "refs/heads/${FEATURE_BRANCH}"; then
+    elif ! LOCAL_HEAD=$(git show-ref --verify --hash "$FEATURE_REF" 2>/dev/null); then
       CLEANUP_MSG="WARNING: Local branch '${FEATURE_BRANCH}' not found — check the branch name"
-    elif DELETE_ERR=$(git branch -D "$FEATURE_BRANCH" 2>&1 >/dev/null); then
+    elif ! [[ "$MERGED_HEAD" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]; then
+      CLEANUP_MSG="WARNING: Local branch '${FEATURE_BRANCH}' kept because the merged head is unknown"
+    elif [ "$LOCAL_HEAD" != "$MERGED_HEAD" ]; then
+      CLEANUP_MSG="WARNING: Local branch '${FEATURE_BRANCH}' kept because its tip does not match the merged head"
+    elif ! CHECKED_OUT=$(branch_worktree); then
+      CLEANUP_MSG="WARNING: Could not check whether local branch '${FEATURE_BRANCH}' is in use"
+    elif [ -n "$CHECKED_OUT" ]; then
+      CLEANUP_MSG="WARNING: Local branch '${FEATURE_BRANCH}' is checked out at '${CHECKED_OUT}'"
+    elif DELETE_ERR=$(git update-ref --no-deref -d "$FEATURE_REF" "$MERGED_HEAD" 2>&1 >/dev/null); then
+      git config --remove-section "branch.${FEATURE_BRANCH}" >/dev/null 2>&1 || true
       CLEANUP_MSG="Local branch '${FEATURE_BRANCH}' deleted"
     else
       CLEANUP_MSG="WARNING: Could not delete local branch '${FEATURE_BRANCH}': ${DELETE_ERR}"
