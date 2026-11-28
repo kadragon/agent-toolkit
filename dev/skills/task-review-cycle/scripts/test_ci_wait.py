@@ -489,38 +489,54 @@ def main() -> int:
         bindir = tmp / "gh_bin"
         bindir.mkdir()
         # Older gh rejects --slurp and streams one JSON object per page.
-        # `pr view` and `pr checks` always report a stale head and failure, so reading either
-        # instead of the one snapshot shows up red.
+        # Only the PR URL can come from a separate request. Any other PR fields return stale data.
         (bindir / "gh").write_text(
             "#!/usr/bin/env bash\n"
             'case "$1 $2" in\n'
             '  "api graphql")\n'
+            '    expected="${GH_DEFAULT_REPO:-o/r}"\n'
+            '    owner= name=\n'
             '    for arg in "$@"; do\n'
             '      if [[ "$arg" == --slurp ]]; then echo "unknown flag: --slurp" >&2; exit 1; fi\n'
+            '      case "$arg" in owner=*) owner="${arg#owner=}" ;; name=*) name="${arg#name=}" ;; esac\n'
             '    done\n'
+            '    [ "$owner/$name" = "$expected" ] || exit 1\n'
             '    [ -n "${GH_VIEW:-}" ] || exit 1\n'
             '    printf \'%s\' "$GH_VIEW"; exit 0 ;;\n'
-            '  "pr view") echo "' + "b" * 40 + '"; exit 0 ;;\n'
+            '  "run view") [ "$4" = --repo ] && [ "$5" = "${GH_LOG_REPO:-o/r}" ] || exit 1\n'
+            '    echo "Actions job log"; exit 0 ;;\n'
+            '  "pr view") [ -z "${GH_PR_VIEW_ERROR:-}" ] || exit 1\n'
+            '    if [[ "$4 $5 $6 $7" == "--json url --jq .url" ]]; then\n'
+            '    printf \'https://github.com/%s/pull/%s\\n\' "${GH_DEFAULT_REPO:-o/r}" "$3"\n'
+            '    else echo "' + "b" * 40 + '"; fi; exit 0 ;;\n'
             "  \"pr checks\") echo '[{\"bucket\": \"fail\"}]'; exit 1 ;;\n"
             "esac\n"
             "exit 1\n",
             encoding="utf-8")
         (bindir / "gh").chmod(0o755)
 
-        def page(contexts, oid="a" * 40):
+        def page(contexts, oid="a" * 40, repo="o/r"):
             rollup = None if contexts is None else {"contexts": {"nodes": contexts}}
-            return {"data": {"repository": {"pullRequest": {"commits": {"nodes": [
+            return {"data": {"repository": {"nameWithOwner": repo, "pullRequest": {"commits": {"nodes": [
                 {"commit": {"oid": oid, "statusCheckRollup": rollup}}]}}}}}
 
-        def hub_status(rollup, pages=None):
+        def hub_output(rollup, pages=None, command="ci-status", expected_head=None, **gh_env):
             if pages is None and rollup is not None:
                 pages = [page(rollup)]
             env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}")
-            env.pop("GH_VIEW", None)
+            for name in ("GH_VIEW", "GH_DEFAULT_REPO", "GH_LOG_REPO", "GH_PR_VIEW_ERROR"):
+                env.pop(name, None)
+            env.update(gh_env)
             if pages is not None:
                 env["GH_VIEW"] = "\n".join(json.dumps(page_data) for page_data in pages)
+            if command == "ci-logs":
+                args = [str(SCRIPT.parent / "ci-failure-logs.sh"), "7"]
+            else:
+                args = [str(SCRIPT.parent / "hub.sh"), command, "7"]
+            if expected_head:
+                args.extend(["--expected-head", expected_head])
             proc = subprocess.run(
-                ["bash", str(SCRIPT.parent / "hub.sh"), "ci-status", "7"], cwd=hub_repo,
+                ["bash", *args], cwd=hub_repo,
                 capture_output=True, text=True, timeout=30, env=env)
             try:
                 return json.loads(proc.stdout)
@@ -533,49 +549,136 @@ def main() -> int:
                     "conclusion": conclusion, "startedAt": started,
                     "checkSuite": {"workflowRun": {"event": event, "workflow": {"name": "ci"}}}}
 
-        status = hub_status([run_ctx("FAILURE")])
+        status = hub_output([run_ctx("FAILURE")])
         check("ci-status carries headRefOid as head_sha",
               status.get("status") == "failure" and status.get("head_sha") == "a" * 40,
               f"got {status}")
-        status = hub_status([run_ctx("", status="IN_PROGRESS")])
+        status = hub_output([run_ctx("", status="IN_PROGRESS")])
         check("checks come from the same snapshot as the head, not a second request",
               status.get("status") == "pending" and status.get("head_sha") == "a" * 40,
               f"got {status}")
-        status = hub_status([run_ctx("FAILURE", started="2026-01-01T00:00:00Z"),
+        status = hub_output([run_ctx("FAILURE", started="2026-01-01T00:00:00Z"),
                              run_ctx("SUCCESS", started="2026-01-01T00:05:00Z")])
         check("a rerun supersedes the older failure of the same check",
               status.get("status") == "success" and status.get("checks") == 1, f"got {status}")
-        status = hub_status([run_ctx("FAILURE", started="2026-01-01T00:00:00Z"),
+        status = hub_output([run_ctx("FAILURE", started="2026-01-01T00:00:00Z"),
                              run_ctx("SUCCESS", started="2026-01-01T00:05:00Z", event="push")])
         check("a later push run does not hide the pull_request run's failure",
               status.get("status") == "failure" and status.get("checks") == 2, f"got {status}")
-        status = hub_status(None, pages=[page([run_ctx("SUCCESS")]),
+        queued = dict(run_ctx(None, status="QUEUED", started=None), databaseId=2)
+        completed = dict(run_ctx("SUCCESS"), databaseId=1)
+        for runs in ([queued, completed], [completed, queued]):
+            status = hub_output(runs)
+            check("a newer queued rerun keeps the check pending regardless of listing order",
+                  status.get("status") == "pending" and status.get("checks") == 1, f"got {status}")
+        status = hub_output([dict(queued, databaseId=1), dict(completed, databaseId=2)])
+        check("an older queued run does not hide the newer completed check",
+              status.get("status") == "success" and status.get("checks") == 1, f"got {status}")
+        app_checks = [
+            dict(run_ctx("FAILURE"), checkSuite={"app": {"id": "app-1"}}),
+            dict(run_ctx("SUCCESS", started="2026-01-01T00:05:00Z"),
+                 checkSuite={"app": {"id": "app-2"}}),
+        ]
+        status = hub_output(app_checks)
+        check("same-named checks from distinct GitHub apps count independently",
+              status.get("status") == "failure" and status.get("checks") == 2, f"got {status}")
+        status = hub_output([run_ctx("STALE")])
+        check("a completed stale check is a failure",
+              status.get("status") == "failure" and status.get("checks") == 1, f"got {status}")
+        stale_check = dict(run_ctx("STALE", name="stale"), link="https://example.test/checks/stale")
+        logs = hub_output([stale_check], command="ci-logs")
+        check("the stale check appears in failure diagnostics",
+              logs.get("count") == 1 and logs["failed_checks"][0].get("name") == "stale"
+              and logs["failed_checks"][0].get("state") == "STALE", f"got {logs}")
+        app_checks[0]["link"] = "https://example.test/checks/first"
+        app_checks[1]["link"] = "https://example.test/checks/second"
+        logs = hub_output(app_checks, command="ci-logs")
+        check("a passing same-name check from another app does not hide a failing check in diagnostics",
+              logs.get("count") == 1 and logs["failed_checks"][0].get("state") == "FAILURE"
+              and "https://example.test/checks/first" in logs["failed_checks"][0].get("logs", ""),
+              f"got {logs}")
+        failure = run_ctx("FAILURE")
+        logs = hub_output(None, pages=[page([failure]), page([], oid="c" * 40)], command="ci-logs")
+        check("failure diagnostics report that a moving head requires a retry",
+              logs.get("logs_available") is True and logs.get("reason") == "head-changed"
+              and logs.get("count") == 0, f"got {logs}")
+        external = {"__typename": "StatusContext", "context": "external", "state": "ERROR",
+                    "link": "https://external.test/runs/123"}
+        logs = hub_output([external], command="ci-logs")
+        check("a third-party run link is reported without fetching unrelated Actions logs",
+              logs.get("count") == 1 and "https://external.test/runs/123" in logs["failed_checks"][0]["logs"]
+              and "Actions job log" not in logs["failed_checks"][0]["logs"], f"got {logs}")
+        failure["link"] = "https://github.com/O/r/actions/runs/123/job/456"
+        logs = hub_output([failure], command="ci-logs")
+        check("a GitHub Actions link in the target repository still fetches its log",
+              logs.get("count") == 1 and logs["failed_checks"][0].get("run_id") == "123"
+              and logs["failed_checks"][0].get("logs") == "Actions job log", f"got {logs}")
+        logs = hub_output([failure], command="ci-logs", expected_head="c" * 40)
+        check("failure diagnostics reject a snapshot from another commit",
+              logs.get("reason") == "head-changed" and logs.get("count") == 0, f"got {logs}")
+        logs = hub_output(None, command="ci-logs", expected_head="a" * 40)
+        check("failure diagnostics report when the snapshot has no verifiable head",
+              logs.get("reason") == "head-unavailable" and logs.get("count") == 0, f"got {logs}")
+        logs = hub_output([failure], command="ci-logs", expected_head="a" * 40)
+        check("failure diagnostics accept the reviewed commit",
+              logs.get("count") == 1 and logs["failed_checks"][0].get("logs") == "Actions job log",
+              f"got {logs}")
+        upstream_failure = dict(failure, link="https://github.com/upstream/r/actions/runs/123/job/456")
+        upstream = [page([upstream_failure], repo="upstream/r")]
+        status = hub_output(None, pages=upstream, GH_DEFAULT_REPO="upstream/r")
+        check("CI status queries the GitHub CLI default repository for a fork",
+              status.get("status") == "failure" and status.get("head_sha") == "a" * 40, f"got {status}")
+        logs = hub_output(None, pages=upstream, command="ci-logs",
+                          GH_DEFAULT_REPO="upstream/r", GH_LOG_REPO="upstream/r")
+        check("failure diagnostics fetch logs in the fork PR's upstream repository",
+              logs.get("count") == 1 and logs["failed_checks"][0].get("logs") == "Actions job log",
+              f"got {logs}")
+        renamed = dict(failure, link="https://github.com/new-owner/new-repo/actions/runs/123/job/456")
+        logs = hub_output(None, pages=[page([renamed], repo="new-owner/new-repo")],
+                          command="ci-logs", GH_LOG_REPO="new-owner/new-repo")
+        check("failure diagnostics fetch logs using the canonical name after a repository redirect",
+              logs.get("count") == 1 and logs["failed_checks"][0].get("logs") == "Actions job log",
+              f"got {logs}")
+        status = hub_output(None, pages=[page([run_ctx("SUCCESS")]),
                                          page([run_ctx("FAILURE", name="lint")])])
         check("older gh reports the head and includes a failure on a later page",
               status.get("status") == "failure" and status.get("checks") == 2
               and status.get("head_sha") == "a" * 40, f"got {status}")
-        status = hub_status(None, pages=[page([run_ctx("SUCCESS")]),
+        status = hub_output(None, pages=[page([run_ctx("SUCCESS")]),
                                          page([run_ctx("SUCCESS", name="lint")], oid="c" * 40)])
         check("pages from two different heads are not judged",
               status.get("status") == "pending", f"got {status}")
-        status = hub_status([run_ctx("SUCCESS"), run_ctx("SKIPPED", name="lint"),
+        status = hub_output([run_ctx("SUCCESS"), run_ctx("SKIPPED", name="lint"),
                              {"__typename": "StatusContext", "context": "ext", "state": "SUCCESS"}])
         check("skipped checks and status contexts count as passing",
               status.get("status") == "success" and status.get("checks") == 3, f"got {status}")
-        status = hub_status([run_ctx("CANCELLED"),
+        status = hub_output([run_ctx("CANCELLED"),
                              {"__typename": "StatusContext", "context": "ext", "state": "PENDING"}])
         check("a pending status context outranks a cancelled check",
               status.get("status") == "pending", f"got {status}")
-        status = hub_status([{"__typename": "StatusContext", "context": "ext", "state": "ERROR"}])
+        status = hub_output([{"__typename": "StatusContext", "context": "ext", "state": "ERROR"}])
         check("an errored status context is a failure", status.get("status") == "failure",
               f"got {status}")
-        status = hub_status(None, pages=[page(None)])
+        status = hub_output(None, pages=[page(None)])
         check("an empty rollup reports none with the head",
               status.get("status") == "none" and status.get("head_sha") == "a" * 40,
               f"got {status}")
-        status = hub_status(None)
+        status = hub_output(None)
         check("a failed view reports none without a head",
               status.get("status") == "none" and "head_sha" not in status, f"got {status}")
+        status = hub_output([run_ctx("SUCCESS")], GH_PR_VIEW_ERROR="yes")
+        check("a temporary PR lookup failure leaves CI eligible for another poll",
+              status.get("status") == "pending" and "head_sha" not in status, f"got {status}")
+        logs = hub_output([failure], command="ci-logs", expected_head="a" * 40, GH_PR_VIEW_ERROR="yes")
+        check("a temporary PR lookup failure returns a diagnostic retry reason",
+              logs.get("reason") == "head-unavailable" and logs.get("count") == 0, f"got {logs}")
+        env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ['PATH']}", GH_PR_VIEW_ERROR="yes",
+                   CI_WAIT_NO_CHECKS_GRACE_SECS="0", CI_WAIT_TIMEOUT_SECS="0", DISPATCH_TIMING_RUN="")
+        proc = subprocess.run(["bash", str(SCRIPT), "7"], cwd=hub_repo, env=env,
+                              capture_output=True, text=True, timeout=30, check=True)
+        result = json.loads(proc.stdout)
+        check("legacy CI wait cannot pass when the PR lookup was unavailable",
+              result.get("passed") is False and result.get("reason") == "timeout", f"got {result}")
 
     print("\n-- the default deadline fires inside the Bash tool's 600s ceiling --")
     # The orchestrator runs ci-wait.sh in the foreground; a deadline past 600s is killed first and

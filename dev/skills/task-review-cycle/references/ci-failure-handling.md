@@ -54,15 +54,17 @@ Abandoning a PR — option (c) above — follows `../task-next/references/cycle.
 
 ### 1. Fetch Failure Logs
 
-Use the bundled script:
+On GitHub, pass the same reviewed SHA used by the CI wait:
 
 ```bash
 SKILL_DIR="<absolute parent directory of the loaded SKILL.md>"
 [[ -f "$SKILL_DIR/scripts/ci-failure-logs.sh" ]] || { echo "Bundled script unavailable: $SKILL_DIR/scripts/ci-failure-logs.sh" >&2; exit 1; }
-bash "$SKILL_DIR/scripts/ci-failure-logs.sh" <PR_NUMBER>
+bash "$SKILL_DIR/scripts/ci-failure-logs.sh" <PR_NUMBER> --expected-head <REVIEWED_HEAD>
 ```
 
-The script identifies failed checks and returns JSON with logs for each failure (last 200 lines per job on GitHub). On Forgejo remotes the response has `logs_available: false` — the API exposes no job logs (≤ v15), only the failed check names and `target_url` links. In that case: report each failed check's name and link to the user, then reproduce the failure locally (run the project's test/lint command) and diagnose from local output instead of CI logs.
+For `reason: "head-changed"` or `reason: "head-unavailable"`, retry the diagnostics once with the same reviewed SHA. This leaves the CI failure strike count unchanged. If the second lookup is still inconclusive, compare the live PR head with the reviewed SHA. Follow the *Wait for CI* head-mismatch recovery if the head changed. Otherwise report that failure logs could not be verified.
+
+On Forgejo, pass only the PR number. When `logs_available` is false, report each failed check's name and link, then reproduce the failure locally and use that output to diagnose it.
 
 ### 2. Classify the Fix
 
