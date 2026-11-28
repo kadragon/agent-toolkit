@@ -12,8 +12,10 @@ claim-reservation` using the values from the handoff:
 The helper validates the reserved snapshot, creates its pinned worktree, and writes the normal
 active claim to `tasks.md`. On a mismatch, report blocked. For interrupted publication, see the
 queue backend contract's *Local wave reservations*. On success, use
-the returned `worktree`, `branch`, `base`, `candidate`, and `covers`. Continue in that worktree
-at Step 3 after reading the selected bodies with `show`. Read the Phase index's Branch, Plan gate
+the returned `worktree`, `branch`, `base`, `candidate`, and `covers`. In that worktree, call
+`describe` with `ref` set to the returned base SHA and `verify_visibility: false` to get
+`close_ref_template` for the review handoff. The claim already selected and pinned the base.
+Continue at Step 3 after reading the selected bodies with `show`. Read the Phase index's Branch, Plan gate
 and Sprint Contract sections, then archive the contract as usual. The helper already performed
 the worktree creation and claim checks. Set the Herdr worktree label as described under
 Branch. Treat the returned `covers` as the initial claim. Recompute the issue closing refs under

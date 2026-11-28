@@ -81,28 +81,63 @@ under the normal approval policy so each transfer can be checked in context. A r
 auto-review policy has a broader scope than the per-task handoff and is subject to managed
 requirements.
 
-For routine commands, use the sandbox for local `git status`, `git log`, `git show`,
-`git rev-parse` and reading or atomically writing the assigned result under writable `/tmp`.
-For approved network reads, the operator can add a `.rules` file under an active Codex
-config layer's `rules/` directory and restart the child. Use a trusted project layer for
-repository-specific rules. For example:
+Run local `git --no-optional-locks status`, `git log`, `git show`, and `git rev-parse`
+inside the sandbox. The status flag skips an optional index refresh in the protected Git
+directory. Use the sandbox for reading the assigned result and for writing a temporary
+sibling and renaming it over `result.json` in the receipt's writable temporary directory.
+
+For direct network reads of an existing PR during a shared-cache review or resume, an
+operator can add a temporary `.rules` file under the active user layer's `rules/` directory
+(`~/.codex/rules/` by default) and start a child. Review the rule before
+installing it, substitute the intended host, repository and numeric PR number in both the
+rule and the invocations, and remove the file when the review ends.
 
 ```python
-prefix_rule(pattern=["gh", "pr", ["view", "checks"], "--repo", "kadragon/agent-toolkit"], decision="allow")
+prefix_rule(
+    pattern=[
+        "gh", "pr", "view", "--repo", "github.com/kadragon/agent-toolkit",
+        "--json", "number,title,headRefOid,statusCheckRollup", "--", "615",
+    ],
+    decision="allow",
+)
+prefix_rule(
+    pattern=["gh", "pr", "checks", "--repo", "github.com/kadragon/agent-toolkit", "--", "615"],
+    decision="allow",
+)
 ```
 
-Prefix matches allow trailing arguments, including another `--repo` flag. Enable the example
-only if the permitted read commands fit that scope. Use the shown token order and set the tool's
-working directory for direct calls. A rule for `gh pr checks` applies to that outer invocation.
-Run `git fetch origin` through normal approval. A fetch prefix would allow trailing refspecs
-that update local branches. Keep `git push`, PR writes and generic shell or filesystem commands
-under normal approval as well.
+Run these commands directly in non-interactive tool calls.
 
-`codex execpolicy check --rules <file> -- gh pr view --repo kadragon/agent-toolkit 541` shows the
-matched rule and decision. Check the intended invocations and nearby writes such as `git push origin` and
-`gh pr create` before enabling a rule. Rule matching was verified with Codex CLI 0.172.0.
-A dispatched run using these rules through PR creation without routine approval requests is
-unverified. Check that in the child's transcript when enabling the rules for a wave.
+```sh
+gh pr view --repo github.com/kadragon/agent-toolkit --json number,title,headRefOid,statusCheckRollup -- 615
+gh pr checks --repo github.com/kadragon/agent-toolkit -- 615
+```
+
+The explicit JSON field list keeps older GitHub CLI clients from requesting retired
+Projects (classic) fields. Codex matches argument prefixes and permits a suffix. A fixed
+numeric selector scopes the read to one PR, and `--` makes every suffix positional. Each GitHub CLI command accepts at
+most one positional argument, so a suffix such as `--web` or a second `--repo` fails argument
+validation. Recheck these parser limits after upgrading GitHub CLI. Review and CI scripts
+that call GitHub CLI internally go through approval for the outer command.
+
+Run `codex execpolicy check --rules <file> --` followed by each invocation above to confirm
+that an explicit rule matches. Confirm that changing the selector, inserting `--web` before
+`--`, or using `gh pr create` or `git push origin` misses
+the rule. Also verify that GitHub CLI rejects an appended option. Rule matching and argument
+validation were checked with Codex CLI 0.172.0 and GitHub CLI 2.45.0.
+Both reads succeeded against PR 615.
+
+Use the reservation's pinned base at dispatched intake. It supplies the worktree base
+without another child fetch. When a later step needs a fresh ref, run `git fetch origin`
+through normal approval. Fetch writes `FETCH_HEAD` and can update remote-tracking refs.
+An allow rule for the fetch prefix would also accept explicit refspecs that update local refs.
+Keep Git pushes and PR writes under normal approval.
+
+The approval path for a fresh dispatch through PR creation remains unverified. Its PR number
+becomes available at creation, so the optional rule applies to later reads of the existing
+PR. For a fresh dispatch, inspect the transcript up to PR creation for approval reviews on
+local reads and result I/O. Record fetches as Git writes. For an existing PR, inspect the
+restarted child's transcript for the two allowed direct reads.
 
 Sources: [Codex command rules](https://developers.openai.com/codex/rules) and
 [configuration reference](https://developers.openai.com/codex/config-reference).
