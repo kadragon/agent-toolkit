@@ -118,7 +118,7 @@ Use the same SHA in the merge command or ready report. On Forgejo, confirm that 
 and its applicable CI match the local candidate.
 
 Apply the [Dispatch pre-merge report](#dispatch-pre-merge-report) gate to every dispatched
-task cycle, Codex or Claude, before a ready report or any authorized base merge.
+task cycle that has a PR, Codex or Claude, before a ready report or any authorized base merge.
 
 Finalize dispositions and update the PR's `Verification:` section from final evidence when
 authorized. Keep its closing lines and report local and remote check outcomes. On lite, preserve
@@ -165,7 +165,7 @@ to the CI wait and merge helper per `ci-failure-handling.md`. For a separately v
 ## Dispatch pre-merge report
 
 All dispatched PRs report the reviewed head and sources. For receipts with
-`require_review_sources`, consolidate the independent Claude primary and the agy and Codex panel
+`review_policy: three-source` (legacy receipts without a policy: `require_review_sources`), consolidate the independent Claude primary and the agy and Codex panel
 results from Step 3 and late reclaim. A missing required source blocks readiness and merge.
 Keep pending results available for resume and follow the existing review budget when reclaiming.
 
@@ -189,7 +189,7 @@ apply to code findings. Reclaim agy results from the matching invocation directo
 `late-source-reclaim.md`. Record the outcomes on the current SHA before reporting ready. Resume
 a legacy report the same way, using archived evidence that identifies the reviewed head.
 
-For a receipt with `require_review_sources`, set `review_sources` to an object with the keys
+For a receipt with `review_policy: three-source` (legacy: `require_review_sources`), set `review_sources` to an object with the keys
 `claude`, `agy` and `codex`. Use `"complete"` only for a completed, consolidated independent
 result. Otherwise give the reason, such as `"approval denied"`, `"policy excluded"` or
 `"still running"`.

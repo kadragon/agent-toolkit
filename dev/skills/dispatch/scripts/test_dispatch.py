@@ -20,7 +20,6 @@ import phase_timing
 import pinned_wave
 import shared_codex
 from dispatch import (
-    requires_review_sources,
     DEFAULT_GIT_LIMITS,
     POST_SEND_SETTLE_SECONDS,
     QUEUE_BACKEND,
@@ -43,6 +42,7 @@ from dispatch import (
     prepare_codex,
     release,
     report_instruction,
+    requires_review_sources,
     resolve_codex_model,
     send,
     send_wave,
@@ -1153,6 +1153,8 @@ class DispatchReceiptTests(DispatchTestCase):
     def test_explicit_review_policy_overrides_the_legacy_source_flag(self):
         self.assertFalse(requires_review_sources({"review_policy": "head-bound", "require_review_sources": True}))
         self.assertTrue(requires_review_sources({"review_policy": "three-source"}))
+        self.assertTrue(requires_review_sources({"review_policy": "typo", "require_review_sources": False}))
+        self.assertTrue(requires_review_sources({"review_policy": "unknown"}))
         self.assertTrue(requires_review_sources({"require_review_sources": True}))
         self.assertFalse(requires_review_sources({}))
 

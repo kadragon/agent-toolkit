@@ -548,7 +548,9 @@ def requires_review_sources(run):
     """Receipts launched with an explicit review_policy never use the legacy require_review_sources flag."""
     policy = run.get("review_policy")
     if policy is not None:
-        return policy == "three-source"
+        if policy == "head-bound":
+            return False
+        return True  # three-source, or an unrecognized policy: fail closed
     return run.get("require_review_sources", False)
 
 

@@ -1,6 +1,6 @@
 ---
 name: dispatch
-version: 3.10.2
+version: 3.10.3
 description: >-
   Dispatch work from a home repo to a child Codex or Claude Code session in another repo listed in
   the home's repos/*.md, using Herdr (`hc run`). Use when the user asks to
@@ -52,8 +52,8 @@ PRs require permission for each PR. Report any unsupported request layout.
 Forward only workflows the human requested. In separate-worktree prompts, add
 `Dispatch mode: parallel-worktree` and mark an added `--tree` as isolation only.
 Children verify authority before Git writes or nested delegation and stop separate PRs at ready
-before base merge. For Codex task cycles, the review cycle writes the final dispatch report
-through the required-review gate. Hold if the CLI cannot carry the handoff fields.
+before base merge. For every dispatched task cycle, whichever CLI runs it, the review cycle writes the final dispatch
+report through the receipt's review gate. Hold if the CLI cannot carry the handoff fields.
 
 `/dev:task-next` needs a queue. When `pick` reports none, tell the user and offer `/dev:task-new`.
 The task skills own the working-tree gate.
